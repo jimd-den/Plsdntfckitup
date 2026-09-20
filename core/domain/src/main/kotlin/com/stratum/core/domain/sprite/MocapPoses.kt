@@ -39,21 +39,59 @@ object MocapPoses {
     }
 
     /**
-     * The pose for one frame, tolerant of a clip that came back a different
-     * length than the script asked for.
+     * The clips authored as a closed cycle, whose last frame hands back to
+     * the first rather than finishing somewhere else.
      *
-     * A model that returned five attack frames instead of four should still get
-     * a rig, and stretching the authored frames across whatever arrived is a
-     * better answer than refusing or than leaving the last frame unposed.
+     * A breath returns to the chest it started from and a stride returns to
+     * the foot it started on, so the interval after the last frame is a real
+     * interval and the frames have to be spaced around the whole loop. A
+     * flinch, a swing and a death end where they end.
+     *
+     * The roll is not in here, despite the engine looping it. It is authored
+     * as a shape that starts crouched and finishes standing, which is a clip
+     * that happens to be replayed, not a cycle: blending its last frame back
+     * towards its first would put a standing figure halfway through a
+     * somersault.
+     */
+    val cycles = setOf(AnimationState.IDLE, AnimationState.WALK)
+
+    /**
+     * The pose for one frame, at whatever length the clip was asked for.
+     *
+     * The spacing is the whole of this. Frames are placed at `index * poses /
+     * count` through the authored list, which is the same rule [PoseScript]
+     * thins its written poses by -- and that is not a coincidence, it is the
+     * requirement. Every generated frame is sent to the model as a diagram
+     * *and* a sentence, one from each list, and if the two lists are walked
+     * differently the frame is told two different things.
+     *
+     * They used to be. This stretched the authored poses across an open span,
+     * `index / (count - 1)`, so the first and last frames landed exactly on
+     * the first and last poses and everything between drifted: asked for
+     * twelve frames of a walk, the diagram at frame ten was most of a beat
+     * away from the sentence describing it. The two agreed only at six, which
+     * is the one length anybody had looked at.
+     *
+     * Spacing by `poses / count` also gives a cycle its last interval back. A
+     * six pose walk stretched across twelve frames put eleven intervals where
+     * twelve belong, so the step from the last frame round to the first was
+     * more than twice every other step -- the same hitch once per stride that
+     * dropping the reach frame was meant to end, reappearing at a length
+     * nobody had measured.
      */
     fun poseFor(state: AnimationState, index: Int, frameCount: Int): PoseAngles {
         val frames = framesFor(state)
         if (frames.isEmpty()) return PoseAngles()
         if (frameCount <= 1) return frames.first()
-        val t = (index.toFloat() / (frameCount - 1)).coerceIn(0f, 1f)
-        val exact = t * (frames.size - 1)
+
+        val exact = index.toFloat() * frames.size / frameCount
         val at = exact.toInt().coerceIn(0, frames.size - 1)
-        val next = (at + 1).coerceAtMost(frames.size - 1)
+        // A cycle hands back to its first pose; anything else holds its last.
+        val next = if (state in cycles) {
+            (at + 1) % frames.size
+        } else {
+            (at + 1).coerceAtMost(frames.size - 1)
+        }
         // Blended rather than truncated to the authored frame. Truncating sent
         // every frame to the earlier pose: six idle frames from two authored
         // ones came out as five identical stills and one odd last frame, which

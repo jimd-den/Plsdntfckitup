@@ -2,6 +2,7 @@ package com.stratum.core.domain.sprite
 
 import kotlin.math.sqrt
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -44,7 +45,7 @@ class PoseFlowTest {
     )
 
     /** Clips that play back to their own first frame, where the join is a step too. */
-    private val cyclic = setOf(AnimationState.IDLE, AnimationState.WALK)
+    private val cyclic = MocapPoses.cycles
 
     @Test
     fun `no frame jumps or stalls against its neighbours`() {
@@ -136,6 +137,66 @@ class PoseFlowTest {
         }
     }
 
+    /**
+     * A cycle still closes when it is asked for twice as many frames.
+     *
+     * Six authored poses used to be stretched across twelve frames as an open
+     * span -- first frame on the first pose, last frame on the last -- which
+     * puts eleven intervals where a cycle has twelve. The missing one is the
+     * step from the last frame round to the first, so it came out at more than
+     * twice every other step: the walk hitched once per stride at twelve
+     * frames, which is the hitch dropping the reach frame was meant to end,
+     * at the one length nobody had measured.
+     *
+     * Checked here rather than in the evenness test above because at twelve
+     * the poses between the authored ones are interpolated, and the spacing of
+     * interpolated frames follows from the authored ones. The join does not:
+     * it is the one interval the spacing rule can lose.
+     */
+    @Test
+    fun `a looping clip still closes when asked for twice the frames`() {
+        cyclic.forEach { state ->
+            val poses = (0 until LONG).map { skeleton.pose(MocapPoses.poseFor(state, it, LONG)) }
+            val steps = (0 until LONG - 1).map { travel(poses[it], poses[it + 1]) }
+            val median = steps.sorted()[steps.size / 2]
+            val loop = travel(poses.last(), poses.first())
+            assertTrue(
+                loop <= median * MAX_RATIO,
+                "$state at $LONG frames jumps on the loop: $loop against a median step of " +
+                    "$median, so the cycle is missing its last interval",
+            )
+        }
+    }
+
+    /**
+     * Asking for twice the frames draws the same poses, with new ones between.
+     *
+     * The diagram and the sentence for one frame come from two different lists
+     * -- MocapPoses, authored at six, and PoseScript, authored at twelve and
+     * thinned -- and the prompt tells the model to match the diagram. They
+     * agree only if both lists are walked by the same rule. They were not:
+     * this one stretched across an open span while the other stepped by
+     * `index * poses / count`, so at twelve frames the diagram drifted up to
+     * most of a beat from the words describing it, and the two agreed only at
+     * six, which is the one length anybody had looked at.
+     *
+     * Every even frame of a long clip landing on the pose that frame held in
+     * the short one is what says the two rules are still the same rule.
+     */
+    @Test
+    fun `every other frame of a long clip is a frame of the short one`() {
+        AnimationState.entries.forEach { state ->
+            (0 until FRAMES).forEach { short ->
+                assertEquals(
+                    MocapPoses.poseFor(state, short, FRAMES),
+                    MocapPoses.poseFor(state, short * 2, LONG),
+                    "$state frame $short of $FRAMES is not frame ${short * 2} of $LONG, so the " +
+                        "drawn pose no longer lines up with the written one",
+                )
+            }
+        }
+    }
+
     private fun posesOf(state: AnimationState): List<Pose> =
         (0 until FRAMES).map { skeleton.pose(MocapPoses.poseFor(state, it, FRAMES)) }
 
@@ -154,6 +215,9 @@ class PoseFlowTest {
     private companion object {
         /** What the pose script asks for, and what the guide sheet is laid out as. */
         const val FRAMES = 6
+
+        /** The most a clip can be asked for, and twice the authored length. */
+        const val LONG = 12
 
         /** Loose on purpose: a blow accelerates, but not by several times. */
         const val MAX_RATIO = 2.5f
