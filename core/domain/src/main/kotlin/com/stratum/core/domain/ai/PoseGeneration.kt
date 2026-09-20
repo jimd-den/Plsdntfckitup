@@ -195,6 +195,13 @@ class GeneratePoseFrameUseCase(
             appendLine("ground. The large dot marks the hand that holds a weapon; close that")
             appendLine("hand into a grip.")
             appendLine()
+            // Without this the diagram is ambiguous about depth at a
+            // three-quarter angle, and the two halves of a walk come back as
+            // the same stride drawn twice.
+            appendLine("In IMAGE 2 the black arm and leg are on the near side of the body,")
+            appendLine("towards the camera, and the grey arm and leg are on the far side,")
+            appendLine("away from it. Draw them on those sides.")
+            appendLine()
             appendLine("In words, the pose is: ${request.step.instruction}.")
         } else {
             appendLine("Redraw the character in the attached image in a new pose.")
