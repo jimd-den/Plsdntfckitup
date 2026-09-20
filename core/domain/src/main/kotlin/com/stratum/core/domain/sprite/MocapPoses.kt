@@ -62,7 +62,7 @@ object MocapPoses {
     }
 
     /**
-     * A breath, and back to where it started.
+     * A breath and a shift of weight, and back to where it started.
      *
      * Authored as a full cycle rather than as two ends of one. An idle is the
      * pose a character holds for most of the time anybody looks at it, so it
@@ -71,98 +71,164 @@ object MocapPoses {
      * Rising takes longer than falling, the way a real breath does, which is
      * why the peak sits at frame three of six rather than in the middle.
      *
-     * The movement is deliberately tiny -- eight thousandths of the body's
-     * height at the top. It is the smallest thing on this list and the one
-     * that decides whether a character looks alive while standing still.
+     * The hard part is not the amount of movement, it is the *direction*. The
+     * first two versions of this put nearly all their amplitude into the
+     * shoulders swinging forward and back, and a swing forward is along the
+     * camera's own axis: the projection foreshortens it to almost nothing, so
+     * the pose sheet read as a still image no matter how far the numbers were
+     * pushed. Measured on screen, four times the amplitude bought four
+     * thousandths of body height.
+     *
+     * So the motion goes where the camera can see it -- straight up, and
+     * sideways. The chest lifts, the arms come *out* from the body rather than
+     * forward, and the weight shifts onto one hip and back. That last is what
+     * carries most of it: a lateral shift projects at full size, and it is
+     * also what a person standing still actually does.
      */
     private val idle = listOf(
-        PoseAngles(shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR),
+        // Every frame states every angle it moves, including the rest frame.
+        //
+        // This is not style. PoseAngles defaults a standing figure's arms to
+        // eight degrees forward and its hips to two, because that is what a
+        // person at rest looks like -- and the first version of this breath
+        // left the rest frame on those defaults while writing the other five
+        // out in full. Frame one asked for four degrees. So the arms went
+        // *backwards* out of the rest pose and forwards again into frame two,
+        // and the near hand moved three times as far in that one step as in
+        // any other. A breath, measured, that began with a twitch.
         PoseAngles(
-            driftY = -0.003f, lean = 0.4f, shoulderNear = 8.4f, shoulderFar = -8.4f,
-            shoulderNearOut = ARMS_CLEAR + 0.4f, shoulderFarOut = ARMS_CLEAR + 0.4f,
+            shoulderNear = 8f, shoulderFar = -8f,
+            shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
+            elbowNear = 0f, elbowFar = 0f,
+            hipNear = 2f, kneeNear = 0f, hipFar = -2f,
+            lean = 0f, headTilt = 0f, driftY = 0f, driftX = 0f,
         ),
         PoseAngles(
-            driftY = -0.007f, lean = 0.9f, shoulderNear = 9f, shoulderFar = -9f,
-            shoulderNearOut = ARMS_CLEAR + 0.9f, shoulderFarOut = ARMS_CLEAR + 0.9f,
+            shoulderNear = 9.5f, shoulderFar = -9.5f,
+            shoulderNearOut = ARMS_CLEAR + 2.8f, shoulderFarOut = ARMS_CLEAR + 2.8f,
+            elbowNear = -1.5f, elbowFar = 1.5f,
+            hipNear = 1.2f, kneeNear = 0.8f, hipFar = -2.2f,
+            lean = 1.4f, headTilt = -0.6f, driftY = -0.013f, driftX = -0.009f,
         ),
         PoseAngles(
-            driftY = -0.008f, lean = 1f, shoulderNear = 9.2f, shoulderFar = -9.2f,
-            headTilt = -0.5f,
-            // The chest fills on the in-breath, which pushes the arms out a
-            // shade. Tiny, and the reason an idle reads as breathing rather
-            // than as bobbing.
-            shoulderNearOut = ARMS_CLEAR + 1.2f, shoulderFarOut = ARMS_CLEAR + 1.2f,
+            shoulderNear = 11f, shoulderFar = -11f,
+            shoulderNearOut = ARMS_CLEAR + 5.4f, shoulderFarOut = ARMS_CLEAR + 5.4f,
+            elbowNear = -3f, elbowFar = 3f,
+            hipNear = 0.6f, kneeNear = 1.6f, hipFar = -2.4f,
+            lean = 2.6f, headTilt = -1.2f, driftY = -0.025f, driftX = -0.017f,
         ),
         PoseAngles(
-            driftY = -0.005f, lean = 0.6f, shoulderNear = 8.6f, shoulderFar = -8.6f,
-            shoulderNearOut = ARMS_CLEAR + 0.7f, shoulderFarOut = ARMS_CLEAR + 0.7f,
+            // The top of the breath, and the weight fully onto the near hip.
+            shoulderNear = 12f, shoulderFar = -12f,
+            shoulderNearOut = ARMS_CLEAR + 7f, shoulderFarOut = ARMS_CLEAR + 7f,
+            elbowNear = -3.6f, elbowFar = 3.6f,
+            hipNear = 0.2f, kneeNear = 2.2f, hipFar = -2.5f,
+            lean = 3.2f, headTilt = -1.6f, driftY = -0.033f, driftX = -0.022f,
         ),
         PoseAngles(
-            driftY = -0.001f, lean = 0.2f, shoulderNear = 8.1f, shoulderFar = -8.1f,
-            shoulderNearOut = ARMS_CLEAR + 0.2f, shoulderFarOut = ARMS_CLEAR + 0.2f,
+            shoulderNear = 10.5f, shoulderFar = -10.5f,
+            shoulderNearOut = ARMS_CLEAR + 4.6f, shoulderFarOut = ARMS_CLEAR + 4.6f,
+            elbowNear = -2.5f, elbowFar = 2.5f,
+            hipNear = 0.8f, kneeNear = 1.4f, hipFar = -2.3f,
+            lean = 2.2f, headTilt = -1f, driftY = -0.022f, driftX = -0.015f,
+        ),
+        PoseAngles(
+            // Out again, and a hair above the first frame so the loop closes
+            // without landing on it twice.
+            shoulderNear = 9f, shoulderFar = -9f,
+            shoulderNearOut = ARMS_CLEAR + 2.1f, shoulderFarOut = ARMS_CLEAR + 2.1f,
+            elbowNear = -1f, elbowFar = 1f,
+            hipNear = 1.4f, kneeNear = 0.6f, hipFar = -2.1f,
+            lean = 1f, headTilt = -0.4f, driftY = -0.01f, driftX = -0.007f,
         ),
     )
 
     /**
-     * Contact, passing, reaching — twice, once for each leg.
+     * Contact, down, passing -- twice, once for each leg.
      *
-     * The oldest frames in animation, at the length the script now asks for.
-     * Arms swing opposite the legs, and the body drops at the contacts and
-     * rises through the passes, which is the part that makes it read as
-     * walking rather than as gliding.
+     * The beats matter more here than in any other state, because a walk is
+     * the one clip a person watches for minutes at a time. The first version
+     * of this used contact / passing / reaching, and reaching is the moment
+     * *just before* the next heel lands: measured, the reach frame sat a third
+     * of a step from its neighbour where every other frame sat a whole one, so
+     * the cycle stalled once per stride. The reach and the contact after it
+     * are the same beat drawn twice.
      *
-     * The order is the cycle, which matters more here than in any other state:
-     * the last frame hands back to the first, so a reach that sits at the end
-     * of the list instead of between a pass and a contact makes the character
-     * hitch once per stride.
+     * Replacing the reach with the *down* -- weight arriving over the lead
+     * leg, the knee absorbing it, the body at its lowest -- gives three beats
+     * that are genuinely a third of a stride apart, and gives the walk its
+     * bounce: lowest at the down, highest at the passing.
+     *
+     * The order is the cycle, so the last frame hands back to the first. A
+     * passing frame at the end and a contact at the start is a full beat
+     * apart, which is what stops the hitch.
      */
     private val walk = listOf(
         // Contact: front heel down with the leg nearly straight, back leg
-        // trailing with only a little bend so the toe stays down.
+        // trailing with the shin angled forward under it so the toe stays
+        // down. Body at mid height, on its way from the passing to the down.
         PoseAngles(
-            hipNear = 25f, kneeNear = -6f, hipFar = -22f, kneeFar = 10f,
-            shoulderNear = -24f, elbowNear = 14f, shoulderFar = 24f, elbowFar = -14f,
+            hipNear = 27f, kneeNear = -3f, hipFar = -25f, kneeFar = 12f,
+            shoulderNear = -26f, elbowNear = 15f, shoulderFar = 26f, elbowFar = -15f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = 0.014f,
+            driftY = 0.005f,
+        ),
+        // Down: the whole weight over the lead leg, its knee bent to take the
+        // landing, the trailing leg pushing off with the heel already up. The
+        // lowest point of the cycle, and the frame that carries the impact.
+        PoseAngles(
+            hipNear = 13f, kneeNear = -15f, hipFar = -28f, kneeFar = 2f,
+            shoulderNear = -13f, elbowNear = 9f, shoulderFar = 13f, elbowFar = -9f,
+            shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
+            driftY = 0.021f,
         ),
         // Passing: the swing leg comes through *under* the body with the shin
         // folded back, which is a negative knee. Drawn out, bending it forward
         // instead threw the foot out ahead of the figure and read as a kick.
+        // The support leg is straight and the body is at its highest.
         PoseAngles(
-            hipNear = 4f, kneeNear = 0f, hipFar = 20f, kneeFar = -55f,
-            shoulderNear = -6f, elbowNear = 8f, shoulderFar = 6f, elbowFar = -8f,
+            hipNear = -6f, kneeNear = 1f, hipFar = 15f, kneeFar = -36f,
+            shoulderNear = 3f, elbowNear = -2f, shoulderFar = -3f, elbowFar = 2f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = -0.004f,
-        ),
-        // Reaching: the swing leg thrown forward at full extension and the
-        // body at its highest, the moment before the heel lands.
-        PoseAngles(
-            hipNear = -14f, kneeNear = 6f, hipFar = 32f, kneeFar = -14f,
-            shoulderNear = 16f, elbowNear = -10f, shoulderFar = -16f, elbowFar = 10f,
-            shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = -0.012f,
+            driftY = -0.017f,
         ),
         // The same three again with the legs and arms swapped.
         PoseAngles(
-            hipNear = -22f, kneeNear = 10f, hipFar = 25f, kneeFar = -6f,
-            shoulderNear = 24f, elbowNear = -14f, shoulderFar = -24f, elbowFar = 14f,
+            hipNear = -25f, kneeNear = 12f, hipFar = 27f, kneeFar = -3f,
+            shoulderNear = 26f, elbowNear = -15f, shoulderFar = -26f, elbowFar = 15f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = 0.014f,
+            driftY = 0.005f,
         ),
         PoseAngles(
-            hipNear = 20f, kneeNear = -55f, hipFar = 4f, kneeFar = 0f,
-            shoulderNear = 6f, elbowNear = -8f, shoulderFar = -6f, elbowFar = 8f,
+            hipNear = -28f, kneeNear = 2f, hipFar = 13f, kneeFar = -15f,
+            shoulderNear = 13f, elbowNear = -9f, shoulderFar = -13f, elbowFar = 9f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = -0.004f,
+            driftY = 0.021f,
         ),
         PoseAngles(
-            hipNear = 32f, kneeNear = -14f, hipFar = -14f, kneeFar = 6f,
-            shoulderNear = -16f, elbowNear = 10f, shoulderFar = 16f, elbowFar = -10f,
+            hipNear = 15f, kneeNear = -36f, hipFar = -6f, kneeFar = 1f,
+            shoulderNear = -3f, elbowNear = 2f, shoulderFar = 3f, elbowFar = -2f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            driftY = -0.012f,
+            driftY = -0.017f,
         ),
     )
 
+    /**
+     * One swing, accelerating into the impact and decelerating out of it.
+     *
+     * Measured frame to frame, the first version of this spent four frames
+     * barely moving and did the entire strike in one: the near shoulder went
+     * from 168 degrees to 80 in a single step, three times the travel of any
+     * other, while the last two frames moved almost nothing at all. At a fixed
+     * frame duration that is not a fast swing, it is a teleport followed by a
+     * pause.
+     *
+     * So the strike is spread across three frames and the follow-through is
+     * given real distance to cover. The swing still accelerates -- the steps
+     * run roughly 28, 48, 62, 38, 22 degrees, which is the shape of a real
+     * blow -- but no single frame does more than about half again what its
+     * neighbours do.
+     */
     private val attack = listOf(
         // Drawn out, the first version of this reached *forward* at head
         // height: the forearm bent back towards the near side, which put the
@@ -174,31 +240,38 @@ object MocapPoses {
             hipNear = 12f, kneeNear = -8f, hipFar = -16f, kneeFar = 14f,
             lean = -10f, headTilt = -4f,
         ),
+        // Breaking out of the wind-up. Still slow: the weight has not gone
+        // forward yet, so this is the arm starting to fall, not the blow.
         PoseAngles(
-            shoulderNearOut = 30f, shoulderFarOut = 16f,
-            shoulderNear = 168f, elbowNear = 4f, shoulderFar = 150f, elbowFar = 8f,
-            hipNear = 16f, kneeNear = -6f, hipFar = -14f, kneeFar = 16f,
-            lean = -2f,
+            shoulderNearOut = 32f, shoulderFarOut = 18f,
+            shoulderNear = 172f, elbowNear = 6f, shoulderFar = 156f, elbowFar = 10f,
+            hipNear = 15f, kneeNear = -7f, hipFar = -15f, kneeFar = 15f,
+            lean = -4f, headTilt = -2f,
         ),
+        // Accelerating. The arms are nearly straight through here -- an
+        // extended elbow is what carries the weapon's tip fastest, and a bent
+        // one at this point reads as a shove.
         PoseAngles(
-            shoulderNearOut = 20f, shoulderFarOut = 6f,
-            shoulderNear = 80f, elbowNear = 8f, shoulderFar = 58f, elbowFar = 14f,
-            hipNear = 24f, kneeNear = -6f, hipFar = -14f, kneeFar = 24f,
+            shoulderNearOut = 22f, shoulderFarOut = 10f,
+            shoulderNear = 124f, elbowNear = 4f, shoulderFar = 110f, elbowFar = 8f,
+            hipNear = 20f, kneeNear = -6f, hipFar = -14f, kneeFar = 20f,
+            lean = 6f, headTilt = 2f, driftX = 0.005f,
+        ),
+        // Impact: the fastest frame, the body furthest forward over the lead
+        // leg, the weapon roughly level.
+        PoseAngles(
+            shoulderNearOut = 12f, shoulderFarOut = 4f,
+            shoulderNear = 62f, elbowNear = 10f, shoulderFar = 44f, elbowFar = 14f,
+            hipNear = 25f, kneeNear = -6f, hipFar = -14f, kneeFar = 25f,
             lean = 14f, headTilt = 6f, driftX = 0.012f,
         ),
+        // Follow-through: the swing carries past, the weight starts coming
+        // back over both feet, the elbows fold as the arms slow.
         PoseAngles(
-            shoulderNearOut = 12f, shoulderFarOut = 0f,
-            shoulderNear = 42f, elbowNear = 20f, shoulderFar = -18f, elbowFar = 22f,
-            hipNear = 16f, kneeNear = -4f, hipFar = -10f, kneeFar = 16f,
-            lean = 6f,
-        ),
-        // Settling: weapon low at the side, weight coming back over both feet,
-        // still carrying a little of the swing forward.
-        PoseAngles(
-            shoulderNearOut = 8f, shoulderFarOut = 0f,
-            shoulderNear = 26f, elbowNear = 14f, shoulderFar = -12f, elbowFar = 16f,
-            hipNear = 8f, kneeNear = -2f, hipFar = -6f, kneeFar = 8f,
-            lean = 3f,
+            shoulderNearOut = 6f, shoulderFarOut = 0f,
+            shoulderNear = 24f, elbowNear = 18f, shoulderFar = -6f, elbowFar = 20f,
+            hipNear = 14f, kneeNear = -4f, hipFar = -9f, kneeFar = 13f,
+            lean = 7f, headTilt = 3f, driftX = 0.004f,
         ),
         // Still coming down, never back up. The first version of this frame
         // raised the weapon into a guard, which is what a fighter really does
@@ -207,9 +280,9 @@ object MocapPoses {
         // Returning to guard belongs to the move out of this clip, not to the
         // end of it, so the arc runs one way the whole way through.
         PoseAngles(
-            shoulderNearOut = 5f, shoulderFarOut = 0f,
-            shoulderNear = 12f, elbowNear = 8f, shoulderFar = -26f, elbowFar = 12f,
-            hipNear = 4f, kneeNear = -2f, hipFar = -4f, kneeFar = 4f,
+            shoulderNearOut = 4f, shoulderFarOut = 0f,
+            shoulderNear = 2f, elbowNear = 12f, shoulderFar = -26f, elbowFar = 14f,
+            hipNear = 5f, kneeNear = -2f, hipFar = -4f, kneeFar = 4f,
             lean = 1f,
         ),
     )
@@ -233,31 +306,44 @@ object MocapPoses {
             shoulderNearOut = 32f, shoulderFarOut = 32f,
             hipNear = -4f, kneeNear = 10f, hipFar = 4f, kneeFar = 10f,
             hipNearOut = 6f, hipFarOut = 6f,
-            driftY = 0.006f,
+            lean = 1f, headTilt = -2f, driftY = 0.006f,
         ),
         PoseAngles(
             // Wide, now that wide is a thing a pose can say. This used to be a
             // hundred and fifty degrees of forward swing, which is an arm
             // wrapped over the top of its own shoulder -- the nearest a
             // fore-and-aft skeleton could get to "thrown open".
+            //
+            // The legs are written out from here on rather than left to the
+            // defaults. Left off, they snapped from the crouch to a neutral
+            // stand in one frame and then held it for three, so the release
+            // recoiled from the waist up while the lower body stood still.
             shoulderNear = 40f, elbowNear = 10f, shoulderFar = -40f, elbowFar = -10f,
             shoulderNearOut = 84f, shoulderFarOut = 84f,
+            hipNear = -2f, kneeNear = 2f, hipFar = 2f, kneeFar = 2f,
+            hipNearOut = 3f, hipFarOut = 3f,
             lean = -8f, headTilt = -12f, driftY = -0.022f,
         ),
         PoseAngles(
             shoulderNear = 34f, elbowNear = 16f, shoulderFar = -34f, elbowFar = -16f,
             shoulderNearOut = 54f, shoulderFarOut = 54f,
-            lean = 2f,
+            hipNear = 0f, kneeNear = 4f, hipFar = 0f, kneeFar = 4f,
+            hipNearOut = 2f, hipFarOut = 2f,
+            lean = 2f, headTilt = -6f, driftY = -0.008f,
         ),
         PoseAngles(
             shoulderNear = 22f, elbowNear = 10f, shoulderFar = -22f, elbowFar = -10f,
             shoulderNearOut = 28f, shoulderFarOut = 28f,
-            lean = 1f,
+            hipNear = 1f, kneeNear = 3f, hipFar = -1f, kneeFar = 3f,
+            hipNearOut = 1f, hipFarOut = 1f,
+            lean = 1f, headTilt = -2f, driftY = 0.002f,
         ),
         PoseAngles(
             shoulderNear = 12f, elbowNear = 2f, shoulderFar = -12f, elbowFar = -2f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            hipNear = 2f, hipFar = -2f,
+            hipNear = 2f, kneeNear = 0f, hipFar = -2f, kneeFar = 0f,
+            hipNearOut = 0f, hipFarOut = 0f,
+            lean = 0f, headTilt = 0f, driftY = 0f,
         ),
     )
 
@@ -271,12 +357,18 @@ object MocapPoses {
             hipNear = -14f, kneeNear = 12f, hipFar = 16f, kneeFar = 8f,
             lean = -18f, headTilt = -16f, driftX = -0.022f,
         ),
+        // The recoil. Measured, the first version folded the arms all the way
+        // in here -- shoulders from 74 degrees out to 22 and the near elbow
+        // from straight to past a right angle in one frame -- which moved the
+        // hands four times as far as any later frame did. A flinch is fast,
+        // but a frame that outruns its neighbours by that much reads as the
+        // arms vanishing and reappearing. The fold starts here and finishes at
+        // the bottom of the stagger.
         PoseAngles(
-            shoulderNear = 44f, elbowNear = 62f, shoulderFar = -30f, elbowFar = 40f,
-            // Coming back in across the body as it doubles over.
-            shoulderNearOut = 22f, shoulderFarOut = 14f,
-            hipNear = -8f, kneeNear = 24f, hipFar = -28f, kneeFar = 34f,
-            lean = 20f, headTilt = 14f, driftX = -0.045f,
+            shoulderNear = 44f, elbowNear = 24f, shoulderFar = -34f, elbowFar = 18f,
+            shoulderNearOut = 50f, shoulderFarOut = 46f,
+            hipNear = -8f, kneeNear = 22f, hipFar = -24f, kneeFar = 30f,
+            lean = 14f, headTilt = 10f, driftX = -0.04f,
         ),
         // The worst of the stagger: bent low over the front knee, arms pulled
         // in to the body rather than flung out.
@@ -288,22 +380,28 @@ object MocapPoses {
         ),
         // Catching it: back foot planted, torso starting to come back up.
         PoseAngles(
-            shoulderNear = 26f, elbowNear = 70f, shoulderFar = -22f, elbowFar = 44f,
-            hipNear = 4f, kneeNear = 22f, hipFar = -26f, kneeFar = 30f,
-            lean = 22f, headTilt = 14f, driftX = -0.05f, driftY = 0.022f,
+            shoulderNear = 24f, elbowNear = 46f, shoulderFar = -21f, elbowFar = 34f,
+            shoulderNearOut = 2f, shoulderFarOut = 2f,
+            hipNear = 4f, kneeNear = 17f, hipFar = -23f, kneeFar = 23f,
+            lean = 18f, headTilt = 11f, driftX = -0.042f, driftY = 0.018f,
         ),
+        // Rising. The recovery used to spend its last three frames moving
+        // almost nothing, so half the clip was a held pose; it covers real
+        // ground now, which is also what keeps the stagger from looking like
+        // the character got stuck part-way down.
         PoseAngles(
-            shoulderNear = 18f, elbowNear = 40f, shoulderFar = -18f, elbowFar = 24f,
-            hipNear = 4f, kneeNear = 12f, hipFar = -14f, kneeFar = 16f,
-            lean = 12f, headTilt = 6f, driftX = -0.03f, driftY = 0.008f,
+            shoulderNear = 16f, elbowNear = 22f, shoulderFar = -15f, elbowFar = 16f,
+            shoulderNearOut = ARMS_CLEAR - 2f, shoulderFarOut = ARMS_CLEAR - 2f,
+            hipNear = 3f, kneeNear = 8f, hipFar = -12f, kneeFar = 11f,
+            lean = 9f, headTilt = 5f, driftX = -0.024f, driftY = 0.005f,
         ),
         // Recovered, but not back to the idle: still tensed, which is what
         // stops a flinch from ending in a shrug.
         PoseAngles(
-            shoulderNear = 12f, elbowNear = 16f, shoulderFar = -12f, elbowFar = 8f,
+            shoulderNear = 10f, elbowNear = 6f, shoulderFar = -10f, elbowFar = 4f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
-            hipNear = 2f, kneeNear = 4f, hipFar = -4f, kneeFar = 4f,
-            lean = 4f, driftX = -0.012f,
+            hipNear = 2f, kneeNear = 2f, hipFar = -3f, kneeFar = 3f,
+            lean = 3f, driftX = -0.008f,
         ),
     )
 
@@ -381,14 +479,14 @@ object MocapPoses {
         // unreadable as a body, and the guide has to be legible before it can
         // be followed.
         PoseAngles(
-            shoulderNear = -58f, elbowNear = 34f, shoulderFar = -100f, elbowFar = -26f,
+            shoulderNear = -44f, elbowNear = 34f, shoulderFar = -88f, elbowFar = -26f,
             // Splayed, which is the word the instruction uses and the thing a
             // fore-and-aft skeleton could not do: limbs fallen away from the
             // body rather than folded in front of it.
-            shoulderNearOut = 46f, shoulderFarOut = 38f,
-            hipNear = -68f, kneeNear = 40f, hipFar = -96f, kneeFar = 28f,
-            hipNearOut = 26f, hipFarOut = 20f,
-            lean = 78f, headTilt = 14f, driftY = 0.28f,
+            shoulderNearOut = 38f, shoulderFarOut = 32f,
+            hipNear = -60f, kneeNear = 50f, hipFar = -86f, kneeFar = 34f,
+            hipNearOut = 20f, hipFarOut = 16f,
+            lean = 70f, headTilt = 16f, driftY = 0.24f,
         ),
         // Settling: one arm falling further out, the body a little flatter.
         PoseAngles(

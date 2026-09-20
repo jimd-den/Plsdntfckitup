@@ -297,15 +297,21 @@ class MocapPosesTest {
     @Test
     fun `a walk lifts the body between contacts`() {
         val frames = MocapPoses.framesFor(AnimationState.WALK)
-        // Contact, pass, reach -- twice. The contacts are the low points and
-        // the passes and reaches the high ones; without that difference a walk
-        // reads as gliding.
-        assertTrue(frames[0].driftY > frames[1].driftY, "the first contact did not drop")
-        assertTrue(frames[3].driftY > frames[4].driftY, "the second contact did not drop")
-        // And the reach is the highest point of each half, which is what puts
-        // the bounce at the top of the stride rather than halfway up it.
-        assertTrue(frames[2].driftY < frames[1].driftY, "the first reach did not rise")
-        assertTrue(frames[5].driftY < frames[4].driftY, "the second reach did not rise")
+        // Contact, down, passing -- twice. The beats used to be contact, pass,
+        // reach, and the reach was dropped because it is the same beat as the
+        // contact that follows it: measured frame to frame, the walk stalled
+        // once per stride. So the low point is now the *down*, one frame after
+        // the contact, where the weight arrives on the lead leg; the high
+        // point is still the passing. Without that difference a walk reads as
+        // gliding. Positive driftY is downward.
+        assertTrue(frames[1].driftY > frames[0].driftY, "the first contact did not drop onto its lead leg")
+        assertTrue(frames[4].driftY > frames[3].driftY, "the second contact did not drop onto its lead leg")
+        // And the passing is the highest point of each half, which is what
+        // puts the bounce over the planted foot rather than halfway up it.
+        assertTrue(frames[2].driftY < frames[1].driftY, "the first passing did not rise")
+        assertTrue(frames[2].driftY < frames[0].driftY, "the first passing was not the high point")
+        assertTrue(frames[5].driftY < frames[4].driftY, "the second passing did not rise")
+        assertTrue(frames[5].driftY < frames[3].driftY, "the second passing was not the high point")
     }
 
     @Test
