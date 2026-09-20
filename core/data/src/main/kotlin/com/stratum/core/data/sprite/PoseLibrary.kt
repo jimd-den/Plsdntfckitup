@@ -1,6 +1,9 @@
 package com.stratum.core.data.sprite
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 /**
@@ -21,6 +24,24 @@ class PoseLibrary(context: Context) {
 
     private val root: File = File(context.applicationContext.filesDir, DIRECTORY).apply { mkdirs() }
 
+    private val _sets = MutableStateFlow<List<String>>(emptyList())
+    val sets: StateFlow<List<String>> = _sets.asStateFlow()
+
+    init {
+        refresh()
+    }
+
+    fun refresh() {
+        _sets.value = listSetsFromDisk()
+    }
+
+    private fun listSetsFromDisk(): List<String> =
+        root.listFiles { file -> file.isDirectory }
+            .orEmpty()
+            .filter { dir -> dir.listFiles().orEmpty().isNotEmpty() }
+            .sortedByDescending { it.lastModified() }
+            .map { it.name }
+
     /**
      * Where a set lives. Does not create it.
      *
@@ -38,12 +59,14 @@ class PoseLibrary(context: Context) {
 
     fun saveReference(setId: String, bytes: ByteArray) {
         File(writableDir(setId), REFERENCE).writeBytes(bytes)
+        refresh()
     }
 
     fun reference(setId: String): ByteArray? = read(File(setDir(setId), REFERENCE))
 
     fun savePose(setId: String, key: String, bytes: ByteArray) {
         File(writableDir(setId), "${key.replace(NON_FILE_SAFE, "_")}$SUFFIX").writeBytes(bytes)
+        refresh()
     }
 
     fun pose(setId: String, key: String): ByteArray? =
@@ -66,12 +89,7 @@ class PoseLibrary(context: Context) {
      * created by reading, but devices already carry the ones that were, and a
      * character with nothing in it is not a character.
      */
-    fun sets(): List<String> =
-        root.listFiles { file -> file.isDirectory }
-            .orEmpty()
-            .filter { dir -> dir.listFiles().orEmpty().isNotEmpty() }
-            .sortedByDescending { it.lastModified() }
-            .map { it.name }
+    fun sets(): List<String> = _sets.value.ifEmpty { listSetsFromDisk() }
 
     /** Removes folders that reading brought into existence and nothing filled. */
     fun forgetEmptySets(): Int {
@@ -79,16 +97,19 @@ class PoseLibrary(context: Context) {
             .orEmpty()
             .filter { dir -> dir.listFiles().orEmpty().isEmpty() }
         empty.forEach { it.delete() }
+        if (empty.isNotEmpty()) refresh()
         return empty.size
     }
 
     fun deleteSet(setId: String) {
         setDir(setId).deleteRecursively()
+        refresh()
     }
 
     /** Throws away one pose so it will be asked for again. */
     fun deletePose(setId: String, key: String) {
         File(setDir(setId), "${key.replace(NON_FILE_SAFE, "_")}$SUFFIX").delete()
+        refresh()
     }
 
     private fun read(file: File): ByteArray? =

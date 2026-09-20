@@ -7,6 +7,9 @@ import com.stratum.core.domain.sprite.Pose
 import com.stratum.core.domain.sprite.PoseGuideMode
 import com.stratum.core.domain.sprite.PoseGuideStyle
 import com.stratum.core.domain.sprite.PoseGuides
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -32,6 +35,9 @@ class PoseGuideStore(context: Context) {
 
     private var cache: MutableMap<String, GuidesDto>? = null
 
+    private val _version = MutableStateFlow(0)
+    val version: StateFlow<Int> = _version.asStateFlow()
+
     fun guidesFor(setId: String): PoseGuides =
         load()[setId]?.toDomain() ?: PoseGuides()
 
@@ -52,6 +58,7 @@ class PoseGuideStore(context: Context) {
         val isDefault = guides == PoseGuides(skeleton = guides.skeleton)
         if (isDefault) all.remove(setId) else all[setId] = guides.toDto()
         runCatching { file.writeText(json.encodeToString(all)) }
+        _version.value++
     }
 
     private fun load(): MutableMap<String, GuidesDto> {

@@ -8,6 +8,9 @@ import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.SpriteFacing
 import com.stratum.core.domain.sprite.SpriteOrigin
 import com.stratum.core.domain.sprite.SpriteSheet
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -31,12 +34,25 @@ class SpriteLibrary(context: Context) {
     /** Whether a decoded sheet has anything drawn on it. Cached beside the pixels. */
     private val drawn = HashMap<String, Boolean>()
 
-    /** Sheets on disk, newest first. */
-    fun all(): List<SpriteSheet> =
+    private val _sheets = MutableStateFlow<List<SpriteSheet>>(emptyList())
+    val sheets: StateFlow<List<SpriteSheet>> = _sheets.asStateFlow()
+
+    init {
+        refresh()
+    }
+
+    fun refresh() {
+        _sheets.value = loadSheetsFromDisk()
+    }
+
+    private fun loadSheetsFromDisk(): List<SpriteSheet> =
         root.listFiles { file -> file.name.endsWith(METADATA_SUFFIX) }
             .orEmpty()
             .sortedByDescending { it.lastModified() }
             .mapNotNull { readMetadata(it) }
+
+    /** Sheets on disk, newest first. */
+    fun all(): List<SpriteSheet> = _sheets.value.ifEmpty { loadSheetsFromDisk() }
 
     fun save(sheet: SpriteSheet, imageBytes: ByteArray) {
         val slug = slugFor(sheet.id)
@@ -46,6 +62,7 @@ class SpriteLibrary(context: Context) {
         File(root, "$slug$METADATA_SUFFIX").writeText(json.encodeToString(sheet.toDto()))
         bitmaps.remove(sheet.id)
         drawn.remove(sheet.id)
+        refresh()
     }
 
     fun delete(sheetId: String) {
@@ -54,6 +71,7 @@ class SpriteLibrary(context: Context) {
         File(root, "$slug$IMAGE_SUFFIX").delete()
         bitmaps.remove(sheetId)
         drawn.remove(sheetId)
+        refresh()
     }
 
     /**

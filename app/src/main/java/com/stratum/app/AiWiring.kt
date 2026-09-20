@@ -3,6 +3,8 @@ package com.stratum.app
 import android.content.Context
 import com.stratum.core.data.ai.OpenRouterImageModel
 import com.stratum.core.data.ai.OpenRouterLanguageModel
+import com.stratum.core.data.character.CharacterRepositoryImpl
+import com.stratum.core.data.settings.PlayerPreferencesStore
 import com.stratum.core.data.sprite.SpriteLibrary
 import com.stratum.core.data.sprite.PoseGuideStore
 import com.stratum.core.data.sprite.PoseLibrary
@@ -10,6 +12,7 @@ import com.stratum.core.data.sprite.SpriteProjectStore
 import com.stratum.core.data.sprite.WeaponFitStore
 import com.stratum.core.data.sprite.WeaponLibrary
 import com.stratum.core.data.settings.ProviderSettingsStore
+import com.stratum.core.domain.character.CharacterRepository
 import com.stratum.core.domain.ai.GenerateContentPackUseCase
 import com.stratum.core.domain.ai.GenerateLoreUseCase
 import com.stratum.core.domain.ai.GenerateBasePoseUseCase
@@ -27,6 +30,9 @@ import com.stratum.core.domain.ai.GenerateWeaponUseCase
 class AiWiring(context: Context) {
 
     val settings = ProviderSettingsStore(context)
+
+    /** Persists player's active character art, weapon, and class choices across app restarts. */
+    val playerPreferences = PlayerPreferencesStore(context)
 
     private val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
 
@@ -73,6 +79,17 @@ class AiWiring(context: Context) {
 
     /** How each character holds a weapon: its hands, not the weapon's. */
     val weaponFits = WeaponFitStore(context)
+
+    /**
+     * Unified repository for Character aggregates, coordinating poses, sprite sheets,
+     * pose guides, and weapon fits under one reactive boundary.
+     */
+    val characterRepository: CharacterRepository = CharacterRepositoryImpl(
+        poses = poses,
+        sprites = sprites,
+        poseGuides = poseGuides,
+        weaponFits = weaponFits,
+    )
 
     val generateContentPack = GenerateContentPackUseCase(languageModel)
 

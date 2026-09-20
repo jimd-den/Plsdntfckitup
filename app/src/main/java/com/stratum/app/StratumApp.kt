@@ -130,27 +130,55 @@ fun StratumApp(
         )
     }
 
+    val ai = remember(context) { AiWiring(context) }
+
+    // Persisted player art choices (hero class, sprite sheet, weapon)
+    val initialLoadout = remember(ai) { ai.playerPreferences.load() }
+
     // Null means "whatever the packs list first", which is what a player who has
     // never opened the class forge should get.
-    var heroClassId by remember { mutableStateOf<String?>(null) }
+    var heroClassId by remember { mutableStateOf<String?>(initialLoadout.heroClassId) }
 
     /**
      * The art the player picked, independent of which class they are playing.
-     *
-     * A class and a look are two different choices, and tying them together
-     * meant a character you had drawn could only be worn by binding it to a
-     * class in another screen first -- so the obvious act of "use this one"
-     * had no button anywhere. Null falls back to the class's own art, which is
-     * what a player who has never drawn anything gets.
+     * Persisted across app restarts.
      */
-    var heroSheetId by remember { mutableStateOf<String?>(null) }
+    var heroSheetId by remember { mutableStateOf<String?>(initialLoadout.heroSheetId) }
+
+    // What the player is holding. Persisted across app restarts.
+    var equippedWeaponId by remember { mutableStateOf<String?>(initialLoadout.equippedWeaponId) }
+
+    // Observable stores: sprite sheets and unified character aggregates
+    val spriteSheets by ai.sprites.sheets.collectAsStateWithLifecycle()
+    val characters by ai.characterRepository.characters.collectAsStateWithLifecycle()
+
+    // Validate loadout against available content and clear gracefully if deleted
+    LaunchedEffect(spriteSheets, heroSheetId) {
+        if (heroSheetId != null && spriteSheets.none { it.id == heroSheetId }) {
+            heroSheetId = null
+            ai.playerPreferences.saveHeroSheet(null)
+        }
+    }
+    LaunchedEffect(content, heroClassId) {
+        if (heroClassId != null && content.heroClasses.none { it.id == heroClassId }) {
+            heroClassId = null
+            ai.playerPreferences.saveHeroClass(null)
+        }
+    }
+    LaunchedEffect(heroClassId) {
+        ai.playerPreferences.saveHeroClass(heroClassId)
+    }
+    LaunchedEffect(heroSheetId) {
+        ai.playerPreferences.saveHeroSheet(heroSheetId)
+    }
+    LaunchedEffect(equippedWeaponId) {
+        ai.playerPreferences.saveEquippedWeapon(equippedWeaponId)
+    }
 
     // A new seed per run, but stable across recomposition so walking around does
     // not regenerate the world under the player.
     var seed by remember { mutableStateOf(System.currentTimeMillis()) }
     val config = remember(seed) { GameSetup.worldConfig(seed) }
-
-    val ai = remember(context) { AiWiring(context) }
 
     // The service is started by the run beginning, not by the forge opening:
     // it exists to protect work in flight, and one that started with the
@@ -160,13 +188,6 @@ fun StratumApp(
         if (generating) PoseGenerationService.start(context)
     }
 
-    // Sheets generated this session join the loaded packs, so a drawing made
-    // five minutes ago is used by the world exactly like one a pack shipped.
-    var spriteRevision by remember { mutableStateOf(0) }
-    // What the player is holding. A weapon is a separate drawing attached at
-    // the hand, so changing it is changing one id -- no character is redrawn.
-    var equippedWeaponId by remember { mutableStateOf<String?>(null) }
-    val spriteSheets = remember(spriteRevision) { ai.sprites.all() }
     val contentWithSprites = remember(content, spriteSheets) {
         content.withSpriteSheets(spriteSheets)
     }
@@ -175,7 +196,7 @@ fun StratumApp(
     // playing, and resolving it without that was the whole bug — every class
     // was drawn with whichever hero sheet happened to be newest.
     val spriteResolver = remember(
-        spriteRevision, contentWithSprites, heroClassId, heroSheetId, equippedWeaponId,
+        contentWithSprites, heroClassId, heroSheetId, equippedWeaponId, characters,
     ) {
         // The resolver is asked for a sprite on every drawn frame, for every
         // actor, so anything built here has to be built once and kept. A rig is
@@ -284,38 +305,45 @@ fun StratumApp(
     }
 
     when (destination) {
-        Destination.HOME -> HomeScreen(
-            packName = content.packs.joinToString(" + ") { it.name },
-            blockCount = content.registry.size,
-            biomeCount = content.biomes.size,
-            classCount = content.heroClasses.size,
-            heroClasses = content.heroClasses,
-            selectedClassId = heroClassId ?: content.heroClasses.firstOrNull()?.id,
-            onSelectClass = { heroClassId = it },
-            characterSheets = remember(spriteSheets) {
-                // Any character art, not only the hero-filed kind. Which
-                // namespace a character landed in is a decision about what the
-                // *world* does with it by default; picking one here is a
-                // person saying outright "draw me as this", and refusing
-                // because they had once labelled it an enemy would be the app
-                // arguing with them about their own character.
-                spriteSheets.filter { SpriteNamespace.isCharacter(it.id) }
-            },
-            selectedSheetId = heroSheetId,
-            onSelectSheet = { id -> heroSheetId = if (heroSheetId == id) null else id },
-            idleFrameFor = heroPortrait,
-            onBuildClass = { destination = Destination.CLASSES },
-            onDescend = {
-                seed = System.currentTimeMillis()
-                destination = Destination.PLAY
-            },
-            onForge = { destination = Destination.FORGE },
-            onSprites = { destination = Destination.SPRITES },
-            spriteCount = spriteSheets.size,
-            onSettings = { destination = Destination.SETTINGS },
-            onStudio = { destination = Destination.STUDIO },
-            modifier = modifier,
-        )
+        Destination.HOME -> {
+            val unpackedCharacters = remember(characters) {
+                characters.filter { !it.isPacked && it.posesDrawn.isNotEmpty() }
+            }
+            HomeScreen(
+                packName = content.packs.joinToString(" + ") { it.name },
+                blockCount = content.registry.size,
+                biomeCount = content.biomes.size,
+                classCount = content.heroClasses.size,
+                heroClasses = content.heroClasses,
+                selectedClassId = heroClassId ?: content.heroClasses.firstOrNull()?.id,
+                onSelectClass = { heroClassId = it },
+                characterSheets = remember(spriteSheets) {
+                    // Any character art, not only the hero-filed kind. Which
+                    // namespace a character landed in is a decision about what the
+                    // *world* does with it by default; picking one here is a
+                    // person saying outright "draw me as this", and refusing
+                    // because they had once labelled it an enemy would be the app
+                    // arguing with them about their own character.
+                    spriteSheets.filter { SpriteNamespace.isCharacter(it.id) }
+                },
+                selectedSheetId = heroSheetId,
+                onSelectSheet = { id -> heroSheetId = if (heroSheetId == id) null else id },
+                idleFrameFor = heroPortrait,
+                unpackedCharacterCount = unpackedCharacters.size,
+                onPoseForge = { destination = Destination.POSES },
+                onBuildClass = { destination = Destination.CLASSES },
+                onDescend = {
+                    seed = System.currentTimeMillis()
+                    destination = Destination.PLAY
+                },
+                onForge = { destination = Destination.FORGE },
+                onSprites = { destination = Destination.SPRITES },
+                spriteCount = spriteSheets.size,
+                onSettings = { destination = Destination.SETTINGS },
+                onStudio = { destination = Destination.STUDIO },
+                modifier = modifier,
+            )
+        }
 
         Destination.PLAY -> {
             // Keyed so forging a pack or starting a new run builds a fresh
@@ -338,12 +366,9 @@ fun StratumApp(
 
         Destination.CLASSES -> {
             val classViewModel: ClassForgeViewModel = viewModel(
-                // Keyed on the sprite revision too. Without it the picker is
-                // built once and then lists whatever art existed at that
-                // moment, so a character generated afterwards cannot be
-                // chosen -- which looks exactly like the generator not having
-                // worked.
-                key = "classes-$classRevision-$spriteRevision",
+                // Keyed on class revision and sheet count to rebuild picker
+                // when classes or sheets change.
+                key = "classes-$classRevision-${spriteSheets.size}",
                 factory = ClassForgeViewModel.factory(
                     content = content,
                     saveClass = { hero ->
@@ -396,7 +421,6 @@ fun StratumApp(
                         // would pay the cost every frame.
                         val prepared = GeneratedSheetPreparer.prepare(sheet, bytes)
                         ai.sprites.save(prepared.sheet, prepared.bytes)
-                        spriteRevision++
                         SheetPreparation(
                             prepared.sheet,
                             prepared.keyStrategy,
@@ -407,7 +431,6 @@ fun StratumApp(
                     loadSheets = ai.sprites::all,
                     deleteSheet = { id ->
                         ai.sprites.delete(id)
-                        spriteRevision++
                     },
                     isProviderConfigured = ai::isConfigured,
                 ),
@@ -471,9 +494,6 @@ fun StratumApp(
                     loadGuides = ai.poseGuides::guidesFor,
                     saveGuides = { setId, guides ->
                         ai.poseGuides.save(setId, guides)
-                        // The resolver caches rigs, so a changed pose source has
-                        // to rebuild them or the sword keeps the old hand.
-                        spriteRevision++
                     },
                     saveReference = ai.poses::saveReference,
                     loadReference = ai.poses::reference,
@@ -490,31 +510,14 @@ fun StratumApp(
                         }
                         composed?.let {
                             ai.sprites.save(it.sheet, it.bytes)
-                            spriteRevision++
                             it.packed()
                         }
                     },
                     savedCharacters = {
-                        // Built from what the stores already hold rather than
-                        // from a list of its own: a separate index would be a
-                        // second source of truth that drifts the first time a
-                        // set is deleted from anywhere else.
-                        ai.poses.sets().map { setId ->
-                            SavedCharacter(
-                                setId = setId,
-                                name = SavedCharacter.nameOf(setId),
-                                posesDrawn = ai.poses.keysIn(setId).size,
-                                hasReference = ai.poses.hasReference(setId),
-                                sheetId = ai.sprites.all()
-                                    .firstOrNull { it.id == setId }?.id,
-                            )
-                        }
+                        ai.characterRepository.all().map { it.toSavedCharacter() }
                     },
                     deleteCharacter = { setId ->
-                        ai.poses.deleteSet(setId)
-                        ai.sprites.delete(setId)
-                        ai.poseGuides.save(setId, PoseGuides())
-                        spriteRevision++
+                        ai.characterRepository.delete(setId)
                     },
                     exportSheet = { sheetId, name ->
                         val bytes = ai.sprites.bytesFor(sheetId)
@@ -605,9 +608,6 @@ fun StratumApp(
                     fitFor = ai.weaponFits::fitFor,
                     saveFit = { sheetId, fit ->
                         ai.weaponFits.save(sheetId, fit)
-                        // The resolver caches rigs, so it has to be rebuilt for
-                        // a corrected fit to reach the world.
-                        spriteRevision++
                     },
                     deleteWeapon = { id ->
                         ai.weapons.delete(id)
@@ -669,7 +669,6 @@ fun StratumApp(
                             // mapping replaces that sheet rather than leaving
                             // the world to choose between two versions of it.
                             ai.sprites.save(it.sheet, it.bytes)
-                            spriteRevision++
                             it.sheet
                         }
                     },
@@ -716,6 +715,8 @@ private fun HomeScreen(
     onSelectSheet: (String) -> Unit = {},
     /** The chosen character's art, so the picker shows who rather than what. */
     idleFrameFor: (String) -> DrawableSprite? = { null },
+    unpackedCharacterCount: Int = 0,
+    onPoseForge: () -> Unit = {},
     onBuildClass: () -> Unit,
     onDescend: () -> Unit,
     onForge: () -> Unit,
@@ -803,11 +804,41 @@ private fun HomeScreen(
                 // character should be reads as the feature being broken;
                 // naming the reason turns it into the next thing to do.
                 Text(
-                    text = "No character art yet — you will be drawn as a shape. " +
-                        "Make one in the pose forge and it appears here.",
+                    text = if (unpackedCharacterCount > 0) {
+                        "Character art has been drawn but not packed into a sprite sheet yet. " +
+                            "Pack it in the pose forge to wear it here."
+                    } else {
+                        "No character art yet — you will be drawn as a shape. " +
+                            "Make one in the pose forge and it appears here."
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.inkMuted,
                 )
+                Spacer(Modifier.height(Space.medium))
+            }
+
+            if (unpackedCharacterCount > 0) {
+                StratumPanel(
+                    raised = false,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = if (unpackedCharacterCount == 1) {
+                            "1 character drawn but not packed into a sprite sheet yet."
+                        } else {
+                            "$unpackedCharacterCount characters drawn but not packed into sprite sheets yet."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.accent,
+                    )
+                    Spacer(Modifier.height(Space.small))
+                    StratumAction(
+                        label = "Open pose forge to pack",
+                        onClick = onPoseForge,
+                        emphasis = ActionEmphasis.SECONDARY,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Spacer(Modifier.height(Space.medium))
             }
 
@@ -871,6 +902,13 @@ private fun HomeScreen(
                 label = "Descend",
                 onClick = onDescend,
                 emphasis = ActionEmphasis.PRIMARY,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.small))
+            StratumAction(
+                label = if (unpackedCharacterCount > 0) "Pose forge ($unpackedCharacterCount unpacked)" else "Pose forge",
+                onClick = onPoseForge,
+                emphasis = if (unpackedCharacterCount > 0) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(Space.small))

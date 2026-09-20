@@ -2,6 +2,9 @@ package com.stratum.core.data.sprite
 
 import android.content.Context
 import com.stratum.core.domain.sprite.WeaponFit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -25,6 +28,9 @@ class WeaponFitStore(context: Context) {
 
     private var cache: MutableMap<String, FitDto>? = null
 
+    private val _version = MutableStateFlow(0)
+    val version: StateFlow<Int> = _version.asStateFlow()
+
     fun fitFor(sheetId: String): WeaponFit =
         load()[sheetId]?.toDomain() ?: WeaponFit.none
 
@@ -32,6 +38,7 @@ class WeaponFitStore(context: Context) {
         val fits = load()
         if (fit.isIdentity) fits.remove(sheetId) else fits[sheetId] = fit.toDto()
         runCatching { file.writeText(json.encodeToString(fits)) }
+        _version.value++
     }
 
     private fun load(): MutableMap<String, FitDto> {

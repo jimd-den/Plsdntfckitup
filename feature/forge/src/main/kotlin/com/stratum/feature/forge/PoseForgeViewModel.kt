@@ -15,6 +15,7 @@ import com.stratum.core.domain.ai.RunDecision
 import com.stratum.core.domain.ai.PoseStep
 import com.stratum.core.domain.ai.PoseView
 import com.stratum.core.domain.ai.SavedCharacter
+import com.stratum.core.domain.character.CharacterRole
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.PackedSheet
 import com.stratum.core.domain.sprite.Pose
@@ -423,21 +424,52 @@ class PoseForgeViewModel(
                 }
             }
 
+            val currentSetId = setId
+            val drawnNow = withContext(Dispatchers.IO) { posesDrawn(currentSetId) }
+            var autoPackedSheet: SpriteSheet? = null
+            var autoPackedMessage: String? = null
+
+            if (abandoned == null && drawnNow.isNotEmpty()) {
+                val hasExistingSheet = savedCharacters().firstOrNull { it.setId == currentSetId }?.sheetId != null
+                if (!hasExistingSheet || failures.isEmpty()) {
+                    val onDisk = current.scope.scriptFor(current.frames, PoseView.entries)
+                    val counts = onDisk.drawnCounts(drawnNow)
+                    val plan = PoseSheetPlanner.plan(
+                        id = currentSetId,
+                        name = current.subject.trim().ifBlank { "Character" },
+                        frameCounts = counts,
+                        cellSize = current.cellSize,
+                        views = onDisk.drawnViews(drawnNow)
+                            .ifEmpty { listOf(PoseView.FRONT) }
+                            .map { it.keySuffix to it.serves },
+                    )
+                    if (plan != null) {
+                        val packed = withContext(Dispatchers.Default) { composeSheet(currentSetId, plan) }
+                        if (packed != null) {
+                            autoPackedSheet = packed.sheet
+                            autoPackedMessage = " Packed into a ${packed.sheet.columns}x${packed.sheet.rows} sheet — ready to wear on the home screen!"
+                        }
+                    }
+                }
+            }
+
             _state.value = _state.value.copy(
                 busy = false,
                 currentStep = null,
                 attempt = 1,
                 waitingMs = 0L,
                 error = abandoned,
+                savedSheet = autoPackedSheet ?: _state.value.savedSheet,
+                characters = savedCharacters(),
                 message = when {
                     // Said plainly, because the failure is the same for every
                     // remaining frame and the person needs to fix one thing
                     // rather than read forty identical errors.
                     abandoned != null -> "Stopped after ${_state.value.completed} of " +
                         "${_state.value.total}. Nothing else would have worked either."
-                    failures.isEmpty() -> "Every pose drawn. Build the sheet."
+                    failures.isEmpty() -> "Every pose drawn.${autoPackedMessage ?: " Build the sheet."}"
                     else -> "${failures.size} pose${if (failures.size == 1) "" else "s"} " +
-                        "failed. Run it again to retry just those."
+                        "failed. Run it again to retry just those.${autoPackedMessage ?: " Poses drawn so far can be packed into a sheet now."}"
                 },
             )
         }
@@ -534,6 +566,7 @@ class PoseForgeViewModel(
                 _state.value.copy(
                     busy = false,
                     savedSheet = sheet,
+                    characters = savedCharacters(),
                     message = buildString {
                         append("Saved as a ${sheet.columns}x${sheet.rows} sheet at ")
                         // The frame size the sheet actually came out at, which
@@ -715,10 +748,7 @@ class PoseForgeViewModel(
  * which every monster wore the player's face. The choice is written into the
  * set id, so the art is filed where the game looks for that kind of actor.
  */
-enum class CharacterRole(val label: String, val namespace: String) {
-    HERO("Hero", SpriteNamespace.HERO),
-    ENEMY("Enemy", SpriteNamespace.MONSTER),
-}
+typealias CharacterRole = com.stratum.core.domain.character.CharacterRole
 
 /**
  * How many animations to draw.
@@ -829,7 +859,7 @@ data class PoseForgeUiState(
 
     val canBuildAnimations: Boolean get() = hasReference && !busy && providerConfigured
 
-    val canBuildSheet: Boolean get() = completed > 0 && !busy
+    val canBuildSheet: Boolean get() = (completed > 0 || drawn.isNotEmpty()) && !busy
 
     /** What is being drawn right now, in the words the model was given. */
     val currentLabel: String?

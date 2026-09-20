@@ -59,6 +59,7 @@ import com.stratum.core.domain.ai.SavedCharacter
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.PoseGuideMode
 import com.stratum.core.domain.sprite.PoseGuideStyle
+import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.SpriteValidation
 
 /**
@@ -218,8 +219,29 @@ fun PoseForgeContent(
 
         Notice(state.message, state.error, onDismiss)
 
+        if (state.setId != null && state.savedSheet == null && state.drawn.isNotEmpty() && !state.busy) {
+            Spacer(Modifier.height(Space.medium))
+            StratumPanel(
+                raised = false,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Poses are drawn for this character but not packed into a sprite sheet yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StratumTheme.colors.accent,
+                )
+                Spacer(Modifier.height(Space.small))
+                StratumAction(
+                    label = "Build sheet now",
+                    onClick = onBuildSheet,
+                    emphasis = ActionEmphasis.PRIMARY,
+                    enabled = state.canBuildSheet,
+                )
+            }
+        }
+
         Spacer(Modifier.height(Space.large))
-        SavedPanel(state, onOpenCharacter, onForgetCharacter)
+        SavedPanel(state, onOpenCharacter, onForgetCharacter, onBuildSheet)
 
         Spacer(Modifier.height(Space.medium))
         CharacterPanel(
@@ -259,6 +281,7 @@ private fun SavedPanel(
     state: PoseForgeUiState,
     onOpen: (SavedCharacter) -> Unit,
     onForget: (String) -> Unit,
+    onBuildSheet: () -> Unit,
 ) {
     if (state.characters.isEmpty()) return
     val colors = StratumTheme.colors
@@ -290,12 +313,28 @@ private fun SavedPanel(
                         // idea, not a character.
                         text = buildString {
                             append("${character.posesDrawn} pose(s)")
+                            if (SpriteNamespace.servesMonster(character.setId)) append(" · Enemy")
                             if (!character.hasReference) append(" · no reference")
                             if (character.sheetId != null) append(" · packed")
+                            else if (character.posesDrawn > 0) append(" · not packed")
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.inkMuted,
                     )
+                }
+                if (character.sheetId == null && character.posesDrawn > 0) {
+                    StratumAction(
+                        label = "Pack",
+                        onClick = {
+                            if (character.setId != state.setId) {
+                                onOpen(character)
+                            }
+                            onBuildSheet()
+                        },
+                        emphasis = ActionEmphasis.PRIMARY,
+                        enabled = !state.busy,
+                    )
+                    Spacer(Modifier.width(Space.small))
                 }
                 StratumAction(
                     label = "Open",
