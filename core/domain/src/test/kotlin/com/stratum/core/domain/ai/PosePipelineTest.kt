@@ -55,6 +55,38 @@ class PoseScriptTest {
         assertEquals(7, script.frameCounts().size)
     }
 
+    /**
+     * The words and the drawing have to describe the same pose.
+     *
+     * Every generated frame is sent as a stick figure diagram *and* a sentence,
+     * and the prompt tells the model to match the diagram exactly. The two come
+     * from different lists: the diagram from MocapPoses, which is authored at
+     * the six frames a sheet row holds, and the sentence from here, authored at
+     * twelve and thinned by taking every other one. That thinning lands on the
+     * authored poses only if there are exactly twice as many sentences as
+     * poses, and nothing said so -- so the lists drifted. Measured against each
+     * other, a six frame attack was being sent the diagram of its impact
+     * alongside the words "the top of the wind-up", and the sentence that
+     * actually says "impact" was never sent at all.
+     *
+     * Contradicting the diagram is worse than saying nothing: it is what turns
+     * a generated row into a set of poses with no relation to each other.
+     */
+    @Test
+    fun `there are two written poses for every drawn one, so thinning lands on them`() {
+        AnimationState.entries.forEach { state ->
+            val drawn = MocapPoses.framesFor(state).size
+            val written = PoseScript.of(listOf(state), mapOf(state to PoseScript.MAX_FRAMES))
+                .stepsFor(state).size
+            assertEquals(
+                drawn * 2,
+                written,
+                "$state has $written written poses for $drawn drawn ones, so asking for " +
+                    "$drawn frames takes every other sentence and misses the poses",
+            )
+        }
+    }
+
     @Test
     fun `an animation can be asked for more frames, and they are all different`() {
         AnimationState.entries.forEach { state ->
