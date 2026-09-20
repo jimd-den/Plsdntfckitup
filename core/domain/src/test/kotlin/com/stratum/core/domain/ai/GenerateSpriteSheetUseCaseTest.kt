@@ -1,6 +1,7 @@
 package com.stratum.core.domain.ai
 
 import com.stratum.core.domain.sprite.AnimationState
+import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.SpriteOrigin
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -31,7 +32,7 @@ class GenerateSpriteSheetUseCaseTest {
     fun `a returned image becomes a cuttable sheet`() = runTest {
         val model = FakeImageModel(Result.success(image(256, 256)))
         val result = GenerateSpriteSheetUseCase(model)(
-            SpriteSheetRequest(subject = "a bronze-masked warrior", namespace = "igbo"),
+            SpriteSheetRequest(subject = "a bronze-masked warrior", namespace = "igbo:"),
         ).getOrThrow()
 
         assertEquals("igbo:a_bronze_masked_warrior", result.sheet.id)
@@ -49,7 +50,7 @@ class GenerateSpriteSheetUseCaseTest {
         val result = GenerateSpriteSheetUseCase(model)(
             SpriteSheetRequest(
                 subject = "a bronze-masked warrior",
-                namespace = "action",
+                namespace = SpriteNamespace.ACTION,
                 layout = SheetLayout.action(AnimationState.WALK),
                 variant = "WALK",
             ),
@@ -74,7 +75,7 @@ class GenerateSpriteSheetUseCaseTest {
         val walk = use(
             SpriteSheetRequest(
                 subject = "a bronze-masked warrior",
-                namespace = "action",
+                namespace = SpriteNamespace.ACTION,
                 layout = SheetLayout.action(AnimationState.WALK),
                 variant = "WALK",
             ),
@@ -82,7 +83,7 @@ class GenerateSpriteSheetUseCaseTest {
         val attack = use(
             SpriteSheetRequest(
                 subject = "a bronze-masked warrior",
-                namespace = "action",
+                namespace = SpriteNamespace.ACTION,
                 layout = SheetLayout.action(AnimationState.ATTACK),
                 variant = "ATTACK",
             ),

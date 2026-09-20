@@ -41,4 +41,30 @@ class SpriteNamespaceTest {
         assertFalse(SpriteNamespace.isCharacter("weapon:alo_staff"))
         assertFalse(SpriteNamespace.isCharacter("prop:barrel"))
     }
+
+    @Test
+    fun `action sheets serve as heroes`() {
+        assertTrue(SpriteNamespace.servesHero("action:warrior_walk"))
+        assertTrue(SpriteNamespace.isCharacter("action:warrior_walk"))
+    }
+
+    @Test
+    fun `action sheets never serve as monsters`() {
+        assertFalse(SpriteNamespace.servesMonster("action:warrior_walk"))
+    }
+
+    @Test
+    fun `every sprite target lands in a known namespace`() {
+        SpriteTarget.entries.forEach { target ->
+            val id = "${target.namespace}probe"
+            // The classification must agree with the target's intent.
+            when (target) {
+                SpriteTarget.MONSTER ->
+                    assertTrue(SpriteNamespace.servesMonster(id))
+                else ->
+                    assertTrue(SpriteNamespace.servesHero(id))
+            }
+            assertTrue(SpriteNamespace.isCharacter(id))
+        }
+    }
 }

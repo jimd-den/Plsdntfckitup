@@ -367,16 +367,15 @@ object SpriteNamespace {
 
     const val HERO = "hero:"
     const val MONSTER = "monster:"
-
-    /** Characters generated before a character could say what it was for. */
     const val POSE = "pose:"
+    const val ACTION = "action:"
 
     fun servesHero(sheetId: String): Boolean =
-        sheetId.startsWith(HERO) || sheetId.startsWith(POSE)
+        sheetId.startsWith(HERO) || sheetId.startsWith(POSE) ||
+            sheetId.startsWith(ACTION)
 
     fun servesMonster(sheetId: String): Boolean = sheetId.startsWith(MONSTER)
 
-    /** Whether this is character art at all, rather than a prop or a weapon. */
     fun isCharacter(sheetId: String): Boolean =
         servesHero(sheetId) || servesMonster(sheetId)
 }

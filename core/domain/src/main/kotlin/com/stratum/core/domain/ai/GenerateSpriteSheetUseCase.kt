@@ -2,6 +2,7 @@ package com.stratum.core.domain.ai
 
 import com.stratum.core.domain.sprite.AnimationClip
 import com.stratum.core.domain.sprite.AnimationState
+import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.SpriteOrigin
 import com.stratum.core.domain.sprite.SpriteSheet
 
@@ -39,7 +40,7 @@ class GenerateSpriteSheetUseCase(
         }
 
         val sheet = SpriteSheet(
-            id = "${request.namespace}:${request.slug()}",
+            id = "${request.namespace}${request.slug()}",
             name = request.subject,
             columns = layout.columns,
             rows = layout.rows,
@@ -172,7 +173,7 @@ class GenerateSpriteSheetUseCase(
 data class SpriteSheetRequest(
     /** What to draw: "a bronze-masked warrior with a curved blade". */
     val subject: String,
-    val namespace: String = "generated",
+    val namespace: String = SpriteNamespace.POSE,
     val styleDirection: String = "",
     val layout: SheetLayout = SheetLayout.standard(),
     val modelId: String? = null,

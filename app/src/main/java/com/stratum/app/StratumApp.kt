@@ -317,15 +317,7 @@ fun StratumApp(
                 heroClasses = content.heroClasses,
                 selectedClassId = heroClassId ?: content.heroClasses.firstOrNull()?.id,
                 onSelectClass = { heroClassId = it },
-                characterSheets = remember(spriteSheets) {
-                    // Any character art, not only the hero-filed kind. Which
-                    // namespace a character landed in is a decision about what the
-                    // *world* does with it by default; picking one here is a
-                    // person saying outright "draw me as this", and refusing
-                    // because they had once labelled it an enemy would be the app
-                    // arguing with them about their own character.
-                    spriteSheets.filter { SpriteNamespace.isCharacter(it.id) }
-                },
+                characterSheets = remember(spriteSheets) { spriteSheets },
                 selectedSheetId = heroSheetId,
                 onSelectSheet = { id -> heroSheetId = if (heroSheetId == id) null else id },
                 idleFrameFor = heroPortrait,

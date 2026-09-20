@@ -27,6 +27,7 @@ import com.stratum.core.domain.sprite.PoseSheetPlan
 import com.stratum.core.domain.sprite.PoseSheetPlanner
 import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.SpriteSheet
+import com.stratum.core.domain.bvh.BandaiNamcoMotionDataset
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -166,6 +167,44 @@ class PoseForgeViewModel(
             return
         }
         acceptImported(step, pose)
+    }
+
+    /**
+     * Applies genuine optical motion capture reference frames from the Bandai Namco
+     * Research Motiondataset across all animation states of the current script.
+     */
+    fun applyBandaiNamcoMocap() {
+        val script = _state.value.script
+        val referenceFrames = BandaiNamcoMotionDataset.buildReferenceScript(script)
+        updateGuides { current ->
+            current.copy(
+                mode = PoseGuideMode.BANDAI_NAMCO,
+                imported = current.imported + referenceFrames,
+            )
+        }
+        _state.value = _state.value.copy(
+            message = "Applied Bandai Namco mocap reference frames for all animations.",
+            error = null,
+        )
+    }
+
+    /**
+     * Imports a BVH motion capture clip from raw text (such as clips from the Bandai
+     * Namco Research Motiondataset) for the targeted pose step.
+     */
+    fun importGuideBvh(step: PoseStep, text: String) {
+        val frameCount = _state.value.script.frameCounts()[step.state] ?: 6
+        val result = BandaiNamcoMotionDataset.buildFromBvh(text, frameCount)
+        val poses = result.getOrNull()
+        if (poses == null || poses.isEmpty()) {
+            val errorMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            _state.value = _state.value.copy(
+                error = "Could not parse BVH motion capture data: $errorMsg",
+            )
+            return
+        }
+        val targetPose = poses.getOrNull(step.index) ?: poses.first()
+        acceptImported(step, targetPose)
     }
 
     fun clearImported(step: PoseStep) = updateGuides { it.withoutImported(step.key) }

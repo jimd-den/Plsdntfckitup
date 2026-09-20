@@ -1,5 +1,7 @@
 package com.stratum.core.domain.sprite
 
+import com.stratum.core.domain.bvh.BandaiNamcoMotionDataset
+
 /** Where the pose for a frame comes from. */
 enum class PoseGuideMode(val label: String) {
     /**
@@ -24,6 +26,12 @@ enum class PoseGuideMode(val label: String) {
      * which is why imports are normalised and why the built-in set stays.
      */
     IMPORTED("Imported OpenPose"),
+
+    /**
+     * Genuine optical motion capture reference frames from the Bandai Namco
+     * Research Motiondataset (https://github.com/BandaiNamcoResearchInc/Bandai-Namco-Research-Motiondataset).
+     */
+    BANDAI_NAMCO("Bandai Namco mocap"),
 }
 
 /** How a guide is drawn. */
@@ -99,6 +107,8 @@ data class PoseGuides(
         PoseGuideMode.BUILT_IN -> builtIn(state, index, frameCount)
         PoseGuideMode.IMPORTED ->
             imported[PoseCell.keyOf(state, index)] ?: builtIn(state, index, frameCount)
+        PoseGuideMode.BANDAI_NAMCO ->
+            imported[PoseCell.keyOf(state, index)] ?: BandaiNamcoMotionDataset.poseFor(state, index, frameCount)
     }
 
     /**
@@ -119,6 +129,8 @@ data class PoseGuides(
         copy(imported = imported + (key to pose), mode = PoseGuideMode.IMPORTED)
 
     fun withoutImported(key: String): PoseGuides = copy(imported = imported - key)
+
+    fun withBandaiNamco(): PoseGuides = copy(mode = PoseGuideMode.BANDAI_NAMCO)
 
     private fun builtIn(state: AnimationState, index: Int, frameCount: Int): Pose =
         skeleton.pose(MocapPoses.poseFor(state, index, frameCount))

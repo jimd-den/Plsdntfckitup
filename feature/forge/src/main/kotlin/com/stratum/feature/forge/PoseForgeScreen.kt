@@ -653,6 +653,9 @@ private fun GuidePanel(
                 PoseGuideMode.IMPORTED ->
                     "${state.importedCount} of ${state.total} frames have an imported pose. " +
                         "The rest fall back to the built-in one."
+                PoseGuideMode.BANDAI_NAMCO ->
+                    "Genuine motion capture reference frames from the Bandai Namco Research " +
+                        "Motiondataset, solved with forward kinematics for this camera."
             },
             style = MaterialTheme.typography.labelSmall,
             color = colors.inkMuted,
