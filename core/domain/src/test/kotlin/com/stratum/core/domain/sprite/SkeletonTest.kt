@@ -214,6 +214,50 @@ class WeaponGripTest {
     }
 
     @Test
+    fun `a roll turns the whole body, and the tuck survives the trip`() {
+        // What went wrong before: limb angles are measured from straight down
+        // rather than from the torso, so leaning the spine past horizontal
+        // left the arms and legs hanging as though the character were still
+        // standing inside its own somersault. Rotating the finished body
+        // cannot do that -- whatever shape was authored is the shape that
+        // turns.
+        val frames = (0 until 6).map { skeleton.pose(MocapPoses.poseFor(AnimationState.ROLL, it, 6)) }
+
+        // Somewhere in the middle the head is below the hips, which is the one
+        // thing a roll has to contain.
+        assertTrue(
+            frames.any { it.require(Joint.HEAD).y > it.require(Joint.PELVIS).y },
+            "nothing in the roll ever went over",
+        )
+        // And it ends upright, or the character finishes the move face down.
+        val last = frames.last()
+        assertTrue(
+            last.require(Joint.HEAD).y < last.require(Joint.PELVIS).y,
+            "the roll never came back up",
+        )
+
+        // The tuck holds throughout: knees stay bent, so no frame is a body
+        // lying out flat in the middle of a somersault.
+        frames.take(4).forEach { pose ->
+            val thigh = pose.require(Joint.HIP_NEAR).distanceTo(pose.require(Joint.KNEE_NEAR))
+            val shin = pose.require(Joint.KNEE_NEAR).distanceTo(pose.require(Joint.FOOT_NEAR))
+            val straight = pose.require(Joint.HIP_NEAR).distanceTo(pose.require(Joint.FOOT_NEAR))
+            assertTrue(straight < (thigh + shin) * 0.9f, "a leg came straight mid-roll")
+        }
+    }
+
+    @Test
+    fun `turning the body cannot stretch it`() {
+        val tucked = PoseAngles(shoulderNear = 30f, elbowNear = 96f, bodyPitch = 137f)
+        val pose = skeleton.pose(tucked)
+        val upper = pose.require(Joint.SHOULDER_NEAR).distanceTo(pose.require(Joint.ELBOW_NEAR))
+        assertTrue(
+            upper <= skeleton.upperArm / IsoProjection.heightScale + 0.0005f,
+            "rotating the body stretched an arm to $upper",
+        )
+    }
+
+    @Test
     fun `an arm hanging down points the weapon down`() {
         val pose = skeleton.pose(PoseAngles(shoulderNear = 0f, elbowNear = 0f))
         assertEquals(180f, pose.weaponGrip().weaponDegrees, 0.5f)
