@@ -129,6 +129,30 @@ class SkeletonTest {
             assertTrue(it.x in 0f..1f && it.y in 0f..1f, "a joint left the frame: $it")
         }
     }
+
+    /**
+     * And so does every pose the pipeline actually draws.
+     *
+     * The check above only ever saw a figure standing at rest, which is the
+     * one pose that was never going to leave its frame. Drawn out, the
+     * attack's wind-up put a hand past the top edge and the death put one past
+     * the left, and both are the failure the ground clamp exists to prevent:
+     * a guide with a limb off the edge teaches the model to crop the
+     * character, and a cropped character is a sheet of amputees.
+     */
+    @Test
+    fun `every authored pose fits in its frame`() {
+        AnimationState.entries.forEach { state ->
+            MocapPoses.framesFor(state).forEachIndexed { index, angles ->
+                skeleton.pose(angles).joints.forEach { (joint, point) ->
+                    assertTrue(
+                        point.x in 0f..1f && point.y in 0f..1f,
+                        "$state frame $index puts $joint outside the frame at $point",
+                    )
+                }
+            }
+        }
+    }
 }
 
 class WeaponGripTest {

@@ -236,7 +236,7 @@ object MocapPoses {
         // needs the hand up and towards the FAR side, past vertical.
         PoseAngles(
             shoulderNearOut = 38f, shoulderFarOut = 24f,
-            shoulderNear = 200f, elbowNear = 16f, shoulderFar = 186f, elbowFar = 20f,
+            shoulderNear = 200f, elbowNear = 16f, shoulderFar = 154f, elbowFar = 36f,
             hipNear = 12f, kneeNear = -8f, hipFar = -16f, kneeFar = 14f,
             lean = -10f, headTilt = -4f,
         ),
@@ -413,48 +413,67 @@ object MocapPoses {
         // came out as a knot -- the limbs were angled from straight down while
         // the spine was bent past horizontal, so they hung as though the
         // character were still standing up inside its own somersault.
+        //
+        // And then the tuck itself was backwards, which measuring could not
+        // see and drawing could. Every frame stepped an even distance from the
+        // last, so the numbers said it flowed -- but the hips swung fifty
+        // degrees *aft* with the knees thrown a hundred forward, which is a
+        // body arched backwards with its shins kicked out, and the arms went
+        // opposite ways because the near and far sides were given opposite
+        // signs. Fore and aft is the same sign on both sides here; only the
+        // outward lift mirrors. So the middle of the somersault read as a
+        // starfish tumbling rather than as a ball.
+        //
+        // A tuck is knees to the chest and heels to the seat: hips well
+        // forward, knees folded back past them, arms reaching down and in
+        // around the shins, spine curled, chin down.
         PoseAngles(
-            shoulderNear = 30f, elbowNear = 96f, shoulderFar = -26f, elbowFar = -96f,
-            shoulderNearOut = 16f, shoulderFarOut = 16f,
-            hipNear = -38f, kneeNear = 88f, hipFar = -42f, kneeFar = 92f,
+            // Going in. Crouched and gathering, not yet closed up.
+            shoulderNear = 52f, elbowNear = -14f, shoulderFar = 48f, elbowFar = -10f,
+            shoulderNearOut = 12f, shoulderFarOut = 12f,
+            hipNear = 72f, kneeNear = -88f, hipFar = 70f, kneeFar = -92f,
             hipNearOut = 10f, hipFarOut = 10f,
-            bodyPitch = 20f, headTilt = 14f, driftY = 0.09f,
+            bodyPitch = 20f, lean = 30f, headTilt = 30f, driftY = 0.09f,
         ),
         PoseAngles(
-            shoulderNear = 34f, elbowNear = 108f, shoulderFar = -30f, elbowFar = -108f,
-            shoulderNearOut = 14f, shoulderFarOut = 14f,
-            hipNear = -52f, kneeNear = 104f, hipFar = -56f, kneeFar = 108f,
-            hipNearOut = 8f, hipFarOut = 8f,
-            bodyPitch = 95f, driftY = 0.13f,
+            shoulderNear = 72f, elbowNear = -26f, shoulderFar = 68f, elbowFar = -22f,
+            shoulderNearOut = 6f, shoulderFarOut = 6f,
+            hipNear = 110f, kneeNear = -118f, hipFar = 106f, kneeFar = -122f,
+            hipNearOut = 10f, hipFarOut = 10f,
+            bodyPitch = 95f, lean = 40f, headTilt = 38f, driftY = 0.13f,
         ),
         PoseAngles(
-            shoulderNear = 36f, elbowNear = 112f, shoulderFar = -32f, elbowFar = -112f,
-            shoulderNearOut = 12f, shoulderFarOut = 12f,
-            hipNear = -56f, kneeNear = 108f, hipFar = -60f, kneeFar = 112f,
-            hipNearOut = 8f, hipFarOut = 8f,
-            bodyPitch = 180f, driftY = 0.155f,
+            // Over the top, and the tightest the ball gets.
+            shoulderNear = 76f, elbowNear = -28f, shoulderFar = 72f, elbowFar = -24f,
+            shoulderNearOut = 5f, shoulderFarOut = 5f,
+            hipNear = 116f, kneeNear = -124f, hipFar = 112f, kneeFar = -128f,
+            hipNearOut = 10f, hipFarOut = 10f,
+            bodyPitch = 180f, lean = 42f, headTilt = 40f, driftY = 0.155f,
         ),
         PoseAngles(
-            shoulderNear = 34f, elbowNear = 100f, shoulderFar = -30f, elbowFar = -100f,
-            shoulderNearOut = 12f, shoulderFarOut = 12f,
-            hipNear = -48f, kneeNear = 96f, hipFar = -52f, kneeFar = 100f,
-            hipNearOut = 8f, hipFarOut = 8f,
-            bodyPitch = 265f, driftY = 0.12f,
+            shoulderNear = 70f, elbowNear = -24f, shoulderFar = 66f, elbowFar = -20f,
+            shoulderNearOut = 6f, shoulderFarOut = 6f,
+            hipNear = 106f, kneeNear = -114f, hipFar = 102f, kneeFar = -118f,
+            hipNearOut = 10f, hipFarOut = 10f,
+            bodyPitch = 265f, lean = 38f, headTilt = 34f, driftY = 0.12f,
         ),
         // Out of the roll and onto a knee, the body nearly upright again.
         PoseAngles(
-            shoulderNear = 26f, elbowNear = 44f, shoulderFar = -20f, elbowFar = 40f,
+            shoulderNear = 34f, elbowNear = 22f, shoulderFar = -18f, elbowFar = 26f,
             shoulderNearOut = 14f, shoulderFarOut = 12f,
-            hipNear = 34f, kneeNear = -62f, hipFar = -28f, kneeFar = 80f,
+            hipNear = 44f, kneeNear = -72f, hipFar = -30f, kneeFar = 86f,
             hipNearOut = 8f, hipFarOut = 6f,
-            bodyPitch = 330f, lean = 18f, driftY = 0.06f,
+            bodyPitch = 330f, lean = 20f, headTilt = 12f, driftY = 0.06f,
         ),
-        // Standing, weight still carrying forward.
+        // Standing, weight still carrying forward. A full turn rather than
+        // none, so a clip stretched to a different frame count finishes the
+        // revolution instead of unwinding back through it.
         PoseAngles(
             shoulderNear = 12f, elbowNear = 10f, shoulderFar = -12f, elbowFar = 6f,
             shoulderNearOut = ARMS_CLEAR, shoulderFarOut = ARMS_CLEAR,
             hipNear = 12f, kneeNear = -8f, hipFar = -10f, kneeFar = 14f,
-            lean = 5f, driftY = 0.01f,
+            hipNearOut = 0f, hipFarOut = 0f,
+            bodyPitch = 360f, lean = 5f, headTilt = 0f, driftY = 0.01f,
         ),
     )
 
@@ -491,18 +510,18 @@ object MocapPoses {
         // Settling: one arm falling further out, the body a little flatter.
         PoseAngles(
             shoulderNear = -70f, elbowNear = 24f, shoulderFar = -108f, elbowFar = -16f,
-            shoulderNearOut = 54f, shoulderFarOut = 44f,
+            shoulderNearOut = 20f, shoulderFarOut = 42f,
             hipNear = -76f, kneeNear = 26f, hipFar = -100f, kneeFar = 18f,
-            hipNearOut = 30f, hipFarOut = 24f,
+            hipNearOut = 18f, hipFarOut = 22f,
             lean = 82f, headTilt = 10f, driftY = 0.31f,
         ),
         // At rest. Still not a single horizontal line, for the same reason the
         // frame before it is not: a body has to stay readable as a body.
         PoseAngles(
             shoulderNear = -78f, elbowNear = 18f, shoulderFar = -112f, elbowFar = -12f,
-            shoulderNearOut = 58f, shoulderFarOut = 48f,
+            shoulderNearOut = 16f, shoulderFarOut = 46f,
             hipNear = -82f, kneeNear = 16f, hipFar = -104f, kneeFar = 10f,
-            hipNearOut = 32f, hipFarOut = 26f,
+            hipNearOut = 19f, hipFarOut = 24f,
             lean = 85f, headTilt = 8f, driftY = 0.33f,
         ),
     )
