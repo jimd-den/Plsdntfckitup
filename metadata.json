@@ -1,0 +1,8 @@
+{
+  "name": "Igbo ARPG Engine",
+  "description": "Clean architecture ARPG game engine with Diablo 1-4 Chameleon HUD, AI Theme Weaver, OpenRouter sprite sheet studio, and authentic Igbo-Ukwu bronze art.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
