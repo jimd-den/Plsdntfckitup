@@ -20,7 +20,9 @@ class ClipSamplingTest {
      */
     @Test
     fun `a looping clip leaves room for the step back to its first frame`() {
-        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 12)
+        // Over the whole clip, because this is about the spacing rule rather
+        // than about how much of a clip holds its facing.
+        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 12, usableFraction = 1f)
 
         assertEquals(12, cuts.size)
         assertEquals(0f, cuts.first().fraction)
@@ -43,7 +45,7 @@ class ClipSamplingTest {
      */
     @Test
     fun `a one-shot clip runs all the way to its end`() {
-        val cuts = ClipSampling.cutsFor(AnimationState.DIE, 12)
+        val cuts = ClipSampling.cutsFor(AnimationState.DIE, 12, usableFraction = 1f)
 
         assertEquals(0f, cuts.first().fraction)
         assertEquals(1f, cuts.last().fraction, 1e-5f)
@@ -157,7 +159,7 @@ class ClipSeekTest {
      */
     @Test
     fun `a cut at the end of a clip seeks just inside it`() {
-        val end = ClipSampling.cutsFor(AnimationState.DIE, 12).last()
+        val end = ClipSampling.cutsFor(AnimationState.DIE, 12, usableFraction = 1f).last()
 
         assertEquals(1f, end.fraction, 1e-5f)
         assertEquals(1999L, ClipSampling.millisFor(end, 2000L))
@@ -165,7 +167,7 @@ class ClipSeekTest {
 
     @Test
     fun `cuts land evenly through the clip`() {
-        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 4)
+        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 4, usableFraction = 1f)
 
         assertEquals(
             listOf(0L, 500L, 1000L, 1500L),
@@ -176,7 +178,7 @@ class ClipSeekTest {
     /** A clip whose container would not say how long it is cannot be cut at all. */
     @Test
     fun `a clip with no duration seeks nowhere`() {
-        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 4)
+        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 4, usableFraction = 1f)
 
         assertTrue(cuts.all { ClipSampling.millisFor(it, 0L) == 0L })
     }
@@ -213,5 +215,102 @@ class ClipRequestTest {
     @Test
     fun `a clip is asked for without audio`() {
         assertFalse(ClipRequest(prompt = "walk").generateAudio)
+    }
+}
+
+class ClipWindowTest {
+
+    /**
+     * Frames are cut from the opening of a clip, not across all of it.
+     *
+     * Measured against real generated video: a four second walk holds its
+     * facing for about eight tenths of a second and then the character starts
+     * to rotate, showing its back by halfway. Two attempts, the second with a
+     * prompt stating outright that the character never turns, both did it. The
+     * four second floor is the cause -- a walk cycle is about a second, so the
+     * model is given five times what the animation needs and fills the rest by
+     * inventing a turntable.
+     *
+     * Cutting twelve frames across the whole clip gives two usable ones and
+     * ten of a character turning round.
+     */
+    @Test
+    fun `cuts stay inside the part of a clip that holds its facing`() {
+        val cuts = ClipSampling.cutsFor(AnimationState.WALK, 12)
+
+        assertTrue(
+            cuts.all { it.fraction <= ClipSampling.USABLE_FRACTION },
+            "a cut landed past the point the character starts turning: " +
+                cuts.map { it.fraction },
+        )
+        // A four second clip, so every cut lands inside the first eight tenths
+        // of a second -- before the turn, whatever the frame count.
+        assertTrue(
+            cuts.all { ClipSampling.millisFor(it, 4000L) < 800L },
+            "a cut landed after the turn begins: " + cuts.map { ClipSampling.millisFor(it, 4000L) },
+        )
+    }
+
+    /** The whole clip is still available for callers that know it is usable. */
+    @Test
+    fun `a caller can ask for the whole clip`() {
+        val cuts = ClipSampling.cutsFor(12, cycle = true, usableFraction = 1f)
+
+        assertEquals(11f / 12f, cuts.last().fraction, 1e-5f)
+    }
+}
+
+class ClipFrameRateTest {
+
+    /**
+     * How many frames a row holds falls out of the clip and the rate.
+     *
+     * Rather than being a number somebody picks, which is the thing nobody can
+     * reason about: twelve frames of a walk means nothing on its own, and
+     * twelve frames a second means the walk plays at twelve frames a second.
+     * It is also how the same clip yields a different sheet without the model
+     * being asked anything — the expensive artefact is the footage, and re-cutting
+     * it is free.
+     */
+    @Test
+    fun `the frame count comes from the rate and the usable window`() {
+        // Four seconds, a fifth of it usable, so eight tenths of a second.
+        assertEquals(9, ClipSampling.cutsAtRate(4000L, fps = 12, cycle = true).size)
+        assertEquals(19, ClipSampling.cutsAtRate(4000L, fps = 24, cycle = true).size)
+        // Doubling the rate doubles the frames, which is the whole point.
+        assertEquals(4, ClipSampling.cutsAtRate(4000L, fps = 6, cycle = true).size)
+    }
+
+    /** A rate nobody can use is clamped rather than obeyed. */
+    @Test
+    fun `an unusable rate is brought back into range`() {
+        assertEquals(
+            ClipSampling.cutsAtRate(4000L, ClipSampling.MIN_FPS, cycle = true).size,
+            ClipSampling.cutsAtRate(4000L, fps = 1, cycle = true).size,
+        )
+        assertEquals(
+            ClipSampling.cutsAtRate(4000L, ClipSampling.MAX_FPS, cycle = true).size,
+            ClipSampling.cutsAtRate(4000L, fps = 600, cycle = true).size,
+        )
+    }
+
+    /**
+     * A row never asks for more cells than a sheet can hold.
+     *
+     * A sheet has to fit one texture and a row is as wide as its longest
+     * animation, so an unbounded count would have the planner shrink every
+     * cell to nothing to make the thing fit.
+     */
+    @Test
+    fun `a long clip at a high rate is capped`() {
+        val cuts = ClipSampling.cutsAtRate(60_000L, fps = 30, cycle = true, usableFraction = 1f)
+
+        assertEquals(ClipSampling.MAX_FRAMES, cuts.size)
+    }
+
+    /** Nothing can be cut from a clip whose length is unknown. */
+    @Test
+    fun `a clip with no duration yields no frames`() {
+        assertTrue(ClipSampling.cutsAtRate(0L, fps = 12, cycle = true).isEmpty())
     }
 }

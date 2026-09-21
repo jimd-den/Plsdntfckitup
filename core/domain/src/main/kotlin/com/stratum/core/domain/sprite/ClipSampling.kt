@@ -88,17 +88,127 @@ object ClipSampling {
      * plausible rather than the ones that were written. For a cycle both ends
      * are the *same* drawing, which is what closes the loop.
      */
-    fun cutsFor(state: AnimationState, count: Int): List<ClipCut> =
-        cutsFor(count, cycle = state in MocapPoses.cycles)
+    fun cutsFor(
+        state: AnimationState,
+        count: Int,
+        usableFraction: Float = USABLE_FRACTION,
+    ): List<ClipCut> =
+        cutsFor(count, cycle = state in MocapPoses.cycles, usableFraction = usableFraction)
 
-    fun cutsFor(count: Int, cycle: Boolean): List<ClipCut> {
+    fun cutsFor(
+        count: Int,
+        cycle: Boolean,
+        usableFraction: Float = USABLE_FRACTION,
+    ): List<ClipCut> {
         if (count <= 0) return emptyList()
         if (count == 1) return listOf(ClipCut(0, 0f))
+        val window = usableFraction.coerceIn(0f, 1f)
         val intervals = if (cycle) count else count - 1
         return (0 until count).map { index ->
-            ClipCut(index, (index.toFloat() / intervals).coerceIn(0f, 1f))
+            ClipCut(index, (index.toFloat() / intervals * window).coerceIn(0f, 1f))
         }
     }
+
+    /**
+     * How much of a generated clip is worth cutting from.
+     *
+     * Measured, and the measurement was a surprise. A walk generated from a
+     * pinned first and last frame came back with the scale rock steady, the
+     * gait natural and the character identical throughout -- every complaint
+     * the separately generated stills had -- and then, about eight tenths of a
+     * second in, the figure began to rotate. By halfway it was showing its
+     * back. A second attempt, whose prompt said in as many words that the
+     * character never turns and never shows its back, and which pinned both
+     * ends to the same drawing, turned sooner.
+     *
+     * The cause is the four second floor. A walk cycle is about a second, and
+     * nothing sells less than four, so the model is handed five times the
+     * footage the animation needs and fills the rest by inventing -- and what
+     * it invents is a turntable. That is fatal for a sprite row, which is
+     * defined by holding one facing.
+     *
+     * So only the opening is cut from, and the rest is paid for and discarded.
+     * That is not waste to be optimised away: it is the shape of the purchase.
+     * Cutting the same twelve frames across the whole four seconds gives two
+     * usable frames and ten of a character turning round.
+     */
+    const val USABLE_FRACTION = 0.2f
+
+    /**
+     * Cuts for a clip at a chosen frame rate.
+     *
+     * The frame count stops being a number anybody picks. A clip is a length of
+     * footage, a frame rate is how finely it is sliced, and how many frames
+     * come out falls out of the two — which is how animation has always been
+     * counted, and it is the thing a person can actually reason about. Twelve
+     * frames of a walk means nothing on its own; twelve frames a second means
+     * the walk plays at twelve frames a second.
+     *
+     * Bounded at both ends. Below [MIN_FPS] the result is a slideshow rather
+     * than a walk, and above [MAX_FPS] the frames are closer together than the
+     * model drew distinct ones, so the sheet grows without the animation
+     * improving. [MAX_FRAMES] is the harder stop: a row has to fit a sheet that
+     * fits a texture, and a long clip at a high rate would otherwise ask for
+     * hundreds of cells.
+     */
+    fun cutsAtRate(
+        durationMillis: Long,
+        fps: Int,
+        cycle: Boolean,
+        usableFraction: Float = USABLE_FRACTION,
+    ): List<ClipCut> {
+        if (durationMillis <= 0L) return emptyList()
+        val rate = fps.coerceIn(MIN_FPS, MAX_FPS)
+        val window = usableFraction.coerceIn(0f, 1f)
+        val usableMillis = durationMillis * window
+        val count = (usableMillis * rate / MILLIS_PER_SECOND)
+            .toInt()
+            .coerceIn(1, MAX_FRAMES)
+        return cutsFor(count, cycle, window)
+    }
+
+    fun cutsAtRate(
+        state: AnimationState,
+        durationMillis: Long,
+        fps: Int,
+        usableFraction: Float = USABLE_FRACTION,
+    ): List<ClipCut> =
+        cutsAtRate(durationMillis, fps, state in MocapPoses.cycles, usableFraction)
+
+    /** How many frames a rate will produce, for a screen that has to say so before spending. */
+    fun frameCountAtRate(
+        durationMillis: Long,
+        fps: Int,
+        usableFraction: Float = USABLE_FRACTION,
+    ): Int = cutsAtRate(durationMillis, fps, cycle = true, usableFraction = usableFraction).size
+
+    /**
+     * Twelve frames a second.
+     *
+     * The rate hand-drawn animation has used for a century: fast enough to
+     * read as movement, slow enough that each frame is a pose somebody chose.
+     * It is also close to what a four second clip yields inside the window
+     * that holds its facing, so the default costs one clip and fills a row.
+     */
+    const val DEFAULT_FPS = 12
+
+    /** Below this a walk is a slideshow. */
+    const val MIN_FPS = 6
+
+    /** Above this the frames are closer together than the model drew distinct ones. */
+    const val MAX_FPS = 30
+
+    /**
+     * The most cells a row can hold.
+     *
+     * A sheet has to fit in one texture, and a row is as wide as its longest
+     * animation. Left unbounded, eight seconds at thirty frames a second would
+     * ask for two hundred and forty columns and the planner would shrink every
+     * cell to nothing to make it fit.
+     */
+    const val MAX_FRAMES = 32
+
+    private const val MILLIS_PER_SECOND = 1000f
 
     /**
      * Cuts for clips generated one authored beat at a time.

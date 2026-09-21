@@ -135,6 +135,10 @@ fun PoseForgeScreen(
         onForgetCharacter = viewModel::forgetCharacter,
         onExportSheet = viewModel::exportSheet,
         onExportPoses = viewModel::exportPoses,
+        onExportReference = viewModel::exportReference,
+        onFrameRateChange = viewModel::setFrameRate,
+        onBasePromptChange = viewModel::editBasePrompt,
+        onResetBasePrompt = viewModel::resetBasePrompt,
         onDismiss = viewModel::dismissMessage,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
@@ -163,6 +167,10 @@ fun PoseForgeContent(
     onForgetCharacter: (String) -> Unit = {},
     onExportSheet: () -> Unit = {},
     onExportPoses: () -> Unit = {},
+    onExportReference: () -> Unit = {},
+    onFrameRateChange: (Int) -> Unit = {},
+    onBasePromptChange: (String) -> Unit = {},
+    onResetBasePrompt: () -> Unit = {},
     onGuideModeChange: (PoseGuideMode) -> Unit = {},
     onGuideStyleChange: (PoseGuideStyle) -> Unit = {},
     onClearImported: (PoseStep) -> Unit = {},
@@ -246,7 +254,7 @@ fun PoseForgeContent(
         Spacer(Modifier.height(Space.medium))
         CharacterPanel(
             state, onSubjectChange, onStyleChange, onScopeChange, onRoleChange,
-            onFramesChange, onAwayViewChange,
+            onFramesChange, onAwayViewChange, onBasePromptChange, onResetBasePrompt,
         )
 
         Spacer(Modifier.height(Space.medium))
@@ -262,7 +270,10 @@ fun PoseForgeContent(
         )
 
         Spacer(Modifier.height(Space.medium))
-        SheetPanel(state, sheetImage, onCellSizeChange, onBuildSheet, onExportSheet, onExportPoses)
+        SheetPanel(
+            state, sheetImage, onCellSizeChange, onBuildSheet, onExportSheet, onExportPoses,
+            onExportReference, onFrameRateChange,
+        )
 
         Spacer(Modifier.height(Space.huge))
     }
@@ -364,6 +375,8 @@ private fun CharacterPanel(
     onRoleChange: (CharacterRole) -> Unit,
     onFramesChange: (AnimationState, Int) -> Unit,
     onAwayViewChange: (Boolean) -> Unit,
+    onBasePromptChange: (String) -> Unit,
+    onResetBasePrompt: () -> Unit,
 ) {
     val colors = StratumTheme.colors
 
@@ -422,6 +435,38 @@ private fun CharacterPanel(
             label = { Text("Style") },
             enabled = !state.busy,
             singleLine = false,
+        )
+
+        // The prompt the reference is drawn from, shown rather than hidden.
+        // Every frame of every animation is an edit of that one drawing, so
+        // whatever the prompt gets wrong is inherited forty times -- and while
+        // it was private, a character that came back wrong could only be
+        // regenerated and hoped over, never corrected.
+        Spacer(Modifier.height(Space.small))
+        OutlinedTextField(
+            value = state.basePrompt,
+            onValueChange = onBasePromptChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(if (state.basePromptEdited) "Reference prompt (edited)" else "Reference prompt") },
+            enabled = !state.busy,
+            singleLine = false,
+            maxLines = 8,
+        )
+        Spacer(Modifier.height(Space.small))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+            StratumAction(
+                label = "Reset prompt",
+                onClick = onResetBasePrompt,
+                emphasis = ActionEmphasis.QUIET,
+                enabled = !state.busy && state.basePromptEdited,
+            )
+        }
+        Spacer(Modifier.height(Space.small))
+        Text(
+            text = "The reference is the one drawing every pose is edited from. Clearing " +
+                "this field puts the built-in prompt back, so an edit can always be undone.",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
         )
 
         Spacer(Modifier.height(Space.medium))
@@ -879,6 +924,8 @@ private fun SheetPanel(
     onBuildSheet: () -> Unit,
     onExportSheet: () -> Unit,
     onExportPoses: () -> Unit,
+    onExportReference: () -> Unit,
+    onFrameRateChange: (Int) -> Unit,
 ) {
     val colors = StratumTheme.colors
 
@@ -900,6 +947,28 @@ private fun SheetPanel(
                     label = "${pixels}px",
                     selected = state.cellSize == pixels,
                     onClick = { onCellSizeChange(pixels) },
+                )
+            }
+        }
+
+        // The rate rather than a count. How many cells a row ends up with
+        // falls out of the rate and the length of the clip, which is also what
+        // lets one clip be re-cut into a different sheet for nothing.
+        Spacer(Modifier.height(Space.small))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.small),
+        ) {
+            Text(
+                text = "Frame rate",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+            )
+            PoseForgeViewModel.FRAME_RATES.forEach { fps ->
+                StratumChip(
+                    label = "$fps fps",
+                    selected = state.frameRate == fps,
+                    onClick = { onFrameRateChange(fps) },
                 )
             }
         }
@@ -954,6 +1023,15 @@ private fun SheetPanel(
                 onClick = onExportPoses,
                 emphasis = ActionEmphasis.QUIET,
                 enabled = !state.busy && state.drawn.isNotEmpty(),
+            )
+            // The reference is in neither of the other two: it is not a frame
+            // and it is not in the sheet, and it is the drawing the whole
+            // character depends on.
+            StratumAction(
+                label = "Export reference",
+                onClick = onExportReference,
+                emphasis = ActionEmphasis.QUIET,
+                enabled = !state.busy && state.hasReference,
             )
         }
         Spacer(Modifier.height(Space.small))

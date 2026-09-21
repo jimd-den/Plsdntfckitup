@@ -16,6 +16,7 @@ import com.stratum.core.domain.ai.PoseStep
 import com.stratum.core.domain.ai.PoseView
 import com.stratum.core.domain.ai.SavedCharacter
 import com.stratum.core.domain.character.CharacterRole
+import com.stratum.core.domain.sprite.ClipSampling
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.PackedSheet
 import com.stratum.core.domain.sprite.Pose
@@ -82,6 +83,12 @@ class PoseForgeViewModel(
     private val exportSheet: (String, String) -> Boolean,
     /** Writes every full-size pose out as one archive. */
     private val exportPoses: (String, String) -> Boolean,
+    /** Writes the T-pose the whole character is an edit of. */
+    private val exportReference: (String, String) -> Boolean,
+    /** Writes the clip an animation was cut from, which the sheet only samples. */
+    private val exportClip: (String, String, String) -> Boolean,
+    /** Which animations have a clip on disk and can be re-cut without paying again. */
+    private val clipsDrawn: (String) -> Set<String>,
     private val isProviderConfigured: () -> Boolean,
 ) : ViewModel() {
 
@@ -314,7 +321,11 @@ class PoseForgeViewModel(
         _state.value = current.copy(busy = true, error = null, message = null, savedSheet = null)
         job = viewModelScope.launch {
             val result = drawReference(
-                BasePoseRequest(subject = current.subject.trim(), styleDirection = current.style),
+                BasePoseRequest(
+                    subject = current.subject.trim(),
+                    styleDirection = current.style,
+                    promptOverride = current.promptOverride,
+                ),
                 GenerationObserver.None,
             )
             _state.value = result.fold(
@@ -711,6 +722,73 @@ class PoseForgeViewModel(
         }
     }
 
+    /**
+     * How finely to cut a clip.
+     *
+     * Clamped to what reads as animation: below the floor it is a slideshow,
+     * and above the ceiling the frames are closer together than the model drew
+     * distinct ones, so the sheet grows without the walk improving.
+     */
+    fun setFrameRate(fps: Int) {
+        _state.value = _state.value.copy(
+            frameRate = fps.coerceIn(ClipSampling.MIN_FPS, ClipSampling.MAX_FPS),
+        )
+    }
+
+    /** Edits the reference prompt. Blank clears back to the built-in one. */
+    fun editBasePrompt(text: String) {
+        _state.value = _state.value.copy(promptOverride = text.takeIf { it.isNotBlank() })
+    }
+
+    /** Puts the built-in prompt back, which is what clearing the field means. */
+    fun resetBasePrompt() {
+        _state.value = _state.value.copy(promptOverride = null, message = "Prompt reset.")
+    }
+
+    /**
+     * Writes out the T-pose the character is built from.
+     *
+     * Separate from the sheet because it is not in the sheet: every animation
+     * frame is an edit of this one drawing and none of them is it, so until
+     * now the one image the character actually depends on was the one image
+     * that could not leave.
+     */
+    fun exportReference() {
+        val setId = _state.value.setId
+        if (setId == null || !_state.value.hasReference) {
+            _state.value = _state.value.copy(error = "There is no reference to export yet.")
+            return
+        }
+        val name = _state.value.subject.trim().ifBlank { "character" }
+        _state.value = if (exportReference(setId, name)) {
+            _state.value.copy(message = "Reference exported.", error = null)
+        } else {
+            _state.value.copy(error = "The reference could not be exported.")
+        }
+    }
+
+    /**
+     * Writes out the clip an animation was cut from.
+     *
+     * The sheet is a sampling of this and a coarse one -- four seconds holds
+     * nearly a hundred pictures and a twelve frame row takes ten. Anyone who
+     * wants the motion rather than the grid, or who wants to re-cut it
+     * somewhere better than a fixed cell, needs the clip.
+     */
+    fun exportClip(key: String) {
+        val setId = _state.value.setId
+        if (setId == null || key !in _state.value.clips) {
+            _state.value = _state.value.copy(error = "There is no clip for that animation.")
+            return
+        }
+        val name = _state.value.subject.trim().ifBlank { "character" }
+        _state.value = if (exportClip(setId, name, key)) {
+            _state.value.copy(message = "Clip exported.", error = null)
+        } else {
+            _state.value.copy(error = "The clip could not be exported.")
+        }
+    }
+
     fun exportPoses() {
         val setId = _state.value.setId
         if (setId == null || _state.value.drawn.isEmpty()) {
@@ -745,6 +823,16 @@ class PoseForgeViewModel(
          */
         val CELL_SIZES = listOf(96, 128, 192, 256, 384)
 
+        /**
+         * The rates offered.
+         *
+         * Twelve is the default and the one hand-drawn animation has used for a
+         * century. Six is for a sheet that has to stay small, and twenty-four is
+         * for motion smooth enough to bear slowing down -- past which the frames
+         * are closer together than the model drew distinct ones.
+         */
+        val FRAME_RATES = listOf(6, 8, 12, 16, 24)
+
         fun factory(
             drawReference: suspend (BasePoseRequest, GenerationObserver) -> Result<GeneratedImage>,
             drawPose: suspend (PoseFrameRequest, GenerationObserver) -> Result<GeneratedImage>,
@@ -764,6 +852,9 @@ class PoseForgeViewModel(
             deleteCharacter: (String) -> Unit = {},
             exportSheet: (String, String) -> Boolean = { _, _ -> false },
             exportPoses: (String, String) -> Boolean = { _, _ -> false },
+            exportReference: (String, String) -> Boolean = { _, _ -> false },
+            exportClip: (String, String, String) -> Boolean = { _, _, _ -> false },
+            clipsDrawn: (String) -> Set<String> = { emptySet() },
             isProviderConfigured: () -> Boolean,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -771,7 +862,7 @@ class PoseForgeViewModel(
                 drawReference, drawPose, guideFor, readGuideImage, readGuideJson, loadGuides,
                 saveGuides, saveReference, loadReference, hasReference, savePose, dropPose,
                 posesDrawn, composeSheet, savedCharacters, deleteCharacter, exportSheet,
-                exportPoses, isProviderConfigured,
+                exportPoses, exportReference, exportClip, clipsDrawn, isProviderConfigured,
             ) as T
         }
     }
@@ -856,6 +947,27 @@ data class PoseForgeUiState(
      */
     val drawsAwayView: Boolean = false,
     val cellSize: Int = PoseSheetPlanner.DEFAULT_CELL,
+    /**
+     * Frames a second a clip is cut into.
+     *
+     * The rate rather than the count, because a count is a number nobody can
+     * reason about: twelve frames of a walk means nothing on its own, and
+     * twelve frames a second means the walk plays at twelve frames a second.
+     * How many cells the row ends up with falls out of the rate and the length
+     * of the clip, which is also what lets the same clip be re-cut into a
+     * different sheet without the model being asked anything again.
+     */
+    val frameRate: Int = ClipSampling.DEFAULT_FPS,
+    /**
+     * An edited reference prompt, or null for the built-in one.
+     *
+     * Null rather than a copy of the default, so the default can be improved
+     * later without every character that never touched the field being stuck
+     * on the old wording.
+     */
+    val promptOverride: String? = null,
+    /** Animations with a clip saved, which can be re-cut for nothing. */
+    val clips: Set<String> = emptySet(),
     val setId: String? = null,
     val hasReference: Boolean = false,
     /** Pose keys already on disk. */
@@ -878,6 +990,23 @@ data class PoseForgeUiState(
 ) {
     val views: List<PoseView>
         get() = if (drawsAwayView) listOf(PoseView.FRONT, PoseView.AWAY) else listOf(PoseView.FRONT)
+
+    /**
+     * The prompt that would be sent, default or edited.
+     *
+     * What the editor shows when it opens. The default used to be unreachable
+     * from here, so the one prompt every frame of every animation is an edit of
+     * was the one prompt nobody could read.
+     */
+    val basePrompt: String
+        get() = BasePoseRequest(
+            subject = subject.trim(),
+            styleDirection = style,
+            promptOverride = promptOverride,
+        ).prompt
+
+    /** True once the prompt has been changed from the built-in one. */
+    val basePromptEdited: Boolean get() = !promptOverride.isNullOrBlank()
 
     val script: PoseScript get() = scope.scriptFor(frames, views)
 
