@@ -180,6 +180,18 @@ data class ProviderConfig(
      * swap a single field between tasks is a trap.
      */
     val imageModel: String = "meta/muse-image",
+    /**
+     * Its own field again, and for a harder reason than [imageModel] had.
+     *
+     * Video models are not in the model list at all. /models enumerates output
+     * modalities as text, image and audio across every entry it returns, and
+     * video appears only as an *input* — the video models live behind
+     * /videos/models, a separate catalogue with its own durations, sizes and
+     * prices. So a field shared with the image model could not even be filled
+     * from the same listing, and anything that tried to validate one against
+     * the other would decide every video model was imaginary.
+     */
+    val videoModel: String = "bytedance/seedance-1-5-pro",
     val baseUrl: String = "https://openrouter.ai/api/v1/",
     val displayName: String = "OpenRouter",
     val refererUrl: String = "https://github.com/jimd-den/Trendaddy",

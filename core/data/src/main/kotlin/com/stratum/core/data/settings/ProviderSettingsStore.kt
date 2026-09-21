@@ -24,6 +24,8 @@ class ProviderSettingsStore(context: Context) {
         // the default no matter what the player had chosen.
         imageModel = prefs.getString(KEY_IMAGE_MODEL, DEFAULT_IMAGE_MODEL)
             .orEmpty().ifBlank { DEFAULT_IMAGE_MODEL },
+        videoModel = prefs.getString(KEY_VIDEO_MODEL, DEFAULT_VIDEO_MODEL)
+            .orEmpty().ifBlank { DEFAULT_VIDEO_MODEL },
         baseUrl = prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL).orEmpty().ifBlank { DEFAULT_BASE_URL },
     )
 
@@ -32,6 +34,7 @@ class ProviderSettingsStore(context: Context) {
             putString(KEY_API, config.apiKey)
             putString(KEY_MODEL, config.model)
             putString(KEY_IMAGE_MODEL, config.imageModel)
+            putString(KEY_VIDEO_MODEL, config.videoModel)
             putString(KEY_BASE_URL, config.baseUrl)
         }
     }
@@ -43,9 +46,20 @@ class ProviderSettingsStore(context: Context) {
         const val KEY_API = "api_key"
         const val KEY_MODEL = "model"
         const val KEY_IMAGE_MODEL = "image_model"
+        const val KEY_VIDEO_MODEL = "video_model"
         const val KEY_BASE_URL = "base_url"
         const val DEFAULT_MODEL = "google/gemini-2.0-flash-exp:free"
         const val DEFAULT_IMAGE_MODEL = "meta/muse-image"
+
+        /**
+         * The cheapest video model that takes both ends of a movement.
+         *
+         * Measured rather than chosen from a listing, because it is not in one:
+         * $0.0000012 a video token without audio, three times cheaper than the
+         * next, and it accepts a first *and* a last frame, which is what lets a
+         * clip be pinned to two drawings the pipeline already knows how to make.
+         */
+        const val DEFAULT_VIDEO_MODEL = "bytedance/seedance-1-5-pro"
         const val DEFAULT_BASE_URL = "https://openrouter.ai/api/v1/"
     }
 }
