@@ -4,6 +4,7 @@ import com.stratum.core.domain.ai.ClipRequest
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ClipSamplingTest {
@@ -312,5 +313,45 @@ class ClipFrameRateTest {
     @Test
     fun `a clip with no duration yields no frames`() {
         assertTrue(ClipSampling.cutsAtRate(0L, fps = 12, cycle = true).isEmpty())
+    }
+}
+
+class SheetFrameRateTest {
+
+    /**
+     * A row plays at the rate it was cut at.
+     *
+     * The per-state defaults were written for six-frame rows -- a walk at
+     * 110ms is about nine frames a second. A row cut at twenty-four holds
+     * nineteen frames, so playing it at the default runs it two and a half
+     * times too slow and the character wades through the world. The rate is
+     * known when the row is made; it just was not being carried.
+     */
+    @Test
+    fun `the clip is timed by the rate the frames were cut at`() {
+        val plan = PoseSheetPlanner.plan(
+            id = "x",
+            name = "x",
+            frameCounts = mapOf(AnimationState.WALK to 19),
+            frameRate = 24,
+        )
+
+        val clip = assertNotNull(plan).sheet.clips.single()
+        assertEquals(41, clip.frameDurationMs, "24fps is 41ms a frame")
+    }
+
+    /** A sheet that does not know its rate keeps the hand-tuned defaults. */
+    @Test
+    fun `without a rate the per-state defaults still apply`() {
+        val plan = PoseSheetPlanner.plan(
+            id = "x",
+            name = "x",
+            frameCounts = mapOf(AnimationState.WALK to 6),
+        )
+
+        assertEquals(
+            AnimationState.WALK.defaultFrameDurationMs,
+            assertNotNull(plan).sheet.clips.single().frameDurationMs,
+        )
     }
 }

@@ -139,6 +139,18 @@ object PoseSheetPlanner {
         cellSize: Int = DEFAULT_CELL,
         origin: SpriteOrigin = SpriteOrigin.AI_GENERATED,
         /**
+         * Frames a second the row was cut at, or null to keep the per-state
+         * defaults.
+         *
+         * A row is only as fast as it says it is. The defaults were written for
+         * six-frame rows -- a walk at 110ms is about nine frames a second --
+         * and a row cut at twenty-four holds nineteen frames, so playing it at
+         * the default runs it two and a half times too slow and the character
+         * wades. The rate the frames were cut at is the rate they have to be
+         * played at, and it is known at the moment the row is made.
+         */
+        frameRate: Int? = null,
+        /**
          * The angles drawn, as (key suffix, the facings that angle serves).
          *
          * Passed as plain data rather than as the generation layer's enum, so
@@ -190,7 +202,10 @@ object PoseSheetPlanner {
                         state = state,
                         firstFrame = row * columns,
                         frameCount = count,
-                        frameDurationMs = state.defaultFrameDurationMs,
+                        frameDurationMs = frameRate
+                            ?.takeIf { it > 0 }
+                            ?.let { (MILLIS_PER_SECOND / it).coerceAtLeast(1) }
+                            ?: state.defaultFrameDurationMs,
                         loops = state !in AnimationState.oneShot,
                     )
                 }
@@ -238,6 +253,8 @@ object PoseSheetPlanner {
      * area on. Together the sheet grows a little over twice, not four times.
      */
     const val DEFAULT_CELL = 192
+
+    private const val MILLIS_PER_SECOND = 1000
 
     /** Below this a character has no silhouette; above it, no sheet fits in a texture. */
     const val MIN_CELL = 32

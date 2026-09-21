@@ -505,6 +505,9 @@ class PoseForgeViewModel(
                         name = current.subject.trim().ifBlank { "Character" },
                         frameCounts = counts,
                         cellSize = current.cellSize,
+                        // The rate the frames were cut at, so a row plays at
+                        // the speed it was made for.
+                        frameRate = current.frameRate,
                         views = onDisk.drawnViews(drawnNow)
                             .ifEmpty { listOf(PoseView.FRONT) }
                             .map { it.keySuffix to it.serves },
@@ -606,6 +609,7 @@ class PoseForgeViewModel(
             name = current.subject.trim().ifBlank { "Character" },
             frameCounts = counts,
             cellSize = current.cellSize,
+            frameRate = current.frameRate,
             // Only the angles that actually came back. Planning a block of
             // rows for an away view nobody drew would leave the bottom half
             // of the sheet empty and the renderer would walk the character
