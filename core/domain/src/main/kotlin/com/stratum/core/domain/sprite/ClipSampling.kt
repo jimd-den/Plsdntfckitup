@@ -75,11 +75,18 @@ object ClipSampling {
     /**
      * Cuts for a clip generated as a whole animation.
      *
-     * Simple, and it gives up the thing that makes these poses *these* poses: a
-     * model handed a sentence and no drawing returns a plausible walk, not the
-     * authored one, and nothing holds the camera still across the clip. Kept
-     * because it is one call per row instead of a dozen, which for a rough pass
-     * is a real trade.
+     * The economical shape, and not for the reason it first looks. Clips cannot
+     * be bought shorter than four seconds — that is the floor across the whole
+     * catalogue — which is some eighty frames whatever you asked for. Taking
+     * twelve out of one clip uses what was paid for; buying a clip per beat to
+     * take one frame out of each pays for the same four seconds six times and
+     * discards all but a frame of each.
+     *
+     * What it gives up is the poses in the middle. Pinned at both ends by
+     * stills drawn under a guide, the clip starts and finishes on authored
+     * poses and invents its own way between them, so the beats in between are
+     * plausible rather than the ones that were written. For a cycle both ends
+     * are the *same* drawing, which is what closes the loop.
      */
     fun cutsFor(state: AnimationState, count: Int): List<ClipCut> =
         cutsFor(count, cycle = state in MocapPoses.cycles)

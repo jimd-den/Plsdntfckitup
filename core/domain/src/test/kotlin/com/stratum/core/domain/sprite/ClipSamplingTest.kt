@@ -1,6 +1,8 @@
 package com.stratum.core.domain.sprite
 
+import com.stratum.core.domain.ai.ClipRequest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -177,5 +179,39 @@ class ClipSeekTest {
         val cuts = ClipSampling.cutsFor(AnimationState.WALK, 4)
 
         assertTrue(cuts.all { ClipSampling.millisFor(it, 0L) == 0L })
+    }
+}
+
+class ClipRequestTest {
+
+    /**
+     * A clip cannot be bought shorter than four seconds.
+     *
+     * Which is the fact that decides how this path is worth using at all. The
+     * first version of this asked for one second, reasoning that a segment
+     * between two authored poses is a fraction of a second of animation and
+     * anything longer is the model inventing what happens next. Both halves
+     * were right and the number was not purchasable: every video model in the
+     * catalogue that publishes a duration set starts at four, and a request
+     * below it is rejected rather than rounded up.
+     */
+    @Test
+    fun `a clip is never asked for shorter than a provider will sell`() {
+        assertEquals(4, ClipRequest.MIN_SECONDS)
+        assertEquals(
+            ClipRequest.MIN_SECONDS,
+            ClipRequest(prompt = "walk", seconds = 1).durationSeconds,
+        )
+        assertEquals(
+            ClipRequest.MAX_SECONDS,
+            ClipRequest(prompt = "walk", seconds = 99).durationSeconds,
+        )
+        assertEquals(6, ClipRequest(prompt = "walk", seconds = 6).durationSeconds)
+    }
+
+    /** Sound is charged for and discarded, and leaving it on doubles the rate. */
+    @Test
+    fun `a clip is asked for without audio`() {
+        assertFalse(ClipRequest(prompt = "walk").generateAudio)
     }
 }

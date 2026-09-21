@@ -50,28 +50,74 @@ data class ClipRequest(
      */
     val firstFrame: ImageReference? = null,
     /**
-     * The drawing the clip ends on, where the provider supports it.
+     * The drawing the clip ends on.
      *
-     * Optional because not every model takes an end frame, and one that does
-     * not is still useful — it just means the far end of the segment drifts and
-     * the next authored keyframe has to be trusted to pull it back.
+     * Checked rather than hoped for: the catalogue reports first and last frame
+     * control on every one of these models, so a clip can be pinned at both
+     * ends by stills the pipeline drew under a guide.
+     *
+     * Which is what makes a looping animation possible at all. Set both ends to
+     * the *same* drawing and the clip is a movement that returns to where it
+     * started — the walk closing its own loop, rather than ending near enough
+     * to its first frame and hitching once per stride. Nothing else on this
+     * path can produce that.
+     *
+     * Still optional, because a provider that drops it leaves the far end to
+     * drift and the next authored keyframe to pull it back, which is worse but
+     * not useless.
      */
     val lastFrame: ImageReference? = null,
-    /** How long a clip to ask for. Short: this spans one authored beat, not an animation. */
-    val seconds: Float = DEFAULT_SECONDS,
-    val width: Int = 1024,
-    val height: Int = 1024,
+    /**
+     * How long a clip to ask for, in whole seconds.
+     *
+     * Not a free number: providers publish a set of durations they accept and
+     * reject anything else, and the floor is four seconds. That is the single
+     * fact that decides how this path is worth using.
+     *
+     * A segment between two authored poses is a fraction of a second of
+     * animation, and four seconds is the least that can be bought. So paying
+     * for a clip per beat to take one frame out of each is the *expensive*
+     * shape, not the cheap one — it buys eighty-odd frames and throws away all
+     * but one. A clip spanning a whole animation, cut into as many frames as
+     * the row wants, buys the same four seconds and uses them.
+     */
+    val seconds: Int = MIN_SECONDS,
+    /** One of the provider's published sizes. Square, because a sprite cell is. */
+    val width: Int = DEFAULT_EDGE,
+    val height: Int = DEFAULT_EDGE,
+    /**
+     * Sound, which a sprite sheet has no use for and is charged for.
+     *
+     * Off is not a tidiness preference. Measured against the published rates
+     * for the model this was built for, generating without audio is half the
+     * price of generating with it, for output that is discarded either way.
+     */
+    val generateAudio: Boolean = false,
 ) {
+    /** Clamped to what providers accept, so a bad number fails here rather than mid-run. */
+    val durationSeconds: Int get() = seconds.coerceIn(MIN_SECONDS, MAX_SECONDS)
+
     companion object {
         /**
-         * Long enough to move, short enough not to invent.
+         * The shortest clip any of these providers sells.
          *
-         * A segment between two authored poses is a fraction of a second of
-         * animation. Asking for four seconds of it does not buy smoother
-         * in-betweens, it buys three seconds of the model deciding what happens
-         * next — which is the drift this path exists to avoid.
+         * Checked against the catalogue rather than assumed: every video model
+         * listing a duration set starts at four. Asking for one second is
+         * rejected, not rounded up.
          */
-        const val DEFAULT_SECONDS = 1f
+        const val MIN_SECONDS = 4
+
+        /** The longest the cheapest model accepts; others go further. */
+        const val MAX_SECONDS = 12
+
+        /**
+         * Square and modest.
+         *
+         * The frames are cut down to a sprite cell a couple of hundred pixels
+         * tall, so resolution above this is paid for and then thrown away —
+         * and video is priced by the pixel far more steeply than stills are.
+         */
+        const val DEFAULT_EDGE = 720
     }
 }
 
