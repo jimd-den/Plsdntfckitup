@@ -76,6 +76,8 @@ class PoseForgeViewModel(
     private val savePose: (String, String, ByteArray) -> Unit,
     private val dropPose: (String, String) -> Unit,
     private val posesDrawn: (String) -> Set<String>,
+    /** Reads a frame back, so an opening pose already drawn is not paid for twice. */
+    private val loadPose: (String, String) -> ByteArray?,
     /** Composites the set into a sheet and puts it in the sprite library. */
     private val composeSheet: (String, PoseSheetPlan) -> PackedSheet?,
     /** Characters already on disk, newest first, so one can be picked up again. */
@@ -789,11 +791,45 @@ class PoseForgeViewModel(
 
             states.forEachIndexed { index, state ->
                 PoseRun.report(current.subject, index, states.size)
+
+                // The clip is pinned to this, and for a cycle it is pinned to
+                // it at both ends -- so it has to be the animation's own first
+                // pose, not the reference. Handing over the T-pose asks the
+                // model to start in a T-pose, finish in a T-pose and not move
+                // the body between, and it obliges: the first version of this
+                // passed the reference and every clip came back a T-pose held
+                // for four seconds.
+                val opening = current.script.stepsFor(state).firstOrNull()
+                if (opening == null) {
+                    failures = failures + (state.name.lowercase() to "no first pose to open on")
+                    return@forEachIndexed
+                }
+                // Drawn under its stick figure exactly as the frame-by-frame
+                // path draws it, and reused when it is already on disk, so
+                // switching between the two paths does not pay for it twice.
+                val openingBytes = withContext(Dispatchers.IO) {
+                    loadPose(setId, opening.key) ?: runCatching {
+                        drawPose(
+                            PoseFrameRequest(
+                                reference = ImageReference(reference),
+                                step = opening,
+                                guide = guideFor(opening, current.guides),
+                                styleDirection = current.style,
+                            ),
+                            GenerationObserver.None,
+                        ).getOrNull()?.bytes?.also { savePose(setId, opening.key, it) }
+                    }.getOrNull()
+                }
+                if (openingBytes == null) {
+                    failures = failures + (state.name.lowercase() to "the opening pose could not be drawn")
+                    return@forEachIndexed
+                }
+
                 val result = drawClipRow(
                     ClipRowRequest(
                         state = state,
                         motion = state.clipMotion,
-                        firstFrame = ImageReference(reference),
+                        openingPose = ImageReference(openingBytes),
                         fps = current.frameRate,
                         styleDirection = current.style,
                     ),
@@ -933,6 +969,7 @@ class PoseForgeViewModel(
             savePose: (String, String, ByteArray) -> Unit,
             dropPose: (String, String) -> Unit,
             posesDrawn: (String) -> Set<String>,
+            loadPose: (String, String) -> ByteArray? = { _, _ -> null },
             composeSheet: (String, PoseSheetPlan) -> PackedSheet?,
             savedCharacters: () -> List<SavedCharacter> = { emptyList() },
             deleteCharacter: (String) -> Unit = {},
@@ -950,7 +987,7 @@ class PoseForgeViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PoseForgeViewModel(
                 drawReference, drawPose, guideFor, readGuideImage, readGuideJson, loadGuides,
                 saveGuides, saveReference, loadReference, hasReference, savePose, dropPose,
-                posesDrawn, composeSheet, savedCharacters, deleteCharacter, exportSheet,
+                posesDrawn, loadPose, composeSheet, savedCharacters, deleteCharacter, exportSheet,
                 exportPoses, exportReference, exportClip, clipsDrawn, drawClipRow, saveClip,
                 isProviderConfigured,
             ) as T

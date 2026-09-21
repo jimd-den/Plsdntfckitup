@@ -493,6 +493,7 @@ fun StratumApp(
                     savePose = ai.poses::savePose,
                     dropPose = ai.poses::deletePose,
                     posesDrawn = ai.poses::keysIn,
+                    loadPose = ai.poses::pose,
                     composeSheet = { setId, plan ->
                         // Loaded by key rather than all at once: a full
                         // character is forty 1024-pixel images, which is more

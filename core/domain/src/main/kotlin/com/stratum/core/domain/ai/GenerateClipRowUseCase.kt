@@ -64,14 +64,14 @@ class GenerateClipRowUseCase(
             ClipRequest(
                 prompt = buildPrompt(request),
                 modelId = request.modelId,
-                firstFrame = request.firstFrame,
+                firstFrame = request.openingPose,
                 // A cycle ends where it began, so both ends are the same
                 // drawing. A one-shot ends somewhere else, and is given only a
                 // start unless the caller has drawn its finish too.
                 lastFrame = if (request.state in MocapPoses.cycles) {
-                    request.firstFrame
+                    request.openingPose
                 } else {
-                    request.lastFrame
+                    request.closingPose
                 },
                 seconds = request.seconds,
                 width = request.edge,
@@ -169,19 +169,28 @@ data class ClipRowRequest(
     /** The movement, in words. "A steady walk cycle", "a sword swing". */
     val motion: String,
     /**
-     * The drawing the clip starts on.
+     * The animation's own first pose, drawn under its guide.
      *
-     * Not optional in practice. Without it the model invents a character, and
-     * the row is of somebody else.
+     * **Not the T-pose reference.** The clip is pinned to whatever this is, and
+     * for a cycle it is pinned to it at *both* ends -- so handing over the
+     * reference asks the model to start in a T-pose, finish in a T-pose, and
+     * not move the body in between, and it obliges. That is exactly what
+     * happened the first time this was wired: every clip came back a T-pose
+     * held for four seconds.
+     *
+     * The pose that belongs here is frame zero of this state, generated as a
+     * still under its stick figure the way the other path generates every
+     * frame. That is what makes the clip an animation of the authored pose
+     * rather than of the reference.
      */
-    val firstFrame: ImageReference,
+    val openingPose: ImageReference,
     /**
-     * The drawing a one-shot ends on, when there is one.
+     * The pose a one-shot finishes on, when it has been drawn.
      *
-     * Ignored for a cycle, which ends on its first frame by definition and is
-     * given that instead.
+     * Ignored for a cycle, which ends where it began by definition and is given
+     * [openingPose] instead.
      */
-    val lastFrame: ImageReference? = null,
+    val closingPose: ImageReference? = null,
     val fps: Int = ClipSampling.DEFAULT_FPS,
     val seconds: Int = ClipRequest.MIN_SECONDS,
     val edge: Int = ClipRequest.DEFAULT_EDGE,

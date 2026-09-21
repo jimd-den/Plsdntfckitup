@@ -13,7 +13,8 @@ import kotlin.test.assertTrue
 
 class GenerateClipRowUseCaseTest {
 
-    private val drawing = ImageReference("a character".toByteArray())
+    /** Frame zero of the animation, drawn under its guide -- not the T-pose. */
+    private val drawing = ImageReference("the walk's first pose".toByteArray())
 
     private class FakeVideoModel(
         private val result: Result<GeneratedClip> = Result.success(
@@ -38,7 +39,7 @@ class GenerateClipRowUseCaseTest {
     private fun requestFor(state: AnimationState) = ClipRowRequest(
         state = state,
         motion = "a steady walk cycle",
-        firstFrame = drawing,
+        openingPose = drawing,
     )
 
     /**
