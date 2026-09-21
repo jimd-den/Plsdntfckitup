@@ -120,6 +120,7 @@ fun PoseForgeScreen(
         onRoleChange = viewModel::selectRole,
         onFramesChange = viewModel::selectFrames,
         onAwayViewChange = viewModel::toggleAwayView,
+        onDrawFromClipChange = viewModel::setDrawsFromClip,
         onCellSizeChange = viewModel::selectCellSize,
         onDrawReference = viewModel::drawReferencePose,
         onBuildAnimations = viewModel::buildAnimations,
@@ -157,6 +158,7 @@ fun PoseForgeContent(
     onRoleChange: (CharacterRole) -> Unit = {},
     onFramesChange: (AnimationState, Int) -> Unit = { _, _ -> },
     onAwayViewChange: (Boolean) -> Unit = {},
+    onDrawFromClipChange: (Boolean) -> Unit = {},
     onCellSizeChange: (Int) -> Unit = {},
     onDrawReference: () -> Unit = {},
     onBuildAnimations: () -> Unit = {},
@@ -254,7 +256,8 @@ fun PoseForgeContent(
         Spacer(Modifier.height(Space.medium))
         CharacterPanel(
             state, onSubjectChange, onStyleChange, onScopeChange, onRoleChange,
-            onFramesChange, onAwayViewChange, onBasePromptChange, onResetBasePrompt,
+            onFramesChange, onAwayViewChange, onDrawFromClipChange, onBasePromptChange,
+            onResetBasePrompt,
         )
 
         Spacer(Modifier.height(Space.medium))
@@ -375,6 +378,7 @@ private fun CharacterPanel(
     onRoleChange: (CharacterRole) -> Unit,
     onFramesChange: (AnimationState, Int) -> Unit,
     onAwayViewChange: (Boolean) -> Unit,
+    onDrawFromClipChange: (Boolean) -> Unit,
     onBasePromptChange: (String) -> Unit,
     onResetBasePrompt: () -> Unit,
 ) {
@@ -511,6 +515,50 @@ private fun CharacterPanel(
                 onClick = { onAwayViewChange(true) },
             )
         }
+        // The other way of drawing a row, offered rather than chosen for you:
+        // the two fail in opposite directions and neither is simply better.
+        Spacer(Modifier.height(Space.medium))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.small),
+        ) {
+            Text(
+                text = "Drawn as",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+                modifier = Modifier.width(SIDE_LABEL),
+            )
+            StratumChip(
+                label = "Separate frames",
+                selected = !state.drawsFromClip,
+                onClick = { onDrawFromClipChange(false) },
+            )
+            StratumChip(
+                label = "One clip",
+                selected = state.drawsFromClip,
+                onClick = { onDrawFromClipChange(true) },
+            )
+        }
+        Spacer(Modifier.height(Space.small))
+        Text(
+            text = if (state.drawsFromClip) {
+                "One video an animation, cut at the frame rate. The frames cannot " +
+                    "disagree about the costume or the scale, because they were never " +
+                    "drawn apart -- but a clip follows no stick figure, so the poses " +
+                    "between the ends are the model's idea of the movement rather than " +
+                    "the authored ones. Clips cost about ten times a still and cannot be " +
+                    "bought shorter than four seconds, and only the opening holds its " +
+                    "facing, so the rest is paid for and discarded."
+            } else {
+                "One generation a frame, each under its own stick figure, so every pose " +
+                    "is the authored one. What it cannot promise is that the frames agree " +
+                    "with each other: measured on real output, one frame of a walk came " +
+                    "back wearing a cape the others did not have."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
+        )
+
         Spacer(Modifier.height(Space.small))
         Text(
             text = if (state.drawsAwayView) {

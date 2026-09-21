@@ -545,6 +545,8 @@ fun StratumApp(
                         file != null
                     },
                     clipsDrawn = ai.poses::clipKeysIn,
+                    drawClipRow = { request, observer -> ai.generateClipRow(request, observer) },
+                    saveClip = ai.poses::saveClip,
                     exportPoses = { setId, name ->
                         val poses = ai.poses.keysIn(setId)
                             .mapNotNull { key -> ai.poses.pose(setId, key)?.let { key to it } }
