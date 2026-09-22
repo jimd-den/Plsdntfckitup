@@ -493,6 +493,7 @@ fun StratumApp(
                     savePose = ai.poses::savePose,
                     dropPose = ai.poses::deletePose,
                     posesDrawn = ai.poses::keysIn,
+                    loadPose = ai.poses::pose,
                     composeSheet = { setId, plan ->
                         // Loaded by key rather than all at once: a full
                         // character is forty 1024-pixel images, which is more
@@ -526,6 +527,27 @@ fun StratumApp(
                         }
                         file != null
                     },
+                    exportReference = { setId, name ->
+                        val file = ai.poses.reference(setId)?.let {
+                            SpriteExporter.exportReference(context, name, it)
+                        }
+                        file?.let {
+                            SpriteExporter.share(context, it, "image/png", name)
+                        }
+                        file != null
+                    },
+                    exportClip = { setId, name, key ->
+                        val file = ai.poses.clip(setId, key)?.let {
+                            SpriteExporter.exportClip(context, name, key, it)
+                        }
+                        file?.let {
+                            SpriteExporter.share(context, it, SpriteExporter.MIME_VIDEO, name)
+                        }
+                        file != null
+                    },
+                    clipsDrawn = ai.poses::clipKeysIn,
+                    drawClipRow = { request, observer -> ai.generateClipRow(request, observer) },
+                    saveClip = ai.poses::saveClip,
                     exportPoses = { setId, name ->
                         val poses = ai.poses.keysIn(setId)
                             .mapNotNull { key -> ai.poses.pose(setId, key)?.let { key to it } }

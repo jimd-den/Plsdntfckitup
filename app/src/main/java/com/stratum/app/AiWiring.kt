@@ -2,9 +2,11 @@ package com.stratum.app
 
 import android.content.Context
 import com.stratum.core.data.ai.OpenRouterImageModel
+import com.stratum.core.data.ai.OpenRouterVideoModel
 import com.stratum.core.data.ai.OpenRouterLanguageModel
 import com.stratum.core.data.character.CharacterRepositoryImpl
 import com.stratum.core.data.settings.PlayerPreferencesStore
+import com.stratum.core.data.sprite.VideoFrameExtractor
 import com.stratum.core.data.sprite.SpriteLibrary
 import com.stratum.core.data.sprite.PoseGuideStore
 import com.stratum.core.data.sprite.PoseLibrary
@@ -13,6 +15,8 @@ import com.stratum.core.data.sprite.WeaponFitStore
 import com.stratum.core.data.sprite.WeaponLibrary
 import com.stratum.core.data.settings.ProviderSettingsStore
 import com.stratum.core.domain.character.CharacterRepository
+import com.stratum.core.domain.ai.GenerateClipRowUseCase
+import com.stratum.core.domain.ai.VideoModelPort
 import com.stratum.core.domain.ai.GenerateContentPackUseCase
 import com.stratum.core.domain.ai.GenerateLoreUseCase
 import com.stratum.core.domain.ai.GenerateBasePoseUseCase
@@ -37,6 +41,26 @@ class AiWiring(context: Context) {
     private val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
 
     private val imageModel = OpenRouterImageModel(configProvider = settings::load)
+
+    /**
+     * Draws a clip a sheet can be cut from.
+     *
+     * Reads its model from the same settings as the others, and its own field:
+     * video models are not in /models at all, so the image model's setting
+     * could not name one even if you wanted it to.
+     */
+    val videoModel: VideoModelPort = OpenRouterVideoModel(configProvider = settings::load)
+
+    /**
+     * Draws an animation as one clip and cuts its frames out.
+     *
+     * The decoder is handed in here because the domain cannot open a video
+     * container, exactly as it cannot decode a PNG.
+     */
+    val generateClipRow = GenerateClipRowUseCase(
+        videoModel = videoModel,
+        cutFrames = { clip, cuts -> VideoFrameExtractor.framesAt(clip, cuts) },
+    )
 
     /** Generated sheets live on the device, keyed by id. */
     val sprites = SpriteLibrary(context)
