@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -16,6 +17,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -36,6 +38,13 @@ import com.stratum.engine.world.FeedbackKind
 import com.stratum.engine.world.FeedbackMark
 import com.stratum.engine.world.GroundInsert
 import com.stratum.engine.world.GroundLoot
+import com.stratum.core.domain.art.ActorPresentation
+import com.stratum.core.domain.art.ActorRole
+import com.stratum.core.domain.art.StyleSheetArtDirector
+import com.stratum.core.domain.art.WorldArtDirector
+import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.engine.render.WorldFrameRenderer
 import com.stratum.engine.world.IsometricProjection
 
 /**
@@ -83,6 +92,18 @@ fun WorldCanvas(
     buildMode: Boolean = false,
     onBuildDrag: (from: BlockPos, to: BlockPos) -> Unit = { _, _ -> },
     onBuildCommit: () -> Unit = {},
+    /**
+     * Everything about how the world looks, as data.
+     *
+     * Defaulted so a caller that has no opinion still gets a directed world,
+     * and replaceable so a player's prompt, a pack's own style or a boss
+     * arena's can take over without this function changing.
+     */
+    artDirector: WorldArtDirector = DEFAULT_ART_DIRECTOR,
+    /** Drives the light, the haze and anything that drifts. */
+    worldTime: WorldTime = WorldTime(),
+    /** The region a column belongs to, so weather and palette can be local. */
+    biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
     /** Redrawn whenever this changes; the world itself is mutable and not a Compose state. */
     revision: Int,
     /** Changes every frame while a fight is running, to force a redraw. */
@@ -91,6 +112,11 @@ fun WorldCanvas(
     onTapBlock: (BlockPos) -> Unit = {},
     onLongPressBlock: (BlockPos) -> Unit = {},
 ) {
+    // Held across frames: it owns the scratch buffers that keep a frame from
+    // allocating, and rebuilding it per draw would throw them away every time.
+    val renderer = remember(projection) { WorldFrameRenderer(projection, artDirector) }
+    renderer.director = artDirector
+
     Canvas(
         modifier = modifier
             .pointerInput(buildMode, projection, revision, world) {
@@ -136,111 +162,25 @@ fun WorldCanvas(
         @Suppress("UNUSED_EXPRESSION")
         frame
 
-        val originX = size.width / 2f - projection.project(camera).x
-        val originY = size.height / 2f - projection.project(camera).y
+        val sink = ComposeFrameSink(this)
+        val playerAccentArgb = playerAccent.toArgb().toLong() and 0xFFFFFFFFL
 
-        // Ground at the player's own height is fully lit; everything lower is
-        // shaded towards it, so depth reads relative to where you are standing
-        // rather than to an absolute sea level you cannot see.
-        val eyeLevel = kotlin.math.floor(camera.z).toInt()
+        // Terrain, props and the sky. The canvas no longer decides what any of
+        // it looks like: it hands the world to the renderer, the renderer asks
+        // the art director, and what comes back is a list of shapes.
+        val view = renderer.render(
+            world = world,
+            camera = camera,
+            width = size.width,
+            height = size.height,
+            sink = sink,
+            highlight = highlight,
+            time = worldTime,
+            biomeAt = biomeAt,
+        )
+        val originX = view.originX
+        val originY = view.originY
 
-        val range = projection.visibleRange(size.width, size.height, originX, originY)
-
-        // Allocated once and rewound per block. A path per face per block per
-        // frame was tens of thousands of short-lived objects a second, and the
-        // collector spent more time on them than the renderer did drawing.
-        val faces = BlockFaces()
-
-        range.forEachColumnInDrawOrder { x, y ->
-            val surface = world.surfaceAt(x, y)
-            if (surface < 0) return@forEachColumnInDrawOrder
-
-            // Draw a few levels below the surface so cliff faces have sides
-            // rather than floating tops.
-            val floor = maxOf(0, surface - VISIBLE_DEPTH)
-
-            // The range is a generous box; this is the exact test. Without it
-            // every loaded column is drawn, on screen or not.
-            if (!projection.isColumnOnScreen(
-                    x, y, surface, floor,
-                    originX, originY, size.width, size.height,
-                )
-            ) {
-                return@forEachColumnInDrawOrder
-            }
-
-            // Props stand on the ground but are not the ground. Shading and
-            // ledge shadows read the terrain beneath them, or a tree would make
-            // its own column look like a cliff.
-            var ground = surface
-            while (ground > 0 && world.blockAt(BlockPos(x, y, ground)).glyph != null) ground--
-
-            // How far below the player this column sits. Lower ground is drawn
-            // darker, which is the whole of "am I down a level" — without it an
-            // isometric field of one material reads as a flat UI background no
-            // matter how much geometry is in it.
-            val depthBelow = (eyeLevel - ground).coerceIn(0, DEPTH_SHADE_RANGE)
-            val depthShade = 1f - depthBelow.toFloat() / DEPTH_SHADE_RANGE * DEPTH_SHADE_STRENGTH
-
-            // A ledge casts onto the cell in front of it. Two heightmap lookups,
-            // and it is what turns a plateau edge into something you can see.
-            val shadowed = world.surfaceAt(x - 1, y) > ground || world.surfaceAt(x, y - 1) > ground
-
-            // Deterministic per-cell jitter. A large plain of one block is
-            // perfectly uniform otherwise, which reads as paper, not ground.
-            val grain = 1f + (((x * 73856093) xor (y * 19349663)) and 0xFF) / 255f * GRAIN - GRAIN / 2f
-
-            // The column's prop, if any: drawn once at the top of its run, so a
-            // four-block trunk is one tree rather than four stacked emoji.
-            var propGlyph: String? = null
-            var propScale = 1f
-            var propAt = 0
-
-            for (z in floor..surface) {
-                val pos = BlockPos(x, y, z)
-                val block = world.blockAt(pos)
-                if (block.isAir) continue
-
-                val glyph = block.glyph
-                if (glyph != null) {
-                    propGlyph = glyph
-                    propScale = block.glyphScale
-                    propAt = z
-                    continue
-                }
-
-                // Fully buried blocks are invisible; skipping them is the single
-                // biggest saving in the draw loop.
-                if (z < ground && isEnclosed(world, pos)) continue
-
-                val isTop = z == ground
-                val lit = depthShade * if (isTop) grain else 1f
-                val screen = projection.project(pos)
-                drawBlock(
-                    centerX = originX + screen.x,
-                    centerY = originY + screen.y,
-                    projection = projection,
-                    topColor = Color(block.topColor).scaleRgb(lit),
-                    sideColor = Color(block.sideColor).scaleRgb(depthShade),
-                    highlighted = pos == highlight,
-                    accent = Color(block.accentColor),
-                    faces = faces,
-                    shadowTop = isTop && shadowed,
-                )
-            }
-
-            propGlyph?.let { glyph ->
-                val screen = projection.project(BlockPos(x, y, propAt))
-                drawGlyph(
-                    x = originX + screen.x,
-                    y = originY + screen.y,
-                    projection = projection,
-                    glyph = glyph,
-                    scale = PROP_GLYPH_SCALE * propScale,
-                    shade = depthShade,
-                )
-            }
-        }
 
         // The ghost sits above terrain but below actors, so the player is never
         // hidden behind their own plan.
@@ -266,6 +206,13 @@ fun WorldCanvas(
             val screen = projection.project(actor.position)
             val x = originX + screen.x
             val y = originY + screen.y
+
+            // Every actor is planted before it is drawn: a contact shadow, a
+            // rank ring if it has earned one, a halo if it is worth walking
+            // towards. Without it the cast is pasted onto the terrain rather
+            // than standing on it, whatever the art on top of it is.
+            renderer.ground(sink, x, y, artDirector.actorStyleFor(actor.presentation(playerAccentArgb, view.eyeLevel)))
+
             when (actor) {
                 // A beam in the rarity colour says "loot and how good"; the
                 // glyph on top says "and it is an axe". Neither alone answers
@@ -339,6 +286,11 @@ fun WorldCanvas(
             }
         }
 
+        // Weather and vignette sit over the actors rather than under them.
+        // Air in front of the characters is what makes a scene read as a place
+        // you are standing in rather than a diagram you are looking at.
+        renderer.finish(sink, view, worldTime, biomeAt(camera.x.toInt(), camera.y.toInt()))
+
         // Feedback last and unsorted by depth: a damage number must never be
         // hidden behind the thing it refers to.
         feedback.sortedBy { it.id }.forEach { mark ->
@@ -347,6 +299,15 @@ fun WorldCanvas(
         }
     }
 }
+
+/**
+ * The style a caller gets when it does not ask for one.
+ *
+ * A single instance rather than a default argument expression: the director
+ * caches its own lighting terms, and building a new one per recomposition would
+ * throw that away sixty times a second for an object that never changes.
+ */
+private val DEFAULT_ART_DIRECTOR: WorldArtDirector = StyleSheetArtDirector()
 
 /** Anything drawn on top of the terrain, so they can be depth sorted together. */
 private sealed interface Actor {
@@ -361,6 +322,44 @@ private sealed interface Actor {
     }
     data class Insert(val ground: GroundInsert) : Actor {
         override val position: WorldPoint get() = ground.position
+    }
+}
+
+/**
+ * What the art director needs to know about an actor.
+ *
+ * Deliberately not the engine's own type. The director decides how a *class* of
+ * thing is weighted against the terrain — you, a threat, a prize — and handing
+ * it a monster with its stats, its cooldowns and its loot table would invite
+ * decisions it has no business making.
+ */
+private fun Actor.presentation(playerAccent: Long, eyeLevel: Int): ActorPresentation {
+    val depth = (eyeLevel - position.z.toInt()).coerceAtLeast(0)
+    return when (this) {
+        is Actor.Player -> ActorPresentation(
+            id = "player",
+            role = ActorRole.PLAYER,
+            accent = playerAccent,
+            depthBelowEye = depth,
+        )
+        is Actor.Monster -> ActorPresentation(
+            id = enemy.instanceId,
+            role = ActorRole.ENEMY,
+            rank = enemy.rank,
+            accent = enemy.bodyColor,
+            depthBelowEye = depth,
+        )
+        is Actor.Loot -> ActorPresentation(
+            id = loot.item.instanceId,
+            role = ActorRole.LOOT,
+            accent = loot.item.rarity.beamColor(),
+            depthBelowEye = depth,
+        )
+        is Actor.Insert -> ActorPresentation(
+            id = ground.insertId,
+            role = ActorRole.INTERACTABLE,
+            depthBelowEye = depth,
+        )
     }
 }
 
@@ -746,96 +745,6 @@ private fun pick(
     )
 }
 
-/** A block is invisible when every face that could be seen is covered. */
-private fun isEnclosed(world: World, pos: BlockPos): Boolean =
-    !world.blockAt(pos.above()).isAir &&
-        !world.blockAt(BlockPos(pos.x + 1, pos.y, pos.z)).isAir &&
-        !world.blockAt(BlockPos(pos.x, pos.y + 1, pos.z)).isAir
-
-/**
- * One block: the top rhombus plus the two side faces the camera can see.
- *
- * Sides are drawn at fixed brightness rather than from a light source, which
- * keeps blocks readable at a glance and costs nothing per frame.
- */
-private fun DrawScope.drawBlock(
-    centerX: Float,
-    centerY: Float,
-    projection: IsometricProjection,
-    topColor: Color,
-    sideColor: Color,
-    accent: Color,
-    highlighted: Boolean,
-    faces: BlockFaces,
-    /** True when a taller neighbour is casting onto this cell. */
-    shadowTop: Boolean = false,
-) {
-    val halfWidth = projection.tileWidth * projection.zoom / 2f
-    val halfHeight = projection.tileHeight * projection.zoom / 2f
-    val lift = projection.blockHeight * projection.zoom
-
-    faces.shapeFor(centerX, centerY, halfWidth, halfHeight, lift)
-
-    drawPath(faces.left, sideColor.scaleRgb(LEFT_FACE_SHADE))
-    drawPath(faces.right, sideColor.scaleRgb(RIGHT_FACE_SHADE))
-    drawPath(faces.top, topColor)
-
-    if (shadowTop) {
-        drawPath(faces.top, LEDGE_SHADOW)
-    }
-
-    // A seam on every top face. Individually almost invisible; together they
-    // are what makes a field of tiles read as cells you could dig or build on
-    // rather than as one painted surface.
-    drawPath(faces.top, TILE_SEAM, style = Stroke(width = 1f))
-
-    if (highlighted) {
-        // A target you can actually find. The old wash was the same value as
-        // the terrain under it, so the cell you were about to act on was
-        // indistinguishable from the ones you were not.
-        drawPath(faces.top, TARGET_FILL)
-        drawPath(faces.top, TARGET_EDGE, style = Stroke(width = 4f))
-        drawPath(faces.top, accent, style = Stroke(width = 2f))
-    }
-}
-
-/**
- * The three faces of a block, reused across every block in a frame.
- *
- * A block is always the same six-sided shape in a different place, so the paths
- * are rewound and refilled rather than rebuilt. At a thousand-odd blocks a frame
- * and sixty frames a second, allocating them was the single largest source of
- * garbage in the app.
- */
-private class BlockFaces {
-    val top = Path()
-    val left = Path()
-    val right = Path()
-
-    fun shapeFor(cx: Float, cy: Float, halfWidth: Float, halfHeight: Float, lift: Float) {
-        top.rewind()
-        top.moveTo(cx, cy - halfHeight)
-        top.lineTo(cx + halfWidth, cy)
-        top.lineTo(cx, cy + halfHeight)
-        top.lineTo(cx - halfWidth, cy)
-        top.close()
-
-        left.rewind()
-        left.moveTo(cx - halfWidth, cy)
-        left.lineTo(cx, cy + halfHeight)
-        left.lineTo(cx, cy + halfHeight + lift)
-        left.lineTo(cx - halfWidth, cy + lift)
-        left.close()
-
-        right.rewind()
-        right.moveTo(cx + halfWidth, cy)
-        right.lineTo(cx, cy + halfHeight)
-        right.lineTo(cx, cy + halfHeight + lift)
-        right.lineTo(cx + halfWidth, cy + lift)
-        right.close()
-    }
-}
-
 /**
  * The player.
  *
@@ -1014,25 +923,6 @@ private fun DrawScope.drawGlyph(
     }
 }
 
-private fun Color.scaleRgb(factor: Float) = Color(
-    red = (red * factor).coerceIn(0f, 1f),
-    green = (green * factor).coerceIn(0f, 1f),
-    blue = (blue * factor).coerceIn(0f, 1f),
-    alpha = alpha,
-)
-
-/** The south-west face reads as turned away from the light. */
-/** Levels below the player before depth shading bottoms out. */
-private const val DEPTH_SHADE_RANGE = 8
-/** How dark the deepest visible level goes. */
-private const val DEPTH_SHADE_STRENGTH = 0.45f
-/** Per-cell brightness jitter, so a large plain is not perfectly flat. */
-private const val GRAIN = 0.07f
-private val LEDGE_SHADOW = Color(0xFF000000).copy(alpha = 0.22f)
-private val TILE_SEAM = Color(0xFF000000).copy(alpha = 0.10f)
-private const val LEFT_FACE_SHADE = 0.72f
-private const val RIGHT_FACE_SHADE = 0.52f
-private const val VISIBLE_DEPTH = 6
 private const val HIT_SWELL = 0.18f
 private const val ROLL_SQUASH = 0.62f
 private const val RISE_FRACTION = 0.85f
@@ -1058,14 +948,6 @@ private const val SHADOW_ALPHA = 0.42f
 
 /** Fraction of a tile width. Was 0.22; a player you cannot find is not a player. */
 private const val PLAYER_RADIUS = 0.34f
-/**
- * Props are drawn at roughly two thirds of a tile.
- *
- * Full tile width was wrong: a prop that covers its own cell hides the terrain
- * it is standing on, and a field of them reads as a texture rather than as
- * objects placed on ground you could dig.
- */
-private const val PROP_GLYPH_SCALE = 0.62f
 /** Sits the glyph's feet on the cell rather than centring it in the air. */
 private const val GLYPH_BASELINE = 0.18f
 /** Loot is smaller than scenery: bright and specific, not a landmark. */

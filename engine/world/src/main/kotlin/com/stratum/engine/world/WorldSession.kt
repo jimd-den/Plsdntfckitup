@@ -107,6 +107,16 @@ class WorldSession(
 
     val world: World get() = streamingWorld
 
+    /**
+     * Which region a column belongs to, or null when the generator has none.
+     *
+     * Exposed for the renderer rather than for the rules: art direction is
+     * per region — what hangs in the air here, what colour the shadows are —
+     * and the alternative was making the canvas guess from the block under the
+     * player's feet.
+     */
+    fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = biomeSource?.biomeAt(worldX, worldY)
+
     private val hero = heroClassId
         ?.let { id -> content.heroClasses.firstOrNull { it.id == id } }
         ?: content.heroClasses.firstOrNull()

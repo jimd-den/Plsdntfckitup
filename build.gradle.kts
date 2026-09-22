@@ -18,7 +18,14 @@ plugins {
  * for the way around that -- adding an Android dependency or plugin to a module
  * that is supposed to stay pure.
  */
-val pureModules = listOf(":core:domain", ":engine:world", ":content:igbo", ":legacy:domain")
+val pureModules = listOf(
+  ":core:domain",
+  ":engine:world",
+  ":engine:render",
+  ":content:igbo",
+  ":tools:artpreview",
+  ":legacy:domain",
+)
 
 tasks.register("architectureCheck") {
   group = "verification"

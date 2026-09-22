@@ -31,6 +31,13 @@ import com.stratum.engine.world.MineResult
 import com.stratum.engine.world.PlaceRejection
 import com.stratum.engine.world.PlaceResult
 import com.stratum.engine.world.ReviveResult
+import com.stratum.core.domain.art.ArtDirection
+import com.stratum.core.domain.art.BiomeArtKit
+import com.stratum.core.domain.art.StyleLexicon
+import com.stratum.core.domain.art.StyleSheetArtDirector
+import com.stratum.core.domain.art.WorldArtDirector
+import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.engine.world.WorldSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +63,15 @@ class PlayViewModel(
      * otherwise free of one.
      */
     private val spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+    /**
+     * What the player asked their world to look like, in their own words.
+     *
+     * Empty is the house style. Anything else is read by [StyleLexicon] into a
+     * set of rendering rules, so "dark", "kawaii" or "a weird old woodblock
+     * print" are all the same amount of work and none of them touch the
+     * simulation.
+     */
+    private val stylePrompt: String = "",
 ) : ViewModel() {
 
     /**
@@ -64,6 +80,24 @@ class PlayViewModel(
      * pointing at the world the player just left.
      */
     private var session = WorldSession(content, config, heroClassId)
+
+    /**
+     * The ingredients each region is drawn from, read out of the loaded packs.
+     *
+     * Derived rather than authored, so a pack a model generated a minute ago is
+     * art directed exactly as well as the one that shipped with the game.
+     */
+    private val artKits: Map<String, BiomeArtKit> = content.packs
+        .flatMap { BiomeArtKit.deriveAll(it).entries }
+        .associate { it.key to it.value }
+
+    private var artDirector: WorldArtDirector = directorFor(stylePrompt)
+
+    /** Accumulated play time, which is what the light and the weather drift on. */
+    private var elapsed = 0f
+
+    /** The current roll of the current prompt, so a reroll is the next one. */
+    private var styleSeed: Long = stylePrompt.lowercase().hashCode().toLong()
 
     private val _state = MutableStateFlow(initialState(content))
     val state: StateFlow<PlayUiState> = _state.asStateFlow()
@@ -107,6 +141,41 @@ class PlayViewModel(
      * the world run slow for a moment rather than teleporting the player through
      * a wall — falling behind is recoverable, tunnelling is not.
      */
+    /**
+     * Changes what the world looks like, without changing the world.
+     *
+     * The seed comes from the prompt, so asking for the same thing twice gives
+     * the same world back; passing a different one is the reroll. Nothing here
+     * touches a block, a monster or the player's bag — a restyle is a change of
+     * opinion about colour, not a new game.
+     */
+    fun restyle(prompt: String, seed: Long = prompt.lowercase().hashCode().toLong()) {
+        artDirector = directorFor(prompt, seed)
+        styleSeed = seed
+        _state.value = _state.value.copy(
+            artDirector = artDirector,
+            stylePrompt = prompt,
+            styleSummary = artDirector.direction.summary,
+        )
+    }
+
+    /** The same request again, somewhere else. Asking twice should not be futile. */
+    fun rerollStyle() {
+        restyle(_state.value.stylePrompt, styleSeed + 1)
+    }
+
+    fun toggleStyle() {
+        _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
+    }
+
+    private fun directorFor(
+        prompt: String,
+        seed: Long = prompt.lowercase().hashCode().toLong(),
+    ): WorldArtDirector = StyleSheetArtDirector(
+        direction = StyleLexicon.interpret(prompt, ArtDirection.HOUSE, seed).direction,
+        kits = artKits,
+    )
+
     private fun startLoop() {
         loopJob?.cancel()
         loopJob = viewModelScope.launch {
@@ -119,6 +188,7 @@ class PlayViewModel(
                     ((now - previousFrame) / NANOS_PER_SECOND).coerceIn(MIN_STEP, MAX_STEP)
                 }
                 previousFrame = now
+                elapsed += delta
 
                 val events = session.tick(delta)
                 if (events.isEmpty()) {
@@ -244,6 +314,13 @@ class PlayViewModel(
         projection = IsometricProjection(),
         palette = content.palette,
         biomeName = session.currentBiome.name,
+        artDirector = artDirector,
+        stylePrompt = stylePrompt,
+        styleSummary = artDirector.direction.summary,
+        // A lambda rather than a bound reference: starting a fresh world
+        // replaces the session, and a captured reference would keep answering
+        // for the world the player just left.
+        biomeAt = { x, y -> session.biomeAt(x, y) },
     )
 
     /**
@@ -412,6 +489,7 @@ class PlayViewModel(
             player = snapshot.player,
             camera = snapshot.player.position,
             biomeName = snapshot.biome.name,
+            worldTime = WorldTime(elapsedSeconds = elapsed),
             miningTarget = snapshot.miningTarget,
             miningFraction = snapshot.miningFraction,
             worldRevision = snapshot.worldRevision,
@@ -529,6 +607,15 @@ data class PlayUiState(
     val skills: List<SkillDefinition> = emptyList(),
     /** Advances every tick so the canvas redraws while the fight is moving. */
     val frame: Int = 0,
+    /** How the world is drawn. Swapped by [PlayViewModel.restyle], never by the canvas. */
+    val artDirector: WorldArtDirector = StyleSheetArtDirector(),
+    val worldTime: WorldTime = WorldTime(),
+    val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
+    /** What the player last asked for, so the field can show it back to them. */
+    val stylePrompt: String = "",
+    /** What the game understood by it, which is how a player learns the vocabulary. */
+    val styleSummary: String = "",
+    val styleOpen: Boolean = false,
     val message: String? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive

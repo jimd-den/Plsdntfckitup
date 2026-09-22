@@ -83,6 +83,9 @@ fun PlayScreen(
         onSelectAnvilItem = viewModel::selectAnvilItem,
         onSlotInsert = viewModel::slotInsert,
         onUnslotInsert = viewModel::unslotInsert,
+        onRestyle = viewModel::restyle,
+        onRerollStyle = viewModel::rerollStyle,
+        onToggleStyle = viewModel::toggleStyle,
         onOpenMenu = onOpenMenu,
     )
 }
@@ -115,6 +118,9 @@ fun PlayScreenContent(
     onSelectAnvilItem: (String) -> Unit = {},
     onSlotInsert: (String, String) -> Unit = { _, _ -> },
     onUnslotInsert: (String, Int) -> Unit = { _, _ -> },
+    onRestyle: (String) -> Unit = {},
+    onRerollStyle: () -> Unit = {},
+    onToggleStyle: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
@@ -148,6 +154,9 @@ fun PlayScreenContent(
                 buildMode = state.buildMode,
                 onBuildDrag = onBuildDrag,
                 onBuildCommit = onBuildCommit,
+                artDirector = state.artDirector,
+                worldTime = state.worldTime,
+                biomeAt = state.biomeAt,
                 revision = state.worldRevision,
                 frame = state.frame,
                 modifier = Modifier.fillMaxSize(),
@@ -185,9 +194,26 @@ fun PlayScreenContent(
                         onClick = onToggleAnvil,
                         emphasis = if (state.anvilOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                     )
+                    // Restyling is a world-level act, not a settings-menu one:
+                    // the player changes it while looking at the thing it
+                    // changes, which is the only way to judge whether it helped.
+                    StratumAction(
+                        label = "Style",
+                        onClick = onToggleStyle,
+                        emphasis = if (state.styleOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
+                    )
                 }
                 Spacer(Modifier.height(Space.small))
                 ZoomControls(onZoom = onZoom)
+            }
+
+            if (state.styleOpen && !state.isDead) {
+                StyleOverlay(
+                    state = state,
+                    onRestyle = onRestyle,
+                    onReroll = onRerollStyle,
+                    onClose = onToggleStyle,
+                )
             }
 
             if (state.satchelOpen && !state.anvilOpen && !state.isDead) {

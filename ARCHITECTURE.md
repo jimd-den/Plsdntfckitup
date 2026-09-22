@@ -21,6 +21,8 @@ wrapped in an ARPG shell, where the content is data rather than code.
                 │                           ▲
                 └───────────────────────────┤
                                      :engine:world
+                                            ▲
+                                     :engine:render ◄── :tools:artpreview
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -32,10 +34,12 @@ Room, OkHttp or Compose exist.
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
 | `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
+| `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
 | `:content:igbo` | Pure Kotlin | The built-in content pack. Data only. |
+| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
 | `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
-| `:feature:play` | Android library | The isometric renderer and the play screen. |
+| `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
 | `:feature:forge` | Android library | AI pack generation and its preview. |
 | `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
 | `:legacy:data` | Android library | The original engine's Room and network layer. |
@@ -44,8 +48,9 @@ Room, OkHttp or Compose exist.
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:content:igbo` and
-`:legacy:domain` apply only the Kotlin JVM plugin, so the Android SDK is not on
+Not by review. `:core:domain`, `:engine:world`, `:engine:render`,
+`:content:igbo`, `:tools:artpreview` and `:legacy:domain` apply only the Kotlin
+JVM plugin, so the Android SDK is not on
 their compile classpath and `import android.*` fails to compile.
 
 `./gradlew architectureCheck` closes the loophole around that: it fails the
@@ -117,6 +122,131 @@ terrain they control.
 An unknown generator id is an error rather than a silent fallback. A pack asking
 for something this build does not have should say so, not quietly hand the
 player a different world.
+
+## Why the look is data
+
+The renderer used to decide what the world looked like. Ground eight levels
+down was fifty-five per cent as bright, a ledge cast at twenty-two per cent
+black, the player was a cream circle with a bronze ring — all of it constants,
+inside a composable, for every pack, forever.
+
+Those constants were not wrong. They were unreachable. A content pack could
+restyle its blocks but not its *world*; a player could not restyle anything; and
+a look nobody can change is a look nobody can direct.
+
+`ArtDirection` is that knowledge as one value: a palette, a lighting rule, a
+contrast contract, a shape language, weather, and the words handed to image
+models. `WorldArtDirector` is the seam that answers with it, per block, per
+prop, per actor, per region:
+
+```kotlin
+interface WorldArtDirector {
+    fun terrainStyleFor(cue: TerrainCue): TerrainStyle
+    fun propStyleFor(cue: PropCue): PropStyle?
+    fun actorStyleFor(actor: ActorPresentation): ActorStyle
+    fun atmosphereFor(biome: BiomeDefinition?, time: WorldTime): AtmosphereStyle
+    fun effectsFor(cue: CombatCue): List<VisualEffect>
+}
+```
+
+The renderer keeps the questions it is good at — where a thing lands on screen,
+what order to draw in, how to get pixels down fast — and has no opinion about
+what a sacred grove looks like.
+
+## The contrast contract
+
+The problem worth naming: in a field of isometric voxels, terrain, trees, ore,
+loot and monsters all tend to end up in the same band of colour and the same
+band of brightness. Nothing is *wrong*, and the eye has nowhere to land. It
+reads as a pleasant prototype rather than as somewhere dangerous.
+
+Contrast is treated as a budget. Terrain is charged for it and actors are paid
+it, and `ContrastContract` is that transaction written down:
+
+- terrain is desaturated and its brightness squeezed into a band,
+- ore, loot and anything interactable is *boosted* past the ground,
+- actors are drawn larger than the grid says they are, because a person who is
+  literally one block wide is a speck and a speck cannot be cared about,
+- every actor gets a contact shadow, a dark contour and a lit rim, which is what
+  stops the cast looking pasted onto the terrain,
+- rank is announced on the floor, in a ring, not in more furniture around the
+  health bar.
+
+`ArtDirection.enforcePlayable()` clamps every style to those bounds before it
+reaches the renderer, whatever produced it. A style may be garish, washed out,
+nearly black or nearly white. It may not hide the thing about to kill you.
+
+## Promptable worlds
+
+A style comes from a sentence. `StyleLexicon` reads one offline: it holds a few
+dozen `StyleTrait`s — moods like *dark*, *kawaii*, *toxic*, *frozen*, and
+rendering manners like *inked*, *woodblock*, *chiaroscuro*, *painterly* — and
+each one is a small edit to the house style. They compose, so "dark kawaii
+woodblock" is three edits rather than a fourth preset somebody had to author.
+
+Two properties matter more than the trait list:
+
+- **Order does not count.** Traits apply in lexicon order, not typing order, so
+  "kawaii dark" and "dark kawaii" are the same world. A prompt is a description,
+  not a program, and players do not order adjectives.
+- **The seed does.** The same words with the same seed are the same world every
+  time; with a different seed they are recognisably the same style in a
+  different place. That is what makes a reroll a reroll rather than a reskin.
+
+Words the lexicon cannot serve are *returned*, not ignored — they are the most
+useful output of the call. `StyleBriefUseCase` hands them to a language model
+along with the style so far, and gets back the same record, clamped on the way
+in. That is the one thing a model is genuinely better at than a lookup table:
+knowing that a painter's manner means broken complementary colour and a restless
+stroke.
+
+The offline path always works — no key, no network, no latency, no cost — and
+the model is an upgrade to it rather than a replacement, so the game is playable
+while the request is still in flight and stays playable if it fails.
+
+## Why the renderer draws into a sink
+
+`WorldFrameRenderer` walks a read-only `World` and emits primitives to a
+`FrameSink`. Two backends implement it: `ComposeFrameSink` on a phone, and
+`ImageFrameSink` in `:tools:artpreview`, which writes PNGs.
+
+That is what makes the look reviewable. `./gradlew :tools:artpreview:artPreview`
+renders the same scene at every built-in style, from the same seed and the same
+camera, in a couple of seconds, with no device and no emulator. A style is a few
+dozen numbers, and the only honest way to know whether a change to them helped
+is to look at it beside the one before.
+
+It is a sink rather than a list of draw objects because it runs sixty times a
+second on a phone: a frame is tens of thousands of primitives, and allocating a
+description of each one costs more than drawing it.
+
+## What the AI is asked for, and what it is not
+
+Generated terrain is the expensive answer to a question the voxel grammar has
+already answered. The model is asked for *bounded ingredients* instead, and
+never for the final image of an acre.
+
+| Tier | Examples | How it is made |
+| --- | --- | --- |
+| Systemic | Blocks, tile variants, ore, grass, ordinary trees | Never generated. Procedural colour plus a silhouette family plus a deterministic variant per instance. Thousands exist and they must agree with each other, which rules do well and independent generations do badly. |
+| Prop | Shrines, ruins, landmark trees, arenas | One generation each at most, usually one per *region*. The landmark is the asset; the generator's placement rules do the rest. |
+| Hero | The player, elites, bosses, weapons | Generated from one curated reference so it is the same character every time, posed from motion data rather than from independent prompts, and accepted by a person before it ships. |
+
+`BiomeArtKit` is the region's ingredient list — a few ground swatches, a few
+prop silhouettes, one landmark, one weather. It is *derived* from rules a pack
+already has rather than authored, so a pack a model invented ninety seconds ago
+is art directed exactly as well as the one that shipped with the game.
+
+`ArtBible` assembles prompts by holding everything fixed but one noun. Camera,
+palette, edge treatment and prohibitions all come from the style record. Ask for
+a tree, a rock and a shrine in three freely written prompts and you get three
+objects from three different games; hold the rest still and you get a set.
+
+Props are drawn as vector silhouettes rather than glyphs. A world of emoji
+trees is one identical tree two hundred times, which reads as a repeating
+texture, and the shapes belong to whichever font the device shipped rather than
+to this game. Eight families with eight variants each cover everything a pack
+can scatter, and every instance is a different individual.
 
 ## Why sprites have two models
 
