@@ -27,6 +27,48 @@ data class PoseCell(
          */
         fun keyOf(state: AnimationState, index: Int, viewSuffix: String = ""): String =
             "${state.name.lowercase()}_$index$viewSuffix"
+
+        /**
+         * How many frames of one animation are actually on disk.
+         *
+         * Read from the keys themselves rather than counted against a script,
+         * and that is the whole point of it. A script is built from a frame
+         * count somebody chose, capped at twelve; a row cut from a clip is as
+         * long as the clip and the frame rate make it, which at twenty-four
+         * frames a second is nineteen. Counted against the script those last
+         * seven are invisible -- they are on disk, they were paid for, and the
+         * sheet is planned twelve wide and drops them. The screen showed
+         * twelve chips for the same reason, so a nineteen frame cycle and a
+         * twelve frame one looked identical.
+         *
+         * Counted from zero and stopping at the first gap. A row with a hole
+         * in it cannot be laid out as though it were whole: the cells after
+         * the hole would be planned, and the keys that should fill them are
+         * not there, so the animation would play through however many blanks
+         * the gap left.
+         */
+        fun rowLength(drawn: Set<String>, state: AnimationState, viewSuffix: String = ""): Int {
+            var length = 0
+            while (keyOf(state, length, viewSuffix) in drawn) length++
+            return length
+        }
+
+        /**
+         * The length of every animation that has anything drawn, across views.
+         *
+         * The longest of the views, because a sheet's row is as wide as the
+         * widest angle in it and a short one is padded. Counting the shortest
+         * would clip the other.
+         */
+        fun rowLengths(
+            drawn: Set<String>,
+            viewSuffixes: List<String> = listOf(""),
+        ): Map<AnimationState, Int> {
+            val suffixes = viewSuffixes.ifEmpty { listOf("") }
+            return AnimationState.entries
+                .associateWith { state -> suffixes.maxOf { rowLength(drawn, state, it) } }
+                .filterValues { it > 0 }
+        }
     }
 }
 

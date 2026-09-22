@@ -18,11 +18,11 @@ import com.stratum.core.domain.ai.PoseStep
 import com.stratum.core.domain.ai.PoseView
 import com.stratum.core.domain.ai.SavedCharacter
 import com.stratum.core.domain.character.CharacterRole
+import com.stratum.core.domain.sprite.PoseCell
 import com.stratum.core.domain.sprite.ClipSampling
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.PackedSheet
 import com.stratum.core.domain.sprite.Pose
-import com.stratum.core.domain.sprite.PoseCell
 import com.stratum.core.domain.sprite.PoseGuideMode
 import com.stratum.core.domain.sprite.PoseGuideStyle
 import com.stratum.core.domain.sprite.PoseGuides
@@ -499,7 +499,14 @@ class PoseForgeViewModel(
                 val hasExistingSheet = savedCharacters().firstOrNull { it.setId == currentSetId }?.sheetId != null
                 if (!hasExistingSheet || failures.isEmpty()) {
                     val onDisk = current.scope.scriptFor(current.frames, PoseView.entries)
-                    val counts = onDisk.drawnCounts(drawnNow)
+                    // Counted off the keys, not against the script. A row
+                    // cut from a clip is as long as the clip and the rate make
+                    // it, which a script capped at twelve cannot describe.
+                    val counts = PoseCell.rowLengths(
+                        drawnNow,
+                        onDisk.drawnViews(drawnNow).ifEmpty { listOf(PoseView.FRONT) }
+                            .map { it.keySuffix },
+                    )
                     val plan = PoseSheetPlanner.plan(
                         id = currentSetId,
                         name = current.subject.trim().ifBlank { "Character" },
@@ -602,7 +609,10 @@ class PoseForgeViewModel(
         // script itself; the view model used to do this arithmetic too, and
         // having two copies is how it came to be right in one and wrong in
         // the other.
-        val counts = onDisk.drawnCounts(drawn)
+        val counts = PoseCell.rowLengths(
+            drawn,
+            onDisk.drawnViews(drawn).ifEmpty { listOf(PoseView.FRONT) }.map { it.keySuffix },
+        )
 
         val plan = PoseSheetPlanner.plan(
             id = setId,
@@ -854,6 +864,10 @@ class PoseForgeViewModel(
                 busy = false,
                 drawn = posesDrawn(setId),
                 clips = clipsDrawn(setId),
+                rowLengths = PoseCell.rowLengths(
+                    posesDrawn(setId),
+                    _state.value.views.map { it.keySuffix },
+                ),
                 failures = failures,
                 message = if (drawn > 0) "Cut $drawn frames from ${states.size} clips." else null,
                 error = if (drawn == 0) "No clip could be drawn." else null,
@@ -1118,6 +1132,15 @@ data class PoseForgeUiState(
     val promptOverride: String? = null,
     /** Animations with a clip saved, which can be re-cut for nothing. */
     val clips: Set<String> = emptySet(),
+    /**
+     * How long each animation actually is on disk.
+     *
+     * Read off the keys rather than taken from the script, because a row cut
+     * from a clip is as long as the clip and the frame rate make it and the
+     * script is capped at twelve. The screen drew twelve chips for a nineteen
+     * frame row, so a long cycle and a short one looked the same.
+     */
+    val rowLengths: Map<AnimationState, Int> = emptyMap(),
     /**
      * Whether each animation is drawn as one clip rather than frame by frame.
      *
