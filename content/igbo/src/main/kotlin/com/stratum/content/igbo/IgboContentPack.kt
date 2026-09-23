@@ -51,7 +51,7 @@ object IgboContentPack {
             strength = 16,
             agility = 11,
             insight = 8,
-            startingBlockIds = listOf(IgboPackBlocks.redEarth.id, IgboPackBlocks.graniteStone.id),
+            startingBlockIds = listOf(IgboPackBlocks.redEarth.id, IgboPackBlocks.graniteStone.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.plankWall.id),
             abilityIds = listOf("$NS:mma_nkwu_cleave", "$NS:ikenga_tremor"),
             baseStats = CombatStats(
                 maxHealth = 260,
@@ -76,7 +76,7 @@ object IgboContentPack {
             strength = 8,
             agility = 12,
             insight = 18,
-            startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id),
+            startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.plankWall.id),
             abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark"),
             baseStats = CombatStats(
                 maxHealth = 180,
@@ -102,7 +102,7 @@ object IgboContentPack {
             strength = 9,
             agility = 13,
             insight = 17,
-            startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id),
+            startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.plankWall.id),
             abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova"),
             baseStats = CombatStats(
                 maxHealth = 200,
@@ -129,7 +129,7 @@ object IgboContentPack {
             strength = 19,
             agility = 15,
             insight = 6,
-            startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id),
+            startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.plankWall.id),
             abilityIds = listOf("$NS:ikenga_tremor", "$NS:mma_nkwu_cleave"),
             baseStats = CombatStats(
                 maxHealth = 300,

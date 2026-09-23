@@ -2,6 +2,7 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.BlockShapes
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.Direction
 import com.stratum.core.domain.world.World
@@ -149,10 +150,12 @@ class PlayerMotion(private val world: World) {
     private fun settled(player: PlayerState): PlayerState {
         val feet = player.blockPos
         if (feet.z <= 0) return player
-        if (world.isSolid(feet.below())) return player
+        val localX = player.position.x - feet.x
+        val localY = player.position.y - feet.y
+        if (BlockShapes.occupies(world, feet.below(), localX, localY)) return player
 
         var z = feet.z
-        while (z > 0 && !world.isSolid(BlockPos(feet.x, feet.y, z - 1))) z--
+        while (z > 0 && !BlockShapes.occupies(world, BlockPos(feet.x, feet.y, z - 1), localX, localY)) z--
         return player.copy(position = player.position.copy(z = z.toFloat()))
     }
 
@@ -168,9 +171,15 @@ class PlayerMotion(private val world: World) {
         val columnY = floor(target.y).toInt()
         val currentZ = from.toBlockPos().z
 
+        // Tested against the block's real shape, not the cell. A wall a third
+        // of a block thick leaves two thirds of its cell open, and treating the
+        // whole cell as solid made building a room pointless: you could not
+        // walk along the inside of your own wall.
+        val localX = target.x - columnX
+        val localY = target.y - columnY
         var highestSolid = -1
         for (z in (currentZ + STEP_UP) downTo 0) {
-            if (world.isSolid(BlockPos(columnX, columnY, z))) {
+            if (BlockShapes.occupies(world, BlockPos(columnX, columnY, z), localX, localY, BODY_MARGIN)) {
                 highestSolid = z
                 break
             }
@@ -192,6 +201,15 @@ class PlayerMotion(private val world: World) {
     companion object {
         /** How far the player climbs without a jump. */
         const val STEP_UP = 1
+
+        /**
+         * How far outside a thin shape the body is still stopped, in blocks.
+         *
+         * The player is a point to the collision model and a body on screen.
+         * Without a margin they could press their centre right up against a
+         * wall and draw half inside it.
+         */
+        const val BODY_MARGIN = 0.18f
         /** Blocks per second at full stick deflection. */
         const val WALK_SPEED = 4.2f
         /** A roll is a burst, not a sprint: fast and over quickly. */

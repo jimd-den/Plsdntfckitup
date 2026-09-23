@@ -47,6 +47,7 @@ fun StyleOverlay(
     onRestyle: (String) -> Unit,
     onReroll: () -> Unit,
     onClose: () -> Unit,
+    onForge: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = StratumTheme.colors
@@ -107,6 +108,14 @@ fun StyleOverlay(
                 StratumAction(
                     label = "Reroll",
                     onClick = onReroll,
+                    emphasis = ActionEmphasis.SECONDARY,
+                )
+                // Paints this style's own textures and props with the image
+                // model. The lighting restyle above is instant and free; this
+                // is the part that costs a few cents and a minute.
+                StratumAction(
+                    label = state.forging ?: "Forge art",
+                    onClick = onForge,
                     emphasis = ActionEmphasis.SECONDARY,
                 )
                 StratumAction(

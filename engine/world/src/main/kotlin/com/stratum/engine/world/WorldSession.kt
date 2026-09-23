@@ -14,6 +14,7 @@ import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.sprite.AnimationSelector
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.Direction
 import com.stratum.core.domain.world.World
@@ -933,6 +934,8 @@ class WorldSession(
      * this exists so the player sees the shape before spending the blocks.
      */
     fun previewBuild(from: BlockPos, to: BlockPos): BuildPreview {
+        if (buildTool.removes) return previewErase(from, to)
+
         val blockId = player.selectedBlockId
             ?: return BuildPreview(emptyList(), 0, 0, false).also { buildPreview = emptyList() }
 
@@ -968,7 +971,56 @@ class WorldSession(
      * afforded rather than refusing the whole thing, which is what a player
      * expects from a drag that was slightly too ambitious.
      */
+    /**
+     * What an erase drag would remove: anything breakable, nothing the player
+     * is standing on, and never bedrock.
+     *
+     * Needs nothing selected and costs nothing, because removing is how a
+     * player gets their blocks back.
+     */
+    private fun previewErase(from: BlockPos, to: BlockPos): BuildPreview {
+        // Anchored on the cell the drag started *above*, so dragging across the
+        // top of a wall erases the wall rather than the ground it stands on.
+        val removable = BuildPlanner.plan(BuildTool.ERASE, from.above(), to.above())
+            .filter { pos ->
+                pos.z in 1 until Chunk.HEIGHT &&
+                    streamingWorld.isLoaded(pos.chunkPos) &&
+                    streamingWorld.blockAt(pos).let { !it.isAir && it.isBreakable } &&
+                    pos != player.feet.below()
+            }
+        buildPreview = removable
+        return BuildPreview(removable, required = 0, held = 0, affordable = true)
+    }
+
+    private fun commitErase(): BuildResult {
+        val planned = buildPreview
+        buildPreview = emptyList()
+        if (planned.isEmpty()) return BuildResult.NothingToBuild
+
+        var removed = 0
+        // Top down, so a column comes apart the way it would if dug by hand and
+        // nothing is asked to settle onto a cell that is about to go.
+        for (pos in planned.sortedByDescending { it.z }) {
+            val block = streamingWorld.blockAt(pos)
+            if (block.isAir || !block.isBreakable) continue
+            if (!streamingWorld.setBlock(pos, BlockRegistry.AIR_INDEX)) continue
+            player = player.withItem(block.drop)
+            interaction.settle(pos)
+            removed++
+        }
+        if (removed == 0) return BuildResult.NothingToBuild
+        player = motion.advance(player, 0f)
+        feedbackLog.add(
+            kind = FeedbackKind.LOOT,
+            text = "Cleared $removed",
+            origin = player.position,
+            color = FEEDBACK_BUILT,
+        )
+        return BuildResult.Erased(removed)
+    }
+
     fun commitBuild(): BuildResult {
+        if (buildTool.removes) return commitErase()
         val blockId = player.selectedBlockId ?: return BuildResult.NothingSelected
         val planned = buildPreview
         if (planned.isEmpty()) return BuildResult.NothingToBuild
@@ -1129,6 +1181,9 @@ sealed interface BuildResult {
     data object NothingSelected : BuildResult
     data object NothingToBuild : BuildResult
     data object OutOfBlocks : BuildResult
+
+    /** An erase drag, and how many blocks it handed back. */
+    data class Erased(val removed: Int) : BuildResult
 }
 
 /** An item lying in the world. */

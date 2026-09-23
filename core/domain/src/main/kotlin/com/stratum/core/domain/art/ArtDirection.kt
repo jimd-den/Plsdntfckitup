@@ -192,6 +192,15 @@ data class LightingRule(
      * "sunset" without changing a single colour.
      */
     val sunAzimuth: Float = 315f,
+    /**
+     * How high the sun stands, in degrees above the horizon.
+     *
+     * Only the 3D renderer can use this — a 2D face shade has no idea how long
+     * a shadow is — and it is the knob that most changes the mood of a lit
+     * scene: high sun is noon and short hard shadows, low sun is long shadows
+     * raking across the terraces.
+     */
+    val sunElevation: Float = 50f,
     /** How much brighter a fully lit face is than an ambient one. */
     val sunStrength: Float = 0.42f,
     /** The floor: how much light a face pointing away from the sun still gets. */
@@ -210,6 +219,8 @@ data class LightingRule(
     val emissiveRadius: Float = 3.5f,
     /** How strongly it bleeds at the source. */
     val emissiveStrength: Float = 0.8f,
+    /** How bright the light the hero carries is. See [SceneLighting.heroLight]. */
+    val heroLight: Float = 0.45f,
 ) {
     init {
         require(depthRange >= 1) { "A depth range below one level cannot shade anything" }

@@ -3,6 +3,7 @@ package com.stratum.core.domain.art
 import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.world.BlockMaterial
+import com.stratum.core.domain.world.BlockType
 import kotlin.math.abs
 
 /**
@@ -22,7 +23,7 @@ class StyleSheetArtDirector(
     override val direction: ArtDirection = ArtDirection.HOUSE,
     /** Per-region ingredients, usually from [BiomeArtKit.deriveAll]. */
     private val kits: Map<String, BiomeArtKit> = emptyMap(),
-) : WorldArtDirector {
+) : WorldArtDirector, SceneArtDirector {
 
     private val palette = direction.palette
     private val light = direction.light
@@ -158,6 +159,65 @@ class StyleSheetArtDirector(
         }
 
         return Tint.quantize(color, ramp)
+    }
+
+    override fun surfaceFor(block: BlockType, face: SurfaceFace, biomeId: String?): SurfaceStyle {
+        val kit = biomeId?.let(kits::get)
+        val base = if (face == SurfaceFace.TOP) block.topColor else block.sideColor
+        val feature = block.lightEmission > 0 || block.material == BlockMaterial.ORE
+        val band = contrast.terrainValueBand
+        var albedo = Tint.saturate(base, if (feature) contrast.featureSaturation else contrast.terrainSaturation)
+        if (!feature) albedo = Tint.clampLuma(albedo, band.start, band.endInclusive)
+        albedo = Tint.quantize(albedo, rampFor(kit))
+        val emission = block.lightEmission.toFloat() / MAX_BLOCK_LIGHT
+        return SurfaceStyle(
+            albedo = albedo,
+            texture = "${block.id}/${face.name.lowercase()}",
+            emissive = emission * light.emissiveStrength,
+            emissiveColor = if (Tint.alpha(block.accentColor) > 0) block.accentColor else palette.resource,
+        )
+    }
+
+    override fun lightingFor(biomeId: String?, time: WorldTime): SceneLighting {
+        val atmosphere = atmosphereFor(null, time)
+        val night = nightFraction(time)
+        // The 2D azimuth is measured on screen; the scene needs it on the
+        // ground. Screen-up and screen-right are the two diagonals of the grid
+        // the isometric camera looks along, so the conversion is one rotation.
+        val azimuth = Math.toRadians(light.sunAzimuth.toDouble())
+        val elevation = Math.toRadians(light.sunElevation.toDouble())
+        val upX = -INV_SQRT2
+        val upY = -INV_SQRT2
+        val rightX = INV_SQRT2
+        val rightY = -INV_SQRT2
+        val horizontalX = (kotlin.math.cos(azimuth) * upX + kotlin.math.sin(azimuth) * rightX).toFloat()
+        val horizontalY = (kotlin.math.cos(azimuth) * upY + kotlin.math.sin(azimuth) * rightY).toFloat()
+        val flat = kotlin.math.cos(elevation).toFloat()
+        return SceneLighting(
+            sunX = horizontalX * flat,
+            sunY = horizontalY * flat,
+            sunZ = kotlin.math.sin(elevation).toFloat(),
+            sunColor = palette.sun,
+            sunIntensity = light.sunStrength * SUN_GAIN * (1f - night * NIGHT_SUN_LOSS),
+            skyAmbient = Tint.mix(palette.ambient, palette.sun, SKY_WARMTH),
+            groundAmbient = palette.shadow,
+            ambientIntensity = light.ambientStrength * AMBIENT_GAIN,
+            shadowStrength = (SHADOW_BASE + light.shadowTint * SHADOW_TINT_GAIN).coerceIn(0f, 0.95f),
+            fogColor = atmosphere.haze,
+            fogStart = FOG_NEAR,
+            fogEnd = FOG_NEAR + FOG_SPAN * (1f - atmosphere.hazeStrength),
+            fogFloor = 0f,
+            rimColor = palette.heroRim,
+            rimStrength = contrast.rimStrength,
+            exposure = 1f,
+            saturation = SATURATION_BASE + SATURATION_GAIN * contrast.terrainSaturation,
+            vignette = atmosphere.vignette,
+            skyTop = atmosphere.skyTop,
+            skyBottom = atmosphere.skyBottom,
+            pointLightGain = light.emissiveStrength * POINT_GAIN,
+            heroLight = light.heroLight * (1f + night),
+            heroLightRadius = HERO_LIGHT_RADIUS,
+        )
     }
 
     override fun propStyleFor(cue: PropCue): PropStyle? {
@@ -404,6 +464,23 @@ class StyleSheetArtDirector(
         const val RIGHT_FACING = 120f
 
         const val MAX_BLOCK_LIGHT = 15
+
+        // The 3D lighting model's gains. Chosen so the house style's numbers,
+        // which were tuned for flat 2D face shades, land at a similar overall
+        // brightness once they are a real sun and a real sky.
+        const val INV_SQRT2 = 0.70710678
+        const val SUN_GAIN = 2.7f
+        const val AMBIENT_GAIN = 1.35f
+        const val NIGHT_SUN_LOSS = 0.6f
+        const val SKY_WARMTH = 0.25f
+        const val SHADOW_BASE = 0.45f
+        const val SHADOW_TINT_GAIN = 0.5f
+        const val FOG_NEAR = 6f
+        const val FOG_SPAN = 30f
+        const val HERO_LIGHT_RADIUS = 7.5f
+        const val SATURATION_BASE = 0.55f
+        const val SATURATION_GAIN = 0.5f
+        const val POINT_GAIN = 1.6f
         /**
          * How dark an unlit cell gets.
          *

@@ -28,6 +28,7 @@ rootProject.name = "Stratum"
 // ---------------------------------------------------------------------------
 // Dependency rule: :app -> :feature:* -> :core:designsystem -> :core:domain
 //                                     -> :core:data      -> :core:domain
+//                                        :engine:scene   -> :core:domain
 //                                        :engine:render  -> :engine:world
 //                                        :engine:world   -> :core:domain
 //                                        :content:igbo   -> :core:domain
@@ -40,6 +41,7 @@ include(":core:data")
 include(":core:designsystem")
 include(":engine:world")
 include(":engine:render")
+include(":engine:scene")
 include(":feature:play")
 include(":feature:forge")
 include(":feature:hero")

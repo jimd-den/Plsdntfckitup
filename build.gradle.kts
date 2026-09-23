@@ -22,6 +22,7 @@ val pureModules = listOf(
   ":core:domain",
   ":engine:world",
   ":engine:render",
+  ":engine:scene",
   ":content:igbo",
   ":tools:artpreview",
   ":legacy:domain",

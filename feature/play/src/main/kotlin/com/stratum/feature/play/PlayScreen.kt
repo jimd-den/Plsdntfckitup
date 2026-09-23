@@ -86,6 +86,8 @@ fun PlayScreen(
         onRestyle = viewModel::restyle,
         onRerollStyle = viewModel::rerollStyle,
         onToggleStyle = viewModel::toggleStyle,
+        onToggle3D = viewModel::toggle3D,
+        onForgeStyle = viewModel::forgeStyle,
         onOpenMenu = onOpenMenu,
     )
 }
@@ -121,48 +123,89 @@ fun PlayScreenContent(
     onRestyle: (String) -> Unit = {},
     onRerollStyle: () -> Unit = {},
     onToggleStyle: () -> Unit = {},
+    onToggle3D: () -> Unit = {},
+    onForgeStyle: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
 
     Column(modifier = modifier.fillMaxSize().background(colors.surface)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            WorldCanvas(
-                world = world,
-                camera = state.camera,
-                projection = state.projection,
-                highlight = state.miningTarget,
-                playerPosition = state.player.position,
-                playerFacing = state.player.facing,
-                playerAccent = colors.accent,
-                enemies = state.enemies,
-                groundLoot = state.groundLoot,
-                groundInserts = state.groundInserts,
-                insertColor = { state.insertOrNull(it)?.color },
-                insertGlyph = { state.insertOrNull(it)?.glyph },
-                feedback = state.feedback,
-                playerFlash = state.playerFlash,
-                isRolling = state.isRolling,
-                isInvulnerable = state.isInvulnerable,
-                flashFor = state.flashFor,
-                impactFor = state.impactFor,
-                spriteFor = state.spriteFor,
-                playerAnimation = state.playerAnimation,
-                animationFor = state.animationFor,
-                buildPreview = state.buildPreview,
-                buildAffordable = state.buildAffordable,
-                buildMode = state.buildMode,
-                onBuildDrag = onBuildDrag,
-                onBuildCommit = onBuildCommit,
-                artDirector = state.artDirector,
-                worldTime = state.worldTime,
-                biomeAt = state.biomeAt,
-                revision = state.worldRevision,
-                frame = state.frame,
-                modifier = Modifier.fillMaxSize(),
-                onTapBlock = onTapBlock,
-                onLongPressBlock = onLongPressBlock,
-            )
+            // 3D by default: a lit, shadowed world seen through the action-RPG
+            // camera. The 2D canvas stays one tap away for devices without
+            // OpenGL ES 3, and as the reference the 3D view was built against.
+            if (state.use3D) {
+                com.stratum.feature.play.gl.Scene3DView(
+                    world = world,
+                    input = com.stratum.feature.play.gl.Scene3DInput(
+                        camera = state.camera,
+                        zoom = state.projection.zoom,
+                        player = state.player.position,
+                        playerFacingX = state.player.facing.dx.toFloat(),
+                        playerFacingY = state.player.facing.dy.toFloat(),
+                        playerAccent = null,
+                        playerFlash = state.playerFlash,
+                        enemies = state.enemies,
+                        groundLoot = state.groundLoot,
+                        groundInserts = state.groundInserts,
+                        feedback = state.feedback,
+                        flashFor = state.flashFor,
+                        impactFor = state.impactFor,
+                        highlight = state.miningTarget,
+                        buildPreview = state.buildPreview,
+                        buildAffordable = state.buildAffordable,
+                        buildMode = state.buildMode,
+                        director = state.artDirector,
+                        kit = state.kit,
+                        time = state.worldTime,
+                        biomeAt = state.biomeAt,
+                        revision = state.worldRevision,
+                        frame = state.frame,
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                    onTapBlock = onTapBlock,
+                    onLongPressBlock = onLongPressBlock,
+                    onBuildDrag = onBuildDrag,
+                    onBuildCommit = onBuildCommit,
+                )
+            } else {
+                WorldCanvas(
+                    world = world,
+                    camera = state.camera,
+                    projection = state.projection,
+                    highlight = state.miningTarget,
+                    playerPosition = state.player.position,
+                    playerFacing = state.player.facing,
+                    playerAccent = colors.accent,
+                    enemies = state.enemies,
+                    groundLoot = state.groundLoot,
+                    groundInserts = state.groundInserts,
+                    insertColor = { state.insertOrNull(it)?.color },
+                    insertGlyph = { state.insertOrNull(it)?.glyph },
+                    feedback = state.feedback,
+                    playerFlash = state.playerFlash,
+                    isRolling = state.isRolling,
+                    isInvulnerable = state.isInvulnerable,
+                    flashFor = state.flashFor,
+                    impactFor = state.impactFor,
+                    spriteFor = state.spriteFor,
+                    playerAnimation = state.playerAnimation,
+                    animationFor = state.animationFor,
+                    buildPreview = state.buildPreview,
+                    buildAffordable = state.buildAffordable,
+                    buildMode = state.buildMode,
+                    onBuildDrag = onBuildDrag,
+                    onBuildCommit = onBuildCommit,
+                    artDirector = state.artDirector,
+                    worldTime = state.worldTime,
+                    biomeAt = state.biomeAt,
+                    revision = state.worldRevision,
+                    frame = state.frame,
+                    modifier = Modifier.fillMaxSize(),
+                    onTapBlock = onTapBlock,
+                    onLongPressBlock = onLongPressBlock,
+                )
+            }
 
             // The world draws under the status bar on purpose; the meters over
             // it do not, or a camera hole lands in the middle of the health bar.
@@ -202,6 +245,11 @@ fun PlayScreenContent(
                         onClick = onToggleStyle,
                         emphasis = if (state.styleOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                     )
+                    StratumAction(
+                        label = if (state.use3D) "3D" else "2D",
+                        onClick = onToggle3D,
+                        emphasis = ActionEmphasis.QUIET,
+                    )
                 }
                 Spacer(Modifier.height(Space.small))
                 ZoomControls(onZoom = onZoom)
@@ -213,6 +261,7 @@ fun PlayScreenContent(
                     onRestyle = onRestyle,
                     onReroll = onRerollStyle,
                     onClose = onToggleStyle,
+                    onForge = onForgeStyle,
                 )
             }
 

@@ -5,6 +5,8 @@ import com.stratum.core.domain.art.ActorRole
 import com.stratum.core.domain.art.ArtDirection
 import com.stratum.core.domain.art.MoteKind
 import com.stratum.core.domain.art.PropSilhouette
+import com.stratum.core.domain.art.PropSilhouettes
+import com.stratum.core.domain.art.PartRole
 import com.stratum.core.domain.art.StyleLexicon
 import com.stratum.core.domain.art.StyleSheetArtDirector
 import com.stratum.core.domain.art.Tint

@@ -1,6 +1,7 @@
 package com.stratum.content.igbo
 
 import com.stratum.core.domain.world.BlockMaterial
+import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockType
 
 /**
@@ -214,11 +215,45 @@ internal object IgboPackBlocks {
         accentColor = 0xFFFFD700,
     )
 
+    /**
+     * Rammed laterite, a third of a block thick.
+     *
+     * The compound walls of an Igbo homestead were built from exactly this, and
+     * they are thin, tall and joined at the corners — which is what makes them
+     * the right first wall for a pack: they read as architecture, not as a
+     * stack of terrain.
+     */
+    val mudWall = BlockType(
+        id = "$NS:mud_wall",
+        displayName = "Laterite Wall",
+        material = BlockMaterial.SOIL,
+        shape = BlockShape.WALL,
+        hardness = 0.6f,
+        isOpaque = false,
+        topColor = 0xFFB5653A,
+        sideColor = 0xFF8E4A28,
+        accentColor = 0xFFE7A36B,
+    )
+
+    /** A split-iroko palisade: the same shape in timber. */
+    val plankWall = BlockType(
+        id = "$NS:plank_wall",
+        displayName = "Iroko Palisade",
+        material = BlockMaterial.WOOD,
+        shape = BlockShape.WALL,
+        hardness = 0.9f,
+        isOpaque = false,
+        topColor = 0xFF8A6238,
+        sideColor = 0xFF5E4024,
+        accentColor = 0xFFC9A26B,
+    )
+
     val all = listOf(
         redEarth, groveTurf, riverClay, ashSand,
         graniteStone, obsidianCrag, catacombMasonry,
         bronzeOre, ironOre, stormCrystal,
         irokoTrunk, irokoCanopy, palmReed, spiritWater,
         bronzeBrazier, nsibidiSeal, ofoShrine,
+        mudWall, plankWall,
     )
 }

@@ -145,6 +145,30 @@ object ArtBible {
         }
     }
 
+    /**
+     * The palette, in words a model follows.
+     *
+     * Hex codes alone are mostly ignored by image models; named roles with hex
+     * codes attached are followed far more often, because the model can tell
+     * which colour is meant to dominate and which is a rare accent.
+     */
+    fun paletteNote(direction: ArtDirection, kit: BiomeArtKit?): String {
+        val palette = direction.palette
+        val mood = when {
+            direction.contrast.terrainValueCeiling < 0.55f -> "dark, low-key values"
+            direction.contrast.terrainValueFloor > 0.35f -> "light, high-key values"
+            else -> "mid-tone values"
+        }
+        val saturation = when {
+            direction.contrast.terrainSaturation < 0.5f -> "muted, desaturated colour"
+            direction.contrast.terrainSaturation > 0.9f -> "rich, saturated colour"
+            else -> "moderately saturated colour"
+        }
+        val accent = kit?.sacredAccent ?: palette.sacred
+        return "Palette: $mood, $saturation; light tinted ${hex(palette.sun)}, shadows tinted ${hex(palette.shadow)}, " +
+            "occasional accent ${hex(accent)}."
+    }
+
     private fun paletteClause(direction: ArtDirection, kit: BiomeArtKit?): String {
         val palette = direction.palette
         val sacred = kit?.sacredAccent ?: palette.sacred
@@ -179,7 +203,9 @@ object ArtBible {
             "consistent with a single named individual"
     }
 
-    private fun hex(color: Long): String = "#%06X".format(color and 0xFFFFFF)
+    private fun hex(color: Long): String = hexOf(color)
+
+    fun hexOf(color: Long): String = "#%06X".format(color and 0xFFFFFF)
 }
 
 /** One thing to generate, with the prompt already assembled. */

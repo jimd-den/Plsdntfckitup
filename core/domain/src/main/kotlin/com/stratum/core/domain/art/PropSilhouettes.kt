@@ -1,6 +1,5 @@
-package com.stratum.engine.render
+package com.stratum.core.domain.art
 
-import com.stratum.core.domain.art.PropSilhouette
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin

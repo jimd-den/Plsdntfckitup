@@ -72,6 +72,13 @@ class PlayViewModel(
      * simulation.
      */
     private val stylePrompt: String = "",
+    /**
+     * Draws new art for a style the player typed, or null when no image model
+     * is configured. OpenRouter with `meta/muse-image` in the shipped app.
+     */
+    private val imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+    /** Where kits forged on this device are kept between runs. */
+    private val kitDirectory: java.io.File? = null,
 ) : ViewModel() {
 
     /**
@@ -156,12 +163,66 @@ class PlayViewModel(
             artDirector = artDirector,
             stylePrompt = prompt,
             styleSummary = artDirector.direction.summary,
+            kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
         )
+    }
+
+    /**
+     * Paints the current style's asset kit with the image model.
+     *
+     * One call per style, a dozen or so images, cents rather than dollars: the
+     * forge plans only the ground, cliff faces, walls and prop kinds of the
+     * region the player is standing in, never the world. What it finishes is
+     * saved and swapped in as it arrives, so the world repaints itself while
+     * the player watches, and anything that fails simply stays as it was.
+     */
+    fun forgeStyle() {
+        val model = imageModel ?: return publish(message = "Add an OpenRouter key in settings to forge art")
+        val root = kitDirectory ?: return publish(message = "No storage for forged art")
+        if (_state.value.forging != null) return
+        val direction = artDirector.direction
+        val folder = java.io.File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_")).apply { mkdirs() }
+        val biome = session.currentBiome.id
+        val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
+        val orders = com.stratum.core.domain.art.ForgePlanner.plan(direction, pack, setOf(biome))
+            .filterNot { java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(it.key)).exists() }
+        if (orders.isEmpty()) {
+            _state.value = _state.value.copy(kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath)
+            return publish(message = "This style is already forged")
+        }
+        val forge = com.stratum.engine.scene.forge.AssetForge(model, com.stratum.feature.play.gl.AndroidImageCodec)
+        _state.value = _state.value.copy(forging = "Forging 0/${orders.size}")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var done = 0
+            var made = 0
+            forge.forge(orders, concurrency = 3) { asset ->
+                done++
+                asset.texture?.let { texture ->
+                    java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(asset.order.key))
+                        .writeBytes(com.stratum.feature.play.gl.AndroidImageCodec.encodePng(texture))
+                    made++
+                }
+                _state.value = _state.value.copy(
+                    forging = "Forging $done/${orders.size}",
+                    kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath,
+                )
+            }
+            // Back on the main thread: publishing reads the session, which the
+            // game loop mutates there.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _state.value = _state.value.copy(forging = null)
+                publish(message = "Forged $made of ${orders.size}")
+            }
+        }
     }
 
     /** The same request again, somewhere else. Asking twice should not be futile. */
     fun rerollStyle() {
         restyle(_state.value.stylePrompt, styleSeed + 1)
+    }
+
+    fun toggle3D() {
+        _state.value = _state.value.copy(use3D = !_state.value.use3D)
     }
 
     fun toggleStyle() {
@@ -317,6 +378,7 @@ class PlayViewModel(
         artDirector = artDirector,
         stylePrompt = stylePrompt,
         styleSummary = artDirector.direction.summary,
+        kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
@@ -466,6 +528,7 @@ class PlayViewModel(
             BuildResult.OutOfBlocks -> publish(message = "Out of blocks")
             BuildResult.NothingSelected -> publish(message = "Nothing selected to build with")
             BuildResult.NothingToBuild -> publish()
+            is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
         }
     }
 
@@ -558,10 +621,12 @@ class PlayViewModel(
             config: WorldConfig,
             heroClassId: String? = null,
             spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+            imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+            kitDirectory: java.io.File? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PlayViewModel(content, config, heroClassId, spriteResolver) as T
+                PlayViewModel(content, config, heroClassId, spriteResolver, imageModel = imageModel, kitDirectory = kitDirectory) as T
         }
     }
 }
@@ -616,6 +681,12 @@ data class PlayUiState(
     /** What the game understood by it, which is how a player learns the vocabulary. */
     val styleSummary: String = "",
     val styleOpen: Boolean = false,
+    /** Which forged asset kit the 3D view draws with. */
+    val kit: String = "house",
+    /** The lit 3D view, or the flat 2D canvas it replaced. */
+    val use3D: Boolean = true,
+    /** Progress of an art forge in flight, or null when none is running. */
+    val forging: String? = null,
     val message: String? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive

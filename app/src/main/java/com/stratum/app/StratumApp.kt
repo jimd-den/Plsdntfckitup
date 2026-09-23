@@ -346,6 +346,8 @@ fun StratumApp(
                         contentWithSprites, config,
                         heroClassId = heroClassId,
                         spriteResolver = spriteResolver,
+                        imageModel = ai.imageModel,
+                        kitDirectory = java.io.File(context.filesDir, "forge"),
                     ),
                 )
                 PlayScreenRoute(

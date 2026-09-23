@@ -23,6 +23,9 @@ wrapped in an ARPG shell, where the content is data rather than code.
                                      :engine:world
                                             ▲
                                      :engine:render ◄── :tools:artpreview
+                                                                │
+                                     :engine:scene ◄────────────┘
+                                   (3D: -> :core:domain only)
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -35,7 +38,8 @@ Room, OkHttp or Compose exist.
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
 | `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
-| `:content:igbo` | Pure Kotlin | The built-in content pack. Data only. |
+| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
+| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
 | `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
 | `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
@@ -48,7 +52,7 @@ Room, OkHttp or Compose exist.
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:engine:render`,
+Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
 `:content:igbo`, `:tools:artpreview` and `:legacy:domain` apply only the Kotlin
 JVM plugin, so the Android SDK is not on
 their compile classpath and `import android.*` fails to compile.
@@ -247,6 +251,93 @@ trees is one identical tree two hundred times, which reads as a repeating
 texture, and the shapes belong to whichever font the device shipped rather than
 to this game. Eight families with eight variants each cover everything a pack
 can scatter, and every instance is a different individual.
+
+## Why the world is 3D, and still made of sprites
+
+The 2D isometric canvas could fake depth but not light: no shadow could fall
+across a terrace, no torch could light the wall behind it, and a character
+could only ever be pasted onto the ground. The play screen now draws a real
+3D scene through a camera that looks down at about fifty degrees through a
+narrow lens from a long way back — the Diablo and Hades camera — so the grid
+still reads as a grid while walls get tops, terraces cast, and braziers light
+what is around them.
+
+The terrain is voxels meshed into triangles, with only visible faces emitted
+and ambient occlusion at every corner. Occlusion is what makes a voxel world
+look solid; without it every inside corner is lit like open ground.
+
+Scenery is not modelled. Trees, reeds, braziers and crystals are painted
+sprites standing in the lit world and turned to face the lens — exactly what
+Diablo II and Hades do, and exactly the kind of asset an image model is good
+at. A sprite in front of a character is faded with an ordered dither (no
+sorting, no depth-write problems), because a player who cannot see their own
+character behind a tree cannot see what is attacking them either.
+
+The camera is what the scene is drawn *through*; taps are resolved by casting
+a ray back out through the same camera and walking it cell by cell
+(`ScenePicker`), so the block under the finger is the block that gets dug.
+
+## Two renderers, one lighting equation
+
+`SceneBuilder` produces a `SceneFrame`: terrain, sprites, bodies, ground
+decals, glows, point lights and the sun's shadow projection, in one vertex
+layout. Two backends draw it:
+
+- `SceneGlRenderer` in `:feature:play`, OpenGL ES 3: a sun shadow map, the
+  scene into a high-range target, and one tone-mapping pass.
+- `SceneRasterizer` in `:tools:artpreview`, on the CPU, supersampled.
+
+Both implement `ShadingModel` — hemisphere ambient, sun with 3x3 PCF shadows,
+point lights, rim light on actors, distance and height fog, filmic shoulder,
+saturation and vignette. The GLSL is a line-for-line port of the Kotlin, and
+the shaders are compiled and linked as GLSL ES 3.00 in headless WebGL2 as a
+check. `./gradlew :tools:artpreview:scenePreview` renders every style from one
+camera, so a change to the look is judged by looking at it.
+
+The director now answers two new questions: what a surface *is*
+(`surfaceFor`, albedo and texture key, no light baked in) and what the light
+*does* (`lightingFor`). The 2D path keeps working unchanged.
+
+Two pieces of the lighting model exist because the first version got them
+wrong. Fog is measured from the point the camera looks at, not the lens: the
+camera sits thirty-odd blocks back, and fog measured from the eye started
+before the first thing on screen. And every style gives the hero a light
+radius, Diablo's answer to dark styles: the darkness stays everywhere except
+around the one thing the player must be able to see.
+
+## The asset forge
+
+`ForgePlanner` reads any content pack and orders a small kit: the ground and
+cliff faces of each region, the walls a player can build, and one sprite per
+kind of prop — a dozen or so images for a region, never one per block. Each
+prompt is the style's words, the block's own colour stated as dominant, the
+prop's silhouette family in plain words, and the prohibitions. Sprites are
+drawn on flat magenta and cut out by flood fill from the border, so purple
+*on* the object survives.
+
+`AssetForge` calls whatever `ImageModelPort` is wired in — OpenRouter with
+`meta/muse-image` in the app and in the `forgeKit` tool — cleans each image
+up for its role (square, downscale, seamless in two separate axis passes;
+key, de-spill, trim), rejects images that are flat key colour or featureless
+and retries them, and never fails a whole kit for one bad image.
+
+On a phone, the Style panel's *Forge art* button does this for whatever the
+player typed, into app storage, and the world repaints as each image lands.
+Four kits ship in the pack: house, dark, hades and kawaii. Styles without a
+kit borrow the house kit and differ by light, fog and grade alone — which is
+itself worth seeing: the neon preview is the house kit.
+
+One lesson is recorded in the code: Muse Image answers in WebP by default,
+and the JVM WebP plugin decoded some of those as a flat green channel — which
+looked exactly like a bad generation. The JVM client now asks for PNG.
+
+## Walls a third of a block thick
+
+`BlockShape.WALL` is a pane a third of a block thick that joins neighbouring
+walls and solid cubes, so dragging a line makes a wall and a corner makes an
+L with nothing to rotate. Collision uses the same boxes the mesher draws
+(`BlockShapes`), so a player can walk along the inside of their own wall. The
+`ERASE` build tool removes a dragged region and hands the blocks back.
 
 ## Why sprites have two models
 

@@ -74,6 +74,7 @@ object StyleLexicon {
                     shadowTint = 0.55f,
                     depthFalloff = 0.62f,
                     ledgeOcclusion = 0.34f,
+                    heroLight = 1.1f,
                 ),
                 contrast = direction.contrast.copy(
                     terrainSaturation = 0.42f,
@@ -358,6 +359,7 @@ object StyleLexicon {
                     depthFalloff = 0.7f,
                     emissiveStrength = 1f,
                     emissiveRadius = 5f,
+                    heroLight = 0.9f,
                 ),
                 contrast = direction.contrast.copy(terrainValueCeiling = 0.58f, rimStrength = 0.9f),
                 atmosphere = direction.atmosphere.copy(vignette = 0.55f),

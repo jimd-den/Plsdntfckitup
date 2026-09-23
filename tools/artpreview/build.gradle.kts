@@ -4,6 +4,7 @@ dependencies {
   implementation(project(":core:domain"))
   implementation(project(":engine:world"))
   implementation(project(":engine:render"))
+  implementation(project(":engine:scene"))
   implementation(project(":content:igbo"))
 }
 
@@ -20,4 +21,36 @@ tasks.register<JavaExec>("artPreview") {
   mainClass.set("com.stratum.tools.artpreview.ArtPreview")
   classpath = sourceSets["main"].runtimeClasspath
   args = listOf(layout.buildDirectory.dir("art-preview").get().asFile.absolutePath)
+}
+
+/**
+ * Renders the world in 3D at every built-in style into build/scene-preview,
+ * using any forged textures found in build/forge.
+ */
+tasks.register<JavaExec>("scenePreview") {
+  group = "verification"
+  description = "Renders the 3D world at every style into build/scene-preview."
+  mainClass.set("com.stratum.tools.artpreview.ScenePreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  args = listOf(
+    layout.buildDirectory.dir("scene-preview").get().asFile.absolutePath,
+    rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
+  )
+  maxHeapSize = "3g"
+}
+
+/**
+ * Generates an asset kit with an image model and writes it into the pack's
+ * resources. Needs OPENROUTER_API_KEY in the environment; the key is never
+ * written anywhere.
+ *
+ *   ./gradlew :tools:artpreview:forgeKit --args="house 'stratum house style'"
+ */
+tasks.register<JavaExec>("forgeKit") {
+  group = "generation"
+  description = "Forges textures and sprites for a style into content/igbo resources."
+  mainClass.set("com.stratum.tools.artpreview.ForgeKit")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  environment("OPENROUTER_API_KEY", System.getenv("OPENROUTER_API_KEY") ?: "")
 }

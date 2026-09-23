@@ -40,7 +40,8 @@ class AiWiring(context: Context) {
 
     private val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
 
-    private val imageModel = OpenRouterImageModel(configProvider = settings::load)
+    /** Shared with the play screen, which forges world art with it. */
+    val imageModel = OpenRouterImageModel(configProvider = settings::load)
 
     /**
      * Draws a clip a sheet can be cut from.
