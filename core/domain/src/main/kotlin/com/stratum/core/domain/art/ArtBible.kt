@@ -165,7 +165,8 @@ object ArtBible {
      */
     const val SCENERY_RULE = "This is background scenery, not the focus of the game: calm and readable, " +
         "no magical effects, no glow, no mist, no smoke, no wisps, no sparkles, no floating particles, " +
-        "colour slightly less saturated than the characters who will stand in front of it"
+        "painted in its natural local colours (green leaves, brown bark, grey stone) at mid-to-dark values, " +
+        "never pale, white or washed out, slightly less saturated and darker than the characters who will stand in front of it"
 
     /** Floors are the quietest layer of all. */
     const val FLOOR_RULE = "A quiet background floor that characters and spell effects must stand out against: " +

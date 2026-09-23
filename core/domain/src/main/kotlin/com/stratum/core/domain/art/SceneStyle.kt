@@ -106,7 +106,7 @@ data class SceneLighting(
      * image model paints every tile as if it were the subject, and a field of
      * those at full strength buries everything standing on it.
      */
-    val floorDetail: Float = 0.45f,
+    val floorDetail: Float = 0.7f,
     /** Saturation of painted floors relative to the painting, for the same reason. */
     val floorSaturation: Float = 0.75f,
 )
