@@ -157,4 +157,33 @@ class ForgeTest {
         assertEquals(1, AssetForge.install(result, library))
         assertTrue(library.layerOf("t:turf/top") >= 0)
     }
+
+    @Test
+    fun `a large map wraps without a copy of itself inside it`() {
+        // A gradient with one bright spot: after wrapping, the spot must appear
+        // once, and the left and right edges must meet.
+        val n = 64
+        val src = Texture(n, n, IntArray(n * n) { i ->
+            val x = i % n; val y = i / n
+            val v = if (x in 30..33 && y in 30..33) 255 else (x * 2 + y)
+            (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+        })
+        val wrapped = Pixels.seamlessWide(src)
+        assertEquals(n - n / 8, wrapped.width)
+        val bright = wrapped.argb.count { (it and 0xFF) == 255 }
+        assertEquals(16, bright, "the spot survives exactly once")
+        for (y in 0 until wrapped.height) {
+            val left = wrapped.argb[y * wrapped.width] and 0xFF
+            val right = wrapped.argb[y * wrapped.width + wrapped.width - 1] and 0xFF
+            assertTrue(kotlin.math.abs(left - right) <= 6, "row $y: edges $left and $right do not meet")
+        }
+    }
+
+    @Test
+    fun `regions get a large ground map for their ground and their paths`() {
+        val withPath = pack.copy(biomes = pack.biomes.map { it.copy(composition = com.stratum.core.domain.content.BiomeComposition(pathBlockId = soil.id)) })
+        val maps = ForgePlanner.plan(ArtDirection.HOUSE, withPath).filter { it.kind == AssetKind.GROUND_MAP }
+        assertEquals(setOf("t:turf/map", "t:soil/map"), maps.map { it.key }.toSet())
+        assertTrue(maps.none { "tileable" in it.prompt.lowercase() }, "asked as one painting, not as a pattern")
+    }
 }

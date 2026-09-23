@@ -76,6 +76,43 @@ object Pixels {
         return seamlessAxis(seamlessAxis(src, horizontal = true), horizontal = false)
     }
 
+    /**
+     * Makes a large painting wrap without copying any of it.
+     *
+     * [seamless] blends most of the image with a copy of itself shifted by
+     * half, which on a two-block tile is invisible and on a sixteen-block map
+     * duplicates every feature: the shrine-sized moss patch appeared twice, a
+     * quarter-map apart, and the whole map read as four copies. Here a band
+     * of [band] of the width is cut from one edge and cross-faded into the
+     * opposite one, so the two edges meet and everything else is untouched.
+     * The result is smaller by that band on each axis.
+     */
+    fun seamlessWide(src: Texture, band: Float = 0.125f): Texture {
+        require(src.height == src.width) { "seamlessWide expects a square texture" }
+        return wrapAxis(wrapAxis(src, band, horizontal = true), band, horizontal = false)
+    }
+
+    private fun wrapAxis(src: Texture, band: Float, horizontal: Boolean): Texture {
+        val w = src.width; val h = src.height
+        val cut = (if (horizontal) w else h).let { (it * band).toInt().coerceAtLeast(1) }
+        val ow = if (horizontal) w - cut else w
+        val oh = if (horizontal) h else h - cut
+        val out = IntArray(ow * oh)
+        for (y in 0 until oh) {
+            for (x in 0 until ow) {
+                val along = if (horizontal) x else y
+                val here = src.argb[y * w + x]
+                out[y * ow + x] = if (along >= cut) here else {
+                    // The start of the kept image fades in from what sat just
+                    // past its far end, so the far end runs into the start.
+                    val far = if (horizontal) src.argb[y * w + (ow + x)] else src.argb[(oh + y) * w + x]
+                    mix(far, here, smoothstep(0f, 1f, (along + 0.5f) / cut)) or (0xFF shl 24)
+                }
+            }
+        }
+        return Texture(ow, oh, out)
+    }
+
     private fun seamlessAxis(src: Texture, horizontal: Boolean): Texture {
         val n = src.width
         val half = n / 2

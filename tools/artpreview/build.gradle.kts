@@ -54,3 +54,17 @@ tasks.register<JavaExec>("forgeKit") {
   workingDir = rootProject.projectDir
   environment("OPENROUTER_API_KEY", System.getenv("OPENROUTER_API_KEY") ?: "")
 }
+
+/**
+ * Rebuilds a kit's finished files of one kind from the raw originals the forge
+ * kept, without calling the model:
+ *   ./gradlew :tools:artpreview:refinishKit --args="house GROUND_MAP"
+ */
+tasks.register<JavaExec>("refinishKit") {
+  group = "generation"
+  description = "Re-runs forge post-processing on kept originals."
+  mainClass.set("com.stratum.tools.artpreview.RefinishKit")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  maxHeapSize = "2g"
+}

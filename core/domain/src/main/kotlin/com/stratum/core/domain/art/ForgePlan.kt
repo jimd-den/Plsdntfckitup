@@ -22,6 +22,29 @@ enum class AssetKind {
      * like a sprite; drawn like a decal.
      */
     GROUND_DETAIL,
+
+    /**
+     * One large painting of a region's ground, covering [GroundMap.BLOCKS]
+     * blocks a side, laid across the floor as a single surface.
+     *
+     * A small tile, however well painted, repeats every couple of blocks and
+     * the eye finds the grid. A map repeats every sixteen, and inside that
+     * span it can hold real variety — a worn patch here, moss there, a scatter
+     * of stones — the way a hand-painted Diablo floor does.
+     */
+    GROUND_MAP,
+}
+
+/** Keys and scale shared by whoever plans, forges and draws ground maps. */
+object GroundMap {
+    /** Blocks one map covers along each side before it repeats. */
+    const val BLOCKS = 16
+
+    const val SUFFIX = "/map"
+
+    fun keyFor(blockId: String): String = "$blockId$SUFFIX"
+
+    fun isMap(key: String): Boolean = key.substringBefore('#').endsWith(SUFFIX)
 }
 
 /**
@@ -83,6 +106,10 @@ object ForgePlanner {
             // spirit mist") and a model paints every word of that into every
             // tile and every tree.
             val setting = biome.name
+            // One large map for the region's ground and one for its paths:
+            // the two floors a player walks on most.
+            listOfNotNull(blocks[biome.surfaceBlockId], biome.composition.pathBlockId?.let { blocks[it] })
+                .forEach { add(map(direction, it, setting, kit)) }
             blocks[biome.surfaceBlockId]?.let { surface ->
                 add(tile(direction, surface, AssetKind.GROUND_TILE, setting, kit))
                 add(tile(direction, surface, AssetKind.WALL_TILE, setting, kit))
@@ -214,6 +241,44 @@ object ForgePlanner {
             append(".")
         }
         return ForgeOrder(variantKey("${block.id}/$face", variant), kind, AssetTier.SYSTEMIC, "$material ($face)", prompt)
+    }
+
+    /**
+     * A wide stretch of a region's ground, painted once.
+     *
+     * Asked for as a large area with variety spread through it, so what
+     * repeats every sixteen blocks is a composition rather than a pattern.
+     * The floor rules still hold: the variety is broad and low in contrast,
+     * because this is what everything else stands on.
+     */
+    private fun map(direction: ArtDirection, block: BlockType, setting: String, kit: BiomeArtKit?): ForgeOrder {
+        val material = block.displayName.lowercase()
+        val base = ArtBible.hexOf(block.topColor)
+        // Not called a tileable texture: asked for one, the model paints a
+        // small motif and repeats it inside the frame, and sixteen blocks of
+        // ground repeat every four. Asked for one painting with a stated
+        // layout, it paints one place; the forge makes the edges meet.
+        val prompt = buildString {
+            append("One single continuous hand-painted illustration of a wide stretch of ground seen straight from above, ")
+            append("orthographic top-down, about ${GroundMap.BLOCKS} by ${GroundMap.BLOCKS} metres, ")
+            append("mostly $material with dominant base colour $base")
+            if (setting.isNotBlank()) append(", in $setting")
+            append(". A unique composition, not a pattern: nothing in it is repeated or copied. ")
+            append("Towards one corner a broad worn hollow of bare earth; a faint trodden trail curving across part of it; ")
+            append("a large soft patch of moss in another area; a small loose scatter of flat stones and a few roots in another; ")
+            append("elsewhere $material varying gently in tone and density, with irregular organic shapes of many different sizes. ")
+            append("Everything lies flat on the ground and the image fills the entire square frame edge to edge. ")
+            append(ArtBible.FLOOR_RULE.replace("no repeating pattern of stones, tiles or cells", "no repeating pattern of any kind")).append(". ")
+            append("Stylized action RPG ground like Diablo or Hades, broad soft brush strokes, ")
+            append("even flat lighting with no directional shadows, no objects standing up, no horizon, no perspective, no border, no vignette. ")
+            append(ArtBible.SCENERY_RULE).append(". ")
+            append(ArtBible.paletteNote(direction, kit, accent = false))
+            direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
+            append(" ")
+            append(direction.diction.forbidden)
+            append(".")
+        }
+        return ForgeOrder(GroundMap.keyFor(block.id), AssetKind.GROUND_MAP, AssetTier.SYSTEMIC, "$material (map)", prompt)
     }
 
     /** A handful of small things lying on a region's floor, seen from above. */

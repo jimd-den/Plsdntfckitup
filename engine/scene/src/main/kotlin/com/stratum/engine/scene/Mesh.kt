@@ -47,7 +47,9 @@ object Vertex {
     const val V = 11
     /**
      * Texture layer, or a negative code: [FLAT] is untextured, [ACTOR] is
-     * untextured and rim-lit. For decals it is the pattern: [DISC] or [RING].
+     * untextured and rim-lit. At or above [TextureLibrary.MAP_BASE] it is a
+     * ground map. For decals it is the pattern: [DISC], [RING] or
+     * [SPRITE_SHADOW].
      */
     const val LAYER = 12
     const val EMISSIVE = 13
@@ -170,21 +172,37 @@ class Texture(val width: Int, val height: Int, val argb: IntArray) {
 class TextureLibrary {
     private val layers = LinkedHashMap<String, Int>()
     private val textures = ArrayList<Texture>()
+    private val maps = ArrayList<Texture>()
 
+    /** Tiles and sprites, by layer. */
     val all: List<Texture> get() = textures
+
+    /**
+     * Ground maps, by layer minus [MAP_BASE]. Kept apart because they are
+     * several times larger than everything else: a GPU array holds layers of
+     * one size, and resampling a map down to a tile's size would throw away
+     * exactly the detail it exists to carry.
+     */
+    val allMaps: List<Texture> get() = maps
     val keys: Set<String> get() = layers.keys
 
     /** Adds or replaces a texture, keeping the layer index if the key existed. */
     fun put(key: String, texture: Texture): Int {
         val existing = layers[key]
         if (existing != null) {
-            textures[existing] = texture
+            if (existing >= MAP_BASE) maps[existing - MAP_BASE] = texture else textures[existing] = texture
             return existing
         }
-        textures += texture
-        layers[key] = textures.lastIndex
+        val layer = if (com.stratum.core.domain.art.GroundMap.isMap(key)) {
+            maps += texture
+            MAP_BASE + maps.lastIndex
+        } else {
+            textures += texture
+            textures.lastIndex
+        }
+        layers[key] = layer
         variantCache.clear()
-        return textures.lastIndex
+        return layer
     }
 
     fun layerOf(key: String?): Int = key?.let(layers::get) ?: -1
@@ -210,9 +228,16 @@ class TextureLibrary {
         found.toIntArray()
     }
 
-    private companion object {
-        const val MAX_VARIANTS = 8
+    companion object {
+        private const val MAX_VARIANTS = 8
+
+        /**
+         * Layers from here up are ground maps. The shader reads them from a
+         * second array; see Vertex.LAYER.
+         */
+        const val MAP_BASE = 1024
     }
 
-    fun textureAt(layer: Int): Texture? = textures.getOrNull(layer)
+    fun textureAt(layer: Int): Texture? =
+        if (layer >= MAP_BASE) maps.getOrNull(layer - MAP_BASE) else textures.getOrNull(layer)
 }

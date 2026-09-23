@@ -61,6 +61,7 @@ internal object SceneShaders {
         in vec4 vShadow;
         flat in vec2 vVariants;
         uniform sampler2DArray uTextures;
+        uniform sampler2DArray uMaps;
         uniform sampler2D uShadowMap;
         uniform float uShadowSize;
         uniform bool uCutout;
@@ -127,12 +128,23 @@ internal object SceneShaders {
             float d = hash21(i + vec2(1.0, 1.0));
             return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
         }
+        // Layers from 1024 up are ground maps, in their own larger array
+        // (TextureLibrary.MAP_BASE). Branching on a flat layer is uniform per
+        // triangle, so mip selection stays well defined.
+        vec4 layerTexel(vec2 uv, float layer) {
+            return layer >= 1024.0 ? texture(uMaps, vec3(uv, layer - 1024.0)) : texture(uTextures, vec3(uv, layer));
+        }
+        vec3 layerMean(float layer) {
+            return layer >= 1024.0 ? textureLod(uMaps, vec3(0.5, 0.5, layer - 1024.0), 16.0).rgb
+                : textureLod(uTextures, vec3(0.5, 0.5, layer), 16.0).rgb;
+        }
+
         vec3 detiled(vec3 first, vec2 uv, vec3 world) {
             vec2 uv2 = mat2(0.8253356, 0.5646425, -0.5646425, 0.8253356) * uv * 0.71 + vec2(0.37, 0.19);
             vec2 p = vec2(world.x + world.z * 0.7, world.y - world.z * 0.7);
             float w = smoothstep(0.35, 0.65, vnoise(p / 6.0));
             float tint = 0.88 + 0.24 * vnoise(p / 13.0 + vec2(17.0, 5.0));
-            vec3 second = texture(uTextures, vec3(uv2, vLayer)).rgb;
+            vec3 second = layerTexel(uv2, vLayer).rgb;
             vec3 c = mix(first, second, w);
             // Port of ShadingModel.variants: sister paintings in slow patches.
             // Branching only on the flat per-face layers, so every pixel of a
@@ -152,7 +164,7 @@ internal object SceneShaders {
         // Port of ShadingModel.calm. The smallest mip level is the painting's
         // average colour, which is what contrast is pulled towards.
         vec3 calm(vec3 c, vec3 n) {
-            vec3 mean = textureLod(uTextures, vec3(0.5, 0.5, vLayer), 16.0).rgb;
+            vec3 mean = layerMean(vLayer);
             bool floorFacing = n.z > 0.7;
             float detail = floorFacing ? uFloorDetail : min(1.0, uFloorDetail + 0.25);
             float saturation = floorFacing ? uFloorSaturation : min(1.0, uFloorSaturation + 0.25);
@@ -166,7 +178,7 @@ internal object SceneShaders {
             vec3 albedo = vColor;
             if (vLayer >= 0.0) {
                 vec2 uv = uCutout ? clamp(vUv, 0.0, 1.0) : vUv;
-                vec4 texel = texture(uTextures, vec3(uv, vLayer));
+                vec4 texel = layerTexel(uv, vLayer);
                 if (uCutout && texel.a < 0.5) discard;
                 albedo *= uCutout ? texel.rgb : calm(detiled(texel.rgb, uv, vWorld), normalize(vNormal));
             }

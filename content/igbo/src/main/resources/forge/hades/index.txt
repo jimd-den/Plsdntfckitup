@@ -13,6 +13,7 @@ detail~igbo~sacred_grove#2.png
 detail~igbo~sacred_grove#3.png
 detail~igbo~sacred_grove.png
 igbo~granite__side.png
+igbo~grove_turf__map.png
 igbo~grove_turf__side.png
 igbo~grove_turf__top#1.png
 igbo~grove_turf__top#2.png
@@ -22,6 +23,7 @@ igbo~mud_wall__side.png
 igbo~mud_wall__top.png
 igbo~plank_wall__side.png
 igbo~plank_wall__top.png
+igbo~red_earth__map.png
 igbo~red_earth__side.png
 igbo~red_earth__top.png
 prop~igbo~bronze_brazier.png

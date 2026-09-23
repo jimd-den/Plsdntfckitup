@@ -48,6 +48,8 @@ class AssetForge(
     private val modelId: String? = null,
     private val tileSize: Int = 256,
     private val spriteSize: Int = 384,
+    /** Ground maps keep far more pixels: each covers sixteen blocks, not two. */
+    private val mapSize: Int = 1024,
 ) {
 
     suspend fun forge(
@@ -106,6 +108,7 @@ class AssetForge(
     /** The clean-up each kind of asset needs. Public so imported art gets the same treatment. */
     fun finish(kind: AssetKind, image: Texture): Texture = when (kind) {
         AssetKind.GROUND_TILE, AssetKind.WALL_TILE -> Pixels.seamless(Pixels.downscale(Pixels.square(image), tileSize))
+        AssetKind.GROUND_MAP -> Pixels.seamlessWide(Pixels.downscale(Pixels.square(image), mapSize))
         AssetKind.PROP_SPRITE, AssetKind.GROUND_DETAIL -> {
             val keyed = Pixels.keyOut(image)
             val trimmed = Pixels.trim(keyed) ?: error("the sprite came back empty after keying")

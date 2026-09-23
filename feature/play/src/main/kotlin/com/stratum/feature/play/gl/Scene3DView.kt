@@ -104,7 +104,7 @@ fun Scene3DView(
     LaunchedEffect(input.kit) {
         val loaded = withContext(Dispatchers.IO) { ForgedKits.load(input.kit) }
         library = loaded
-        renderer.submitTextures(loaded.all)
+        renderer.submitTextures(loaded.all, loaded.allMaps)
         surface?.requestRender()
     }
 

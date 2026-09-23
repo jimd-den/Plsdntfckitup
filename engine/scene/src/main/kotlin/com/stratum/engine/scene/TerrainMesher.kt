@@ -128,9 +128,13 @@ class TerrainMesher(
         val topLayer = textures.layerOf(top.texture).toFloat()
         val sideLayer = textures.layerOf(side.texture).toFloat()
         val emissive = top.emissive
-        // Ground has sister paintings, keyed "<top>#1" and "<top>#2".
-        val variantA = textures.layerOf(top.texture?.let { "$it#1" }).toFloat()
-        val variantB = textures.layerOf(top.texture?.let { "$it#2" }).toFloat()
+        // A ground map, when the forge painted one, covers the top instead of
+        // the small tile: one large painting laid across sixteen blocks.
+        val map = textures.layerOf(com.stratum.core.domain.art.GroundMap.keyFor(block.id))
+        val mapped = map >= 0
+        // Otherwise ground has sister paintings, keyed "<top>#1" and "<top>#2".
+        val variantA = if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#1" }).toFloat()
+        val variantB = if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#2" }).toFloat()
         FACES.forEach { face ->
             val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z + face.dz))
             // This camera never sees an underside, and neither does the sun.
@@ -139,7 +143,7 @@ class TerrainMesher(
             // flag says: culling against one left a hole to the void under it.
             if (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE && neighbour.glyph == null) return@forEach
             val surface = if (face.dz == 1) top else side
-            val layer = if (face.dz == 1) topLayer else sideLayer
+            val layer = if (face.dz == 1) (if (mapped) map.toFloat() else topLayer) else sideLayer
             val base = if (layer >= 0f) textured(surface.albedo) else surface.albedo
             val albedo = if (emissive > 0f) Tint.mix(base, surface.emissiveColor, emissive * 0.5f) else base
             emitFace(
@@ -148,6 +152,7 @@ class TerrainMesher(
                 albedo, layer, emissive,
                 if (face.dz == 1) variantA else -1f,
                 if (face.dz == 1) variantB else -1f,
+                uvScale = if (face.dz == 1 && mapped) MAP_SCALE else TEXTURE_SCALE,
             ) { cornerX, cornerY, cornerZ -> occlusion(world, x, y, z, face, cornerX, cornerY, cornerZ) }
         }
     }
@@ -230,6 +235,7 @@ class TerrainMesher(
         emissive: Float,
         variantA: Float = -1f,
         variantB: Float = -1f,
+        uvScale: Float = TEXTURE_SCALE,
         ao: (Int, Int, Int) -> Float,
     ) {
         val c = face.corners
@@ -246,9 +252,9 @@ class TerrainMesher(
             val u: Float
             val v: Float
             when {
-                face.dz != 0 -> { u = px * TEXTURE_SCALE; v = py * TEXTURE_SCALE }
-                face.dx != 0 -> { u = py * TEXTURE_SCALE; v = -pz * TEXTURE_SCALE }
-                else -> { u = px * TEXTURE_SCALE; v = -pz * TEXTURE_SCALE }
+                face.dz != 0 -> { u = px * uvScale; v = py * uvScale }
+                face.dx != 0 -> { u = py * uvScale; v = -pz * uvScale }
+                else -> { u = px * uvScale; v = -pz * uvScale }
             }
             occ[i] = ao(cx, cy, cz)
             idx[i] = out.vertex(
@@ -312,6 +318,9 @@ class TerrainMesher(
 
         /** Blocks per texture repeat. Two, so one painted tile covers a small patch. */
         const val TEXTURE_SCALE = 0.5f
+
+        /** A ground map covers GroundMap.BLOCKS blocks per repeat. */
+        const val MAP_SCALE = 1f / com.stratum.core.domain.art.GroundMap.BLOCKS
 
         const val LIGHT_RADIUS = 7f
 

@@ -35,6 +35,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     @Volatile private var pending: SceneFrame? = null
     @Volatile private var pendingTextures: List<Texture>? = null
+    @Volatile private var pendingMaps: List<Texture>? = null
 
     private var width = 1
     private var height = 1
@@ -51,6 +52,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
     private var sceneColor = 0
     private var sceneDepth = 0
     private var textureArray = 0
+    private var mapArray = 0
     private var hasTextures = false
     private var emptyVao = 0
 
@@ -63,8 +65,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
     }
 
     /** Replaces the texture array. Layer order must match the scene's [com.stratum.engine.scene.TextureLibrary]. */
-    fun submitTextures(textures: List<Texture>) {
+    fun submitTextures(textures: List<Texture>, maps: List<Texture> = emptyList()) {
         pendingTextures = textures
+        pendingMaps = maps
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -77,6 +80,8 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         createShadowMap()
         staticMeshes.clear()
         pendingTextures = pendingTextures ?: emptyList()
+        pendingMaps = pendingMaps ?: emptyList()
+        mapArray = 0
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -87,6 +92,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     override fun onDrawFrame(gl: GL10?) {
         pendingTextures?.let { uploadTextures(it); pendingTextures = null }
+        pendingMaps?.let { uploadMaps(it); pendingMaps = null }
         val frame = pending ?: run {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -343,17 +349,27 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
      */
     private fun uploadTextures(textures: List<Texture>) {
         if (textureArray != 0) GLES30.glDeleteTextures(1, intArrayOf(textureArray), 0)
+        textureArray = uploadArray(textures, LAYER_SIZE, MIP_LEVELS)
+        hasTextures = textures.isNotEmpty()
+    }
+
+    /** Ground maps: a second, larger array, bound beside the first. See TextureLibrary.allMaps. */
+    private fun uploadMaps(maps: List<Texture>) {
+        if (mapArray != 0) GLES30.glDeleteTextures(1, intArrayOf(mapArray), 0)
+        mapArray = if (maps.isEmpty()) 0 else uploadArray(maps, MAP_SIZE, MAP_MIP_LEVELS)
+    }
+
+    private fun uploadArray(textures: List<Texture>, size: Int, mips: Int): Int {
         val ids = IntArray(1)
         GLES30.glGenTextures(1, ids, 0)
-        textureArray = ids[0]
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, textureArray)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, ids[0])
         val layers = textures.size.coerceAtLeast(1)
-        GLES30.glTexStorage3D(GLES30.GL_TEXTURE_2D_ARRAY, MIP_LEVELS, GLES30.GL_RGBA8, LAYER_SIZE, LAYER_SIZE, layers)
+        GLES30.glTexStorage3D(GLES30.GL_TEXTURE_2D_ARRAY, mips, GLES30.GL_RGBA8, size, size, layers)
         textures.forEachIndexed { layer, texture ->
             val source = Bitmap.createBitmap(texture.argb, texture.width, texture.height, Bitmap.Config.ARGB_8888)
-            val scaled = Bitmap.createScaledBitmap(source, LAYER_SIZE, LAYER_SIZE, true)
-            val pixels = IntArray(LAYER_SIZE * LAYER_SIZE)
-            scaled.getPixels(pixels, 0, LAYER_SIZE, 0, 0, LAYER_SIZE, LAYER_SIZE)
+            val scaled = Bitmap.createScaledBitmap(source, size, size, true)
+            val pixels = IntArray(size * size)
+            scaled.getPixels(pixels, 0, size, 0, 0, size, size)
             // ARGB ints to RGBA bytes.
             val bytes = ByteBuffer.allocateDirect(pixels.size * 4).order(ByteOrder.nativeOrder())
             pixels.forEach { c ->
@@ -362,7 +378,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
             }
             bytes.position(0)
             GLES30.glTexSubImage3D(
-                GLES30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, LAYER_SIZE, LAYER_SIZE, 1,
+                GLES30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, size, size, 1,
                 GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, bytes,
             )
             if (scaled !== source) scaled.recycle()
@@ -373,13 +389,19 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_REPEAT)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_REPEAT)
-        hasTextures = textures.isNotEmpty()
+        return ids[0]
     }
 
     private fun bindTextures(program: Int) {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, textureArray)
         GLES30.glUniform1i(loc(program, "uTextures"), 0)
+        // Unit 2: the shadow map has unit 1. With no maps the sampler points
+        // at the tile array, which no map layer ever reads.
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, if (mapArray != 0) mapArray else textureArray)
+        GLES30.glUniform1i(loc(program, "uMaps"), 2)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
     }
 
     // ---- plumbing ----------------------------------------------------------
@@ -426,6 +448,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         const val TAG = "SceneGl"
         const val SHADOW_SIZE = 2048
         const val LAYER_SIZE = 512
+        /** Sixteen blocks of ground at 64 texels a block. */
+        const val MAP_SIZE = 1024
+        const val MAP_MIP_LEVELS = 11
         const val MIP_LEVELS = 10
     }
 }

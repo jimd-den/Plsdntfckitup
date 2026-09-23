@@ -429,6 +429,30 @@ however good each piece is. Three rules enforce it:
   spirit mist" put a glowing wisp on every tree. Light sources are the one
   exception, because a lit brazier is a landmark.
 
+## Ground maps: one large painting instead of a small tile
+
+A small tile repeats every two blocks and the eye finds the grid however good
+the painting is. So each region's ground and each path block also get a
+`GROUND_MAP`: one large painting from the image model covering
+`GroundMap.BLOCKS` (16) blocks a side, laid across the tops of those blocks
+as a single surface and repeated only every sixteen. Inside that span it
+holds real variety — a worn trail, a mossy hollow, a scatter of stones.
+
+- **Asked for as one place, not a texture.** Called a "seamless tileable
+  texture", the model paints a small motif and repeats it inside the frame,
+  so sixteen blocks repeated every four. The prompt asks for one continuous
+  painting with a stated, non-repeating layout instead.
+- **Wrapped without copies.** The tile seam pass blends most of an image with
+  its half-shifted self, which on a large map duplicated every feature.
+  `Pixels.seamlessWide` cross-fades only a narrow band where opposite edges
+  meet, so nothing is copied.
+- **Kept large on the GPU.** Maps live at `TextureLibrary.MAP_BASE` and up
+  and in their own 1024-texel array beside the 512-texel tile array, so the
+  detail they exist for is not resampled away. Tile variants are skipped where
+  a map is laid; the detile blend and floor calming still apply.
+- `refinishKit` re-runs post-processing on the raw originals the forge kept,
+  so a change like this costs nothing to apply to existing kits.
+
 ## Composition: roads, set pieces, and where fights happen
 
 Noise makes a texture, not a place. `BiomeComposition` lets a pack say what a
