@@ -40,8 +40,13 @@ object ScenePreview {
     private const val WIDTH = 1280
     private const val HEIGHT = 720
     private const val SEED = 20260922L
-    private const val VANTAGE_X = 56
-    private const val VANTAGE_Y = 104
+    /**
+     * In the heart of a grove, south-east of one of its Ofo shrines, so the
+     * frame holds a clearing, the shrine's pad and braziers, the path and the
+     * grove's edge: the pieces of a composed place, not just a textured one.
+     */
+    private const val VANTAGE_X = -460
+    private const val VANTAGE_Y = 470
 
     /**
      * Scene name, style prompt, and the forged kit it draws with.
@@ -81,7 +86,7 @@ object ScenePreview {
 
     fun render(prompt: String, forged: File?, fight: Boolean = false): java.awt.image.BufferedImage {
         val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack))
-        val config = WorldConfig(seed = SEED, simulationRadius = 3)
+        val config = WorldConfig(seed = SEED, simulationRadius = 5)
         val generator = StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain))
         val world = StreamingWorld(content.registry, generator, config)
         world.focusOn(BlockPos(VANTAGE_X, VANTAGE_Y, 0))
@@ -156,8 +161,8 @@ object ScenePreview {
     }
 
     /**
-     * A small walled compound north-west of the player: laterite walls a
-     * third of a block thick, two high, with a gap for a door and a brazier
+     * A small walled compound to the player's left on screen: laterite walls
+     * a third of a block thick, two high, with a gap for a door and a brazier
      * either side of it.
      */
     private fun buildCompound(world: StreamingWorld, registry: BlockRegistry, ground: Int) {
@@ -165,8 +170,8 @@ object ScenePreview {
         val floor = registry.indexOf("igbo:red_earth")
         val brazier = registry.indexOf("igbo:bronze_brazier")
         val paving = registry.indexOf("igbo:laterite_paving")
-        val minX = VANTAGE_X - 7; val maxX = VANTAGE_X - 2
-        val minY = VANTAGE_Y - 7; val maxY = VANTAGE_Y - 2
+        val minX = VANTAGE_X + 1; val maxX = VANTAGE_X + 6
+        val minY = VANTAGE_Y - 11; val maxY = VANTAGE_Y - 6
         for (y in minY..maxY) for (x in minX..maxX) {
             world.setBlock(BlockPos(x, y, ground), floor)
             for (z in ground + 1..ground + 4) world.setBlock(BlockPos(x, y, z), BlockRegistry.AIR_INDEX)

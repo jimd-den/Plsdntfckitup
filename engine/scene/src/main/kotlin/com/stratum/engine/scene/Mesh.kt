@@ -14,10 +14,11 @@ enum class MaterialKind {
     CUTOUT,
 
     /**
-     * Unlit, alpha-blended, procedurally shaped, lying on the ground.
+     * Unlit, alpha-blended, lying on the ground.
      *
-     * Contact shadows, rank rings and pull-me halos. Procedural rather than
-     * textured so they are resolution-free and cost no asset.
+     * Contact shadows, rank rings and pull-me halos, procedural so they are
+     * resolution-free and cost no asset; and the shadows sprites cast, which
+     * take their shape from the sprite's own alpha.
      */
     DECAL,
 
@@ -75,6 +76,13 @@ object Vertex {
     const val ACTOR = -2f
     const val DISC = 0f
     const val RING = 1f
+
+    /**
+     * A decal shaped by a sprite's own silhouette: the texture layer is in
+     * [VARIANT_A] and u, v run 0..1 over the sprite. How props and characters
+     * cast shadows — see SceneBuilder.spriteShadow.
+     */
+    const val SPRITE_SHADOW = 2f
 }
 
 /** Triangles of one material kind, ready to upload or rasterise. */

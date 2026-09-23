@@ -212,22 +212,27 @@ internal object SceneShaders {
         out float vOpacity;
         out vec2 vUv;
         flat out float vPattern;
+        flat out float vTexLayer;
         void main() {
             vColor = aColor;
             vOpacity = aAo;
             vUv = aUv;
             vPattern = aLayer;
+            vTexLayer = aVariants.x;
             gl_Position = uViewProj * vec4(aPos, 1.0);
         }
     """
 
     val SOFT_FRAGMENT = """#version 300 es
         precision highp float;
+        precision highp sampler2DArray;
         in vec3 vColor;
         in float vOpacity;
         in vec2 vUv;
         flat in float vPattern;
+        flat in float vTexLayer;
         uniform bool uGlow;
+        uniform sampler2DArray uTextures;
         out vec4 fragColor;
         const float GLOW_GAIN = 1.4;
         void main() {
@@ -239,7 +244,10 @@ internal object SceneShaders {
                 return;
             }
             float shape;
-            if (vPattern >= 0.5) {
+            if (vPattern >= 1.5) {
+                // A sprite's silhouette, softened by reading a smaller mip.
+                shape = texture(uTextures, vec3(clamp(vUv, 0.0, 1.0), vTexLayer), 1.5).a;
+            } else if (vPattern >= 0.5) {
                 float k = (r - 0.82) / 0.1;
                 shape = exp(-k * k);
             } else {

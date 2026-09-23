@@ -96,6 +96,23 @@ object ForgePlanner {
                 add(tile(direction, it, AssetKind.GROUND_TILE, setting, kit))
             }
             blocks[biome.bedrockFillerBlockId]?.let { add(tile(direction, it, AssetKind.WALL_TILE, setting, kit)) }
+            // Whatever the region's paths and landmarks are made of: these are
+            // the places a player is led to, so they are never left flat.
+            val composition = biome.composition
+            val built = listOfNotNull(
+                composition.pathBlockId, composition.landmark?.centreBlockId,
+                composition.landmark?.ringBlockId, composition.landmark?.floorBlockId,
+            ).mapNotNull { blocks[it] }.distinct()
+            built.forEach { block ->
+                when {
+                    block.glyph != null -> add(sprite(direction, block, setting, kit))
+                    block.shape == BlockShape.FLOOR -> add(tile(direction, block, AssetKind.GROUND_TILE, "a laid, built floor of fitted pieces", null))
+                    else -> {
+                        add(tile(direction, block, AssetKind.GROUND_TILE, setting, kit))
+                        add(tile(direction, block, AssetKind.WALL_TILE, setting, kit))
+                    }
+                }
+            }
             biome.scatter.forEach { rule ->
                 val scattered = listOfNotNull(blocks[rule.blockId], rule.capBlockId?.let { blocks[it] })
                 scattered.forEach { block ->

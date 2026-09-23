@@ -86,7 +86,9 @@ class SceneRasterizer(
         val m = frame.shadowViewProjection
         val clip = FloatArray(4)
         val sx = FloatArray(3); val sy = FloatArray(3); val sz = FloatArray(3)
-        val casters = frame.opaque + frame.cutout
+        // Sprites cast their silhouettes as decals, not into the map. See
+        // Vertex.SPRITE_SHADOW and the GL renderer's shadow pass.
+        val casters = frame.opaque
         casters.forEach { batch ->
             val v = batch.vertices
             val idx = batch.indices
@@ -310,7 +312,10 @@ class SceneRasterizer(
     /** Soft disc or ring, alpha-blended over what is already there. */
     private fun blendDecal(o: Int, p: FloatArray) {
         val r = sqrt(p[Vertex.U] * p[Vertex.U] + p[Vertex.V] * p[Vertex.V])
-        val shape = if (p[Vertex.LAYER] >= Vertex.RING - 0.5f) {
+        val shape = if (p[Vertex.LAYER] >= Vertex.SPRITE_SHADOW - 0.5f) {
+            val t = textures.textureAt(p[Vertex.VARIANT_A].toInt()) ?: return
+            softAlpha(t, p[Vertex.U], p[Vertex.V])
+        } else if (p[Vertex.LAYER] >= Vertex.RING - 0.5f) {
             val k = (r - 0.82f) / 0.1f
             exp(-k * k)
         } else {
@@ -320,6 +325,17 @@ class SceneRasterizer(
         if (alpha <= 0f) return
         val c = o * 3
         for (k in 0 until 3) color[c + k] += (p[Vertex.R + k] - color[c + k]) * alpha
+    }
+
+    /** Alpha averaged over a small cross, standing in for the GPU's blurrier mip. */
+    private fun softAlpha(t: Texture, u: Float, v: Float): Float {
+        val step = 1.5f / t.width
+        var sum = 0f
+        for ((du, dv) in SOFT_TAPS) {
+            val texel = sample(t, u + du * step, v + dv * step, clampEdges = true)
+            sum += ((texel ushr 24) and 0xFF) / 255f
+        }
+        return sum / SOFT_TAPS.size
     }
 
     private fun addGlow(o: Int, p: FloatArray) {
@@ -385,5 +401,6 @@ class SceneRasterizer(
         const val SHADOW_SLOPE_BIAS = 0.004f
         const val NORMAL_OFFSET = 0.04f
         const val GLOW_GAIN = 1.4f
+        private val SOFT_TAPS = listOf(0f to 0f, 1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)
     }
 }

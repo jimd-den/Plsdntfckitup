@@ -28,6 +28,7 @@ prop~igbo~bronze_brazier.png
 prop~igbo~iroko_canopy#1.png
 prop~igbo~iroko_canopy#2.png
 prop~igbo~iroko_canopy.png
+prop~igbo~ofo_shrine.png
 prop~igbo~palm_reed#1.png
 prop~igbo~palm_reed#2.png
 prop~igbo~palm_reed.png

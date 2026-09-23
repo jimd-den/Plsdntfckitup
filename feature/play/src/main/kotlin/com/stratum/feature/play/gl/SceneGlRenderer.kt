@@ -110,8 +110,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         bindTextures(shadowProgram)
         GLES30.glUniform1i(loc(shadowProgram, "uCutout"), 0)
         frame.opaque.forEach { draw(it, static = it === frame.opaque.first()) }
-        GLES30.glUniform1i(loc(shadowProgram, "uCutout"), 1)
-        draw(frame.cutout, static = false)
+        // Sprites do not cast into the shadow map: a camera-facing card seen
+        // from the sun casts a sliver or a slab. They lay their own silhouette
+        // on the ground as a decal instead (Vertex.SPRITE_SHADOW).
         GLES30.glColorMask(true, true, true, true)
     }
 
@@ -181,6 +182,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glUseProgram(soft)
         matrix(soft, "uViewProj", frame.camera.viewProjection)
+        bindTextures(soft)
         GLES30.glUniform1i(loc(soft, "uGlow"), 0)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         draw(frame.decals, static = false)

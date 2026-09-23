@@ -429,6 +429,46 @@ however good each piece is. Three rules enforce it:
   spirit mist" put a glowing wisp on every tree. Light sources are the one
   exception, because a lit brazier is a landmark.
 
+## Composition: roads, set pieces, and where fights happen
+
+Noise makes a texture, not a place. `BiomeComposition` lets a pack say what a
+region's paths and landmarks are made of; the generator decides where they go,
+one column at a time from world coordinates, so chunks still generate in any
+order without seams.
+
+- **Paths** follow the 0.5 contour of a slow noise field: a contour never ends
+  abruptly or crosses itself. The field's value divided by its slope is the
+  distance to the contour, so a road keeps its width through bends; scenery is
+  kept back from its verge.
+- **Landmarks** — a centrepiece, a ring around it, a paved pad — sit one per
+  cell of a fixed 44-block grid, never nearer a cell edge than the largest
+  clearing, so a column only ever consults its own cell. Of several candidate
+  spots in a cell the one nearest a path wins, so roads run through set
+  pieces. A site is used only in open ground, its pad is levelled, and
+  scenery is kept out of its clearing. In the Igbo grove: an Ofo shrine on
+  laterite paving between four braziers.
+- The forge plans art for whatever a region's paths and landmarks use.
+
+`CompositionTest` checks the real pack: shrines exist, stand on level pads with
+their four braziers, and paths are a thread through the grove with nothing
+growing on them.
+
+## Sprite shadows
+
+A camera-facing card seen from the sun casts a sliver or a slab — in the
+preview, literally a rectangle beside every tree. Sprites therefore do not
+cast into the shadow map. Each lays its own silhouette on the ground instead:
+a decal (`Vertex.SPRITE_SHADOW`) that samples the sprite's alpha, stretched
+away from the sun and longer the lower it is, darker at the foot than at the
+tip. The Diablo II and Hades answer; one quad per sprite, identical in both
+backends. Terrain and walls still cast through the shadow map.
+
+## A larger map
+
+The game loads nine by nine chunks around the player (144 blocks across, up
+from 80) and meshes 56 blocks around the camera, so the loaded edge stays far
+past the fog.
+
 ## Combat theatre
 
 The art director already described each moment of combat as data

@@ -23,7 +23,9 @@ object GameSetup {
 
     fun worldConfig(seed: Long = System.currentTimeMillis()): WorldConfig = WorldConfig(
         seed = seed,
-        simulationRadius = 2,
+        // Nine by nine chunks: 144 blocks across, so the loaded edge stays
+        // well past the fog and the world reads as a land, not a tile.
+        simulationRadius = 4,
         seaLevel = 12,
         surfaceVariation = 4,
         caveDensity = 0.44f,

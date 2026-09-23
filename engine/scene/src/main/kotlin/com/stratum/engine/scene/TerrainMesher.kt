@@ -135,7 +135,9 @@ class TerrainMesher(
             val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z + face.dz))
             // This camera never sees an underside, and neither does the sun.
             if (face.dz == -1) return@forEach
-            if (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE) return@forEach
+            // A prop is drawn as a sprite, not a cube, whatever its opacity
+            // flag says: culling against one left a hole to the void under it.
+            if (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE && neighbour.glyph == null) return@forEach
             val surface = if (face.dz == 1) top else side
             val layer = if (face.dz == 1) topLayer else sideLayer
             val base = if (layer >= 0f) textured(surface.albedo) else surface.albedo
@@ -191,7 +193,12 @@ class TerrainMesher(
             if (face.dz == -1) return@forEach
             if (face.dz == 0) {
                 val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z))
-                if (neighbour.shape == BlockShape.FLOOR || (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE)) return@forEach
+                // No lip against another tile, a solid block, or a prop
+                // standing in the paving: a shrine in the middle of a plaza
+                // otherwise stood in a dark square pit.
+                if (neighbour.shape == BlockShape.FLOOR || neighbour.glyph != null ||
+                    (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE)
+                ) return@forEach
             }
             val layer = if (face.dz == 1) topLayer else sideLayer
             val albedo = (if (face.dz == 1) top else side).albedo

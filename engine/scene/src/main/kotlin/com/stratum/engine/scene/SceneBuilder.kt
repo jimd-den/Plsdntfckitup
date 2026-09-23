@@ -89,6 +89,13 @@ class SceneBuilder(
     private val glows = MeshBuilder(MaterialKind.GLOW)
     private val actorMesh = MeshBuilder(MaterialKind.OPAQUE)
 
+    // This frame's sun on the ground: which way shadows fall, how long they
+    // are per unit of height, and how dark. Set at the start of build().
+    private var shadowDirX = 0f
+    private var shadowDirY = 1f
+    private var shadowReach = 0.7f
+    private var shadowOpacity = 0.5f
+
     /** Forgets the cached terrain, e.g. after the textures or the director change. */
     fun invalidate() {
         cachedKey = Long.MIN_VALUE
@@ -149,6 +156,14 @@ class SceneBuilder(
         }
 
         cutout.clear(); decals.clear(); glows.clear(); actorMesh.clear()
+        run {
+            // Shadows fall away from the sun, longer the lower it is.
+            val horizontal = sqrt(lighting.sunX * lighting.sunX + lighting.sunY * lighting.sunY).coerceAtLeast(1e-3f)
+            shadowDirX = -lighting.sunX / horizontal
+            shadowDirY = -lighting.sunY / horizontal
+            shadowReach = (horizontal / lighting.sunZ.coerceAtLeast(0.1f)).coerceIn(MIN_SHADOW_REACH, MAX_SHADOW_REACH)
+            shadowOpacity = SPRITE_SHADOW_OPACITY * lighting.shadowStrength
+        }
         val eyeLevel = floor(camera.target.z).toInt()
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
@@ -239,7 +254,7 @@ class SceneBuilder(
         val baseY = prop.y + 0.5f
         val baseZ = prop.z.toFloat()
 
-        decal(baseX, baseY, baseZ, PROP_SHADOW_RADIUS * style.scale, director.direction.palette.ink, style.contactShadow, Vertex.DISC)
+        decal(baseX, baseY, baseZ, PROP_SHADOW_RADIUS * style.scale * CONTACT_WITH_SHADOW, director.direction.palette.ink, style.contactShadow, Vertex.DISC)
 
         // One of the forged individuals, picked by place: neighbours differ,
         // and the same tree is the same tree every time you walk past it.
@@ -250,9 +265,11 @@ class SceneBuilder(
             val size = 1f + (((variant ushr 11) and 0xFF) / 255f - 0.5f) * PROP_SIZE_SPREAD
             val height = SPRITE_HEIGHT * style.scale * size
             val width = height * texture.width / texture.height
+            val mirrored = (variant ushr 19) and 1 == 1
+            spriteShadow(baseX, baseY, baseZ, width, height, sprite, mirrored, opacity)
             billboard(
                 camera, baseX, baseY, baseZ, width, height, style.fill or Tint.OPAQUE, sprite.toFloat(), opacity,
-                mirrored = (variant ushr 19) and 1 == 1,
+                mirrored = mirrored,
             )
         } else {
             silhouette(camera, baseX, baseY, baseZ, style, opacity)
@@ -361,6 +378,8 @@ class SceneBuilder(
             // Forged characters are drawn facing the lower right; one heading
             // the other way on screen is the same art mirrored.
             val screenwise = actor.facingX * camera.right.x + actor.facingY * camera.right.y
+            val width = height * texture.width / texture.height
+            spriteShadow(actor.x, actor.y, actor.z, width, height, sprite, screenwise < -0.01f)
             billboard(
                 camera, actor.x, actor.y, actor.z, height * texture.width / texture.height, height,
                 Tint.OPAQUE or 0xFFFFFF, sprite.toFloat(), mirrored = screenwise < -0.01f,
@@ -448,7 +467,7 @@ class SceneBuilder(
             val lx = (u * 2f - 1f) * hw; val ly = (1f - v * 2f) * hh
             return cutout.vertex(
                 detail.x + lx * c - ly * sn, detail.y + lx * sn + ly * c, z,
-                0f, 0f, 1f, Tint.OPAQUE or 0xFFFFFF, 1f, u, v, detail.layer.toFloat(),
+                0f, 0f, 1f, LITTER_TINT, 1f, u, v, detail.layer.toFloat(),
             )
         }
         cutout.quad(corner(0f, 1f), corner(1f, 1f), corner(1f, 0f), corner(0f, 0f))
@@ -573,6 +592,36 @@ class SceneBuilder(
         }
     }
 
+    /**
+     * The shadow a sprite casts: its own silhouette laid on the ground and
+     * stretched away from the sun.
+     *
+     * The 2.5D answer, and the one Diablo II and Hades use. A camera-facing
+     * card seen from the sun casts a sliver or a slab — in the preview it was
+     * literally a rectangle beside every tree — while this is a tree-shaped
+     * shadow that points the way the light says it should, costs one quad, and
+     * needs nothing from the shadow map. It darkens more at the foot than at
+     * the tip, as a real shadow's contact edge does.
+     */
+    private fun spriteShadow(
+        x: Float, y: Float, z: Float, width: Float, height: Float, layer: Int, mirrored: Boolean, opacity: Float = 1f,
+    ) {
+        val strength = shadowOpacity * (0.4f + 0.6f * opacity)
+        if (strength <= 0f) return
+        val length = height * shadowReach * SHADOW_SQUASH
+        val px = -shadowDirY * width / 2f; val py = shadowDirX * width / 2f
+        val tipX = x + shadowDirX * length; val tipY = y + shadowDirY * length
+        val lift = z + DECAL_LIFT * 0.5f
+        val u0 = if (mirrored) 1f else 0f; val u1 = 1f - u0
+        val ink = director.direction.palette.ink
+        val l = layer.toFloat()
+        val a = decals.vertex(x - px, y - py, lift, 0f, 0f, 1f, ink, strength, u0, 1f, Vertex.SPRITE_SHADOW, 0f, l)
+        val b = decals.vertex(x + px, y + py, lift, 0f, 0f, 1f, ink, strength, u1, 1f, Vertex.SPRITE_SHADOW, 0f, l)
+        val c = decals.vertex(tipX + px, tipY + py, lift, 0f, 0f, 1f, ink, strength * SHADOW_TIP, u1, 0f, Vertex.SPRITE_SHADOW, 0f, l)
+        val d = decals.vertex(tipX - px, tipY - py, lift, 0f, 0f, 1f, ink, strength * SHADOW_TIP, u0, 0f, Vertex.SPRITE_SHADOW, 0f, l)
+        decals.quad(a, b, c, d)
+    }
+
     /** A soft shape lying on the ground: shadow, ring or halo. */
     private fun decal(x: Float, y: Float, z: Float, radius: Float, color: Long, opacity: Float, pattern: Float) {
         if (opacity <= 0f) return
@@ -664,7 +713,7 @@ class SceneBuilder(
 
     companion object {
         /** Blocks meshed around the camera target in each direction. */
-        const val DEFAULT_RADIUS = 40
+        const val DEFAULT_RADIUS = 56
         const val REGION_STEP = 6
         const val FOG_FLOOR_DEPTH = 4f
         /** Share of the meshed radius past the focus where fog becomes total. */
@@ -674,9 +723,21 @@ class SceneBuilder(
         const val FILL_LIFT = 0.45f
 
         const val SPRITE_HEIGHT = 2.6f
+        const val SPRITE_SHADOW_OPACITY = 0.75f
+        /** Shadow length per unit of sprite height, at the lowest and highest sun. */
+        const val MIN_SHADOW_REACH = 0.35f
+        const val MAX_SHADOW_REACH = 1.4f
+        /** Painted sprites already lean back; their shadows are drawn a little shorter to match. */
+        const val SHADOW_SQUASH = 0.8f
+        /** How much of the foot's darkness reaches the shadow's tip. */
+        const val SHADOW_TIP = 0.55f
+        /** The round contact shadow shrinks when a cast shadow is there as well. */
+        const val CONTACT_WITH_SHADOW = 0.7f
         /** How much forged props vary in size, as a share either way. */
         const val PROP_SIZE_SPREAD = 0.3f
         const val DETAIL_LIFT = 0.03f
+        /** Litter is darkened a little, so it sits in the ground rather than on it. */
+        const val LITTER_TINT = 0xFFB4B4AA
         const val SPRITE_FLASH = 0.9f
 
         const val MAX_EFFECT_LIGHTS = 3

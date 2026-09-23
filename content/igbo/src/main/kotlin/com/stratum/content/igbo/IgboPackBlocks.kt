@@ -180,7 +180,8 @@ internal object IgboPackBlocks {
         id = "$NS:bronze_brazier",
         displayName = "Bronze Brazier",
         glyph = "🔥",
-        glyphScale = 1.2f,
+        // Smaller than a person: a brazier lights a place, it is not the place.
+        glyphScale = 0.85f,
         material = BlockMaterial.METAL,
         hardness = 1.5f,
         isSolid = false,
@@ -206,6 +207,11 @@ internal object IgboPackBlocks {
     val ofoShrine = BlockType(
         id = "$NS:ofo_shrine",
         displayName = "Ofo Shrine",
+        // Drawn, not a cube: the centrepiece of a grove's landmark has to be
+        // the largest, most finished thing in its clearing, and a textured
+        // crate among painted braziers was the smallest.
+        glyph = "🗿",
+        glyphScale = 1.5f,
         material = BlockMaterial.RITUAL,
         hardness = 8f,
         requiredTier = 2,
