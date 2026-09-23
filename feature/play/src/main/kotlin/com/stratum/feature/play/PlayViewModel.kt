@@ -390,7 +390,10 @@ class PlayViewModel(
      * integrates it on its own clock, so this only records intent.
      */
     fun setMoveInput(dx: Float, dy: Float) {
-        session.setMoveInput(dx, dy)
+        // The stick is screen-relative: up walks up the screen, whichever way
+        // the world's axes happen to run under it.
+        val world = com.stratum.engine.world.IsometricProjection.screenToWorldDirection(dx, dy)
+        session.setMoveInput(world.x, world.y)
     }
 
     /** Single nudge, for anything that is not the stick. */

@@ -477,6 +477,22 @@ order without seams.
 their four braziers, and paths are a thread through the grove with nothing
 growing on them.
 
+## One handedness, and a screen-relative stick
+
+The 2D projection draws world +x down-right and +y down-left on screen. A true
+camera looking north-west over a right-handed world shows the mirror image,
+so the 3D view first shipped mirrored against every rule written for the 2D
+one: pushed right, the hero walked left; characters faced away from where
+they walked; the upper-left sun lit from the upper right. `SceneCamera`
+flips screen X in its projection so both views share one handedness, and
+its `right` is the on-screen right.
+
+The stick was also fed in as world axes — right meant east, which on an
+isometric screen is down-right. `IsometricProjection.screenToWorldDirection`
+turns the stick's screen vector into a ground direction first, so up walks up
+the screen. `ScreenDirectionTest` pins stick, 2D and 3D together by where a
+step actually lands on screen, and fails with the mirror removed.
+
 ## Scenery is painted from the camera's angle
 
 The 3D camera looks down at `IsometricCamera.SCENE_ELEVATION_DEGREES` (52),

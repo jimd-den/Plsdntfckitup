@@ -46,13 +46,28 @@ data class SceneCamera(
 
     val view: FloatArray get() = Mat4.lookAt(eye, target, Vec3.UP)
 
-    val projection: FloatArray get() = Mat4.perspective(fovY, aspect, near, far)
+    /**
+     * The perspective, mirrored left to right.
+     *
+     * The game's axes were laid down by the 2D isometric projection, which
+     * draws world +x down-right and +y down-left on screen. A true camera
+     * looking north-west over a right-handed world shows those the other way
+     * round — the mirror image — and every system built on the 2D layout came
+     * out reversed in 3D: the stick walked left when pushed right, characters
+     * faced away from where they walked, and the sun meant for the upper left
+     * lit from the upper right. Flipping screen X gives the 3D view the 2D
+     * view's handedness, so one set of rules is right in both.
+     */
+    val projection: FloatArray get() = Mat4.perspective(fovY, aspect, near, far).also { it[0] = -it[0] }
 
     val viewProjection: FloatArray get() = Mat4.multiply(projection, view)
 
-    /** The screen's right and up directions in world space, for billboards. */
-    val right: Vec3 get() = (target - eye).cross(Vec3.UP).normalized()
-    val up: Vec3 get() = right.cross(target - eye).normalized()
+    /** The unmirrored camera's right, which [projection] shows on the left. */
+    private val lensRight: Vec3 get() = (target - eye).cross(Vec3.UP).normalized()
+
+    /** The screen's right and up directions in world space, for billboards and input. */
+    val right: Vec3 get() = lensRight * -1f
+    val up: Vec3 get() = lensRight.cross(target - eye).normalized()
 
     /** Zoom as a distance multiplier, clamped to what still reads. */
     fun zoomed(factor: Float): SceneCamera = copy(distance = (distance * factor).coerceIn(MIN_DISTANCE, MAX_DISTANCE))
