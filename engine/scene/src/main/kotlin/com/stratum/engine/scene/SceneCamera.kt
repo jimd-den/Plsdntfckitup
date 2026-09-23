@@ -18,8 +18,11 @@ import kotlin.math.sin
  */
 data class SceneCamera(
     val target: Vec3,
-    /** Degrees above the horizon the camera looks down from. */
-    val pitch: Float = 52f,
+    /**
+     * Degrees above the horizon the camera looks down from. Shared with the
+     * forge's prompts, so scenery is painted from the angle it is seen at.
+     */
+    val pitch: Float = com.stratum.core.domain.ai.IsometricCamera.SCENE_ELEVATION_DEGREES.toFloat(),
     /** Degrees around z; 225 places the camera to the south-east, looking north-west. */
     val yaw: Float = 225f,
     /** Distance from target, in blocks. */

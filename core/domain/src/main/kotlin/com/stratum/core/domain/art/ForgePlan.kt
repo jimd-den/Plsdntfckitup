@@ -326,6 +326,20 @@ object ForgePlanner {
         "A different individual from the usual one: older, larger and weathered, with an asymmetric, characterful shape.",
     )
 
+    /** What the scene camera's angle means for each family of prop, concretely. */
+    private fun seenFromAbove(family: PropSilhouette): String = when (family) {
+        PropSilhouette.CANOPY -> "Seen from above: the broad leafy crown dominates, its rounded top and upper surface of leaves " +
+            "clearly visible like a Diablo tree; only a short stretch of trunk and a few roots show beneath it."
+        PropSilhouette.SPIRE -> "Seen from above: the top is visible and the height is foreshortened."
+        PropSilhouette.FROND -> "Seen from above: the fronds spread outward from the centre like a star seen from above, " +
+            "their upper faces visible; the stem is short and partly hidden under them."
+        PropSilhouette.BRAZIER -> "Seen from above: you look down into the bowl, its rim a wide ellipse; the legs are short."
+        PropSilhouette.SHRINE -> "Seen from above: its top surface and offerings are visible; it looks squat rather than tall."
+        PropSilhouette.CRYSTAL -> "Seen from above: the facets of the tops are visible and the cluster looks squat."
+        PropSilhouette.BOULDER -> "Seen from above: the rounded top face is the largest visible part."
+        PropSilhouette.SIGIL -> "Seen from above: the top edge is visible and the height is foreshortened."
+    }
+
     private fun shapeWords(family: PropSilhouette): String = when (family) {
         PropSilhouette.CANOPY -> "a living tree with a trunk and a broad leafy crown"
         PropSilhouette.SPIRE -> "a tall narrow tree or standing stone"
@@ -351,8 +365,9 @@ object ForgePlanner {
             append(shapeWords(PropSilhouette.forMaterial(block)))
             append(", as a game prop sprite for an isometric action RPG like Diablo or Hades")
             if (setting.isNotBlank()) append(", belonging to $setting")
-            append(". The whole object is visible, centred, upright, seen from a high three-quarter camera angle, ")
-            append("with its base at the bottom of the frame. ")
+            append(". The whole object is visible and centred, with its base towards the bottom of the frame. ")
+            append(com.stratum.core.domain.ai.IsometricCamera.sceneClause).append(". ")
+            append(seenFromAbove(PropSilhouette.forMaterial(block))).append(" ")
             append("Isolated on a solid $KEY_NAME background that fills everything around the object. ")
             append("No ground plane, no base, no pedestal, no floor tile or platform under it, no cast shadow, no other objects, ")
             append("crisp clean silhouette edges, no magenta or pink anywhere on the object itself. ")

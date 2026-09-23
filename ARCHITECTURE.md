@@ -477,6 +477,15 @@ order without seams.
 their four braziers, and paths are a thread through the grove with nothing
 growing on them.
 
+## Scenery is painted from the camera's angle
+
+The 3D camera looks down at `IsometricCamera.SCENE_ELEVATION_DEGREES` (52),
+and `SceneCamera` takes its default from there. Prop prompts state that angle
+in degrees and in consequences for each shape family — a tree's crown seen
+from above and dominating, its trunk foreshortened; a brazier's rim a wide
+ellipse. Asked only for "a high three-quarter angle", the model painted trees
+from eye level, and side-on trunks stood up in a world seen from above.
+
 ## Sprite shadows
 
 A camera-facing card seen from the sun casts a sliver or a slab — in the
