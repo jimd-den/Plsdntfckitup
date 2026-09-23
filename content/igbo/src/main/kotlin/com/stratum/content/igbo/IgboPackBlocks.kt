@@ -248,12 +248,31 @@ internal object IgboPackBlocks {
         accentColor = 0xFFC9A26B,
     )
 
+    /**
+     * Fired laterite paving, laid over the ground.
+     *
+     * A floor tile rather than a block: it is walked over, not stood on top
+     * of, so a paved courtyard is at the same level as the grass around it.
+     */
+    val lateritePaving = BlockType(
+        id = "$NS:laterite_paving",
+        displayName = "Laterite Paving",
+        material = BlockMaterial.STONE,
+        shape = BlockShape.FLOOR,
+        hardness = 0.4f,
+        isSolid = false,
+        isOpaque = false,
+        topColor = 0xFFA85C3A,
+        sideColor = 0xFF7A3F26,
+        accentColor = 0xFFD99A6C,
+    )
+
     val all = listOf(
         redEarth, groveTurf, riverClay, ashSand,
         graniteStone, obsidianCrag, catacombMasonry,
         bronzeOre, ironOre, stormCrystal,
         irokoTrunk, irokoCanopy, palmReed, spiritWater,
         bronzeBrazier, nsibidiSeal, ofoShrine,
-        mudWall, plankWall,
+        mudWall, plankWall, lateritePaving,
     )
 }

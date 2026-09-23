@@ -395,9 +395,15 @@ class StyleSheetArtDirector(
     override fun effectsFor(cue: CombatCue): List<VisualEffect> {
         val strength = cue.emphasis.coerceIn(0f, 1f)
         return when (cue.kind) {
+            // The swing is drawn whether or not it lands: a whiff that leaves
+            // no trace feels like the button did nothing.
+            CombatMoment.SWING -> listOf(
+                VisualEffect(EffectKind.WEAPON_ARC, cue.color, radius = 1.3f, duration = 0.24f, intensity = 0.6f + strength * 0.4f),
+            )
             CombatMoment.HIT -> listOf(
                 VisualEffect(EffectKind.HIT_FLASH, palette.sun, duration = 0.12f, intensity = 0.6f + strength * 0.4f),
                 VisualEffect(EffectKind.IMPACT_RING, cue.color, radius = 0.7f + strength, duration = 0.22f),
+                VisualEffect(EffectKind.DEBRIS, cue.color, radius = 0.8f, duration = 0.35f, intensity = 0.3f + strength * 0.3f),
                 VisualEffect(EffectKind.NUMBER, cue.color, intensity = strength),
             )
             CombatMoment.CRITICAL -> listOf(

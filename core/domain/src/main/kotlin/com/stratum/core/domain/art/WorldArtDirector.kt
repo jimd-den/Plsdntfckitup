@@ -301,6 +301,8 @@ data class CombatCue(
 )
 
 enum class CombatMoment {
+    /** A weapon swung, whether or not it connects. */
+    SWING,
     HIT,
     CRITICAL,
     BLOCKED,

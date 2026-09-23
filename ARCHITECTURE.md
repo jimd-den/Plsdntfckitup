@@ -379,6 +379,51 @@ L with nothing to rotate. Collision uses the same boxes the mesher draws
 (`BlockShapes`), so a player can walk along the inside of their own wall. The
 `ERASE` build tool removes a dragged region and hands the blocks back.
 
+`BlockShape.FLOOR` is paving: a slab an eighth of a block thick that is not
+solid and lies in the air cell above the ground. Laying it never raises the
+floor or turns a doorway into a step, and dragging floor across grass paves
+the grass (the build plan is lifted one level). Tiles that touch drop their
+shared edges, so a courtyard is one surface with a lip only at its border.
+
+## Variety: several of everything
+
+A world where every tree is the same tree reads as machine-made faster than
+anything else. The forge plans three individuals of each ground and each
+prop (`ForgePlanner.variants`), keyed `key`, `key#1`, `key#2`, so a kit
+forged before variants existed still loads.
+
+- **Props** pick an individual by a hash of their cell
+  (`TextureLibrary.variantsOf`), then vary in size and mirror, so neighbours
+  differ and the same tree is the same tree every time you pass it.
+- **Ground** weaves its three paintings together. Each ground-top vertex
+  carries its two sister layers (`Vertex.VARIANT_A/B`), and the shader leans
+  towards each in slow patches several blocks across
+  (`ShadingModel.variants`), on top of the detile blend. One field, three
+  paintings, no seams.
+- **Litter** — fallen leaves, pebbles, flowers, roots — is forged as
+  `detail:<biome>` cut-outs and laid flat on about one open ground cell in six,
+  at a turn and size of its own (`TerrainMesher` records the spots; the scene
+  lays the quads). Only on the region's own surface block, so paths, paving
+  and walls stay clean.
+
+## Combat theatre
+
+The art director already described each moment of combat as data
+(`effectsFor(CombatCue)` returns rings, flashes, debris, beams, arcs,
+afterimages, ground glows and shakes). `EffectTrack` in `engine:scene` plays
+them: pure, clocked by the caller, capped so a crowded fight drops its oldest
+effect rather than its newest. `SceneBuilder` turns each one into additive
+glows and soft decals, and the brightest few also become short-lived point
+lights, so a hit lights the ground around it. The camera's aim takes
+`EffectTrack.shake()`; picking uses the same camera, so a tap during a shake
+still lands where the finger is.
+
+On the phone, `CombatTheatre` reads what the engine already reports — every
+new `FeedbackMark` (hit, crit, block, dodge, heal, kill, loot, level-up) and
+every change of the hero's animation into attack, special or roll — and turns
+each into a cue. Nothing new is threaded through the engine. A struck
+character's painted sprite blanches for a moment through its emissive term.
+
 ## Why sprites have two models
 
 `SpriteSheet` is a uniform grid read left to right, with each clip a contiguous

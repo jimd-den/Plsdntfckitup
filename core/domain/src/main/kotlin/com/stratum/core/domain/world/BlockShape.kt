@@ -25,6 +25,15 @@ enum class BlockShape {
      * that makes building miserable.
      */
     WALL,
+
+    /**
+     * A thin tile lying on whatever is under it: paving, planks, a rug.
+     *
+     * Not solid. It sits in the air cell above the ground and is walked over,
+     * so laying a courtyard never raises the floor a player walks on and never
+     * turns a doorway into a step.
+     */
+    FLOOR,
 }
 
 /** An axis-aligned box inside one cell, in cell-local units of 0..1. */
@@ -92,7 +101,12 @@ object BlockShapes {
     fun boxes(shape: BlockShape, connections: Int): List<ShapeBox> = when (shape) {
         BlockShape.CUBE -> CUBE_BOXES
         BlockShape.WALL -> WALL_BOXES[if (connections == 0) EAST or WEST else connections]
+        BlockShape.FLOOR -> FLOOR_BOXES
     }
+
+    /** How thick a floor tile is, as a share of a cell. */
+    const val FLOOR_THICKNESS = 0.12f
+    private val FLOOR_BOXES = listOf(ShapeBox(0f, 0f, 0f, 1f, 1f, FLOOR_THICKNESS))
 
     /**
      * Whether a block at [pos] occupies the point at cell-local ([localX], [localY]).

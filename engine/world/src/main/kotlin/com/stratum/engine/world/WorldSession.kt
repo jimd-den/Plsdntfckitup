@@ -14,6 +14,7 @@ import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.sprite.AnimationSelector
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.Direction
@@ -939,7 +940,10 @@ class WorldSession(
         val blockId = player.selectedBlockId
             ?: return BuildPreview(emptyList(), 0, 0, false).also { buildPreview = emptyList() }
 
-        val planned = BuildPlanner.plan(buildTool, from, to)
+        // A floor tile lies on what was picked rather than replacing it, so its
+        // plan is lifted one level: a drag across grass paves the grass.
+        val lift = if (content.registry.indexOrNull(blockId)?.let { content.registry.typeOf(it).shape } == BlockShape.FLOOR) 1 else 0
+        val planned = BuildPlanner.plan(buildTool, from.above(lift), to.above(lift))
         // Only cells that are actually free: the preview should show what will
         // happen, not what was asked for.
         val placeable = planned.filter { pos ->

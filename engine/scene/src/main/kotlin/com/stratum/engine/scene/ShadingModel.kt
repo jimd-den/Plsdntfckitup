@@ -146,6 +146,19 @@ object ShadingModel {
         out[3] = 0.88f + 0.24f * valueNoise(px / TINT_CELL + 17f, py / TINT_CELL + 5f)
     }
 
+    /**
+     * How far a ground point leans towards its two variant paintings.
+     *
+     * Slow patches several blocks across with short edges: a worn clearing
+     * here, a lush hollow there, the usual ground between. [out] receives the
+     * weights towards variant A and variant B. The GLSL twin is in `main`.
+     */
+    fun variants(wx: Float, wy: Float, out: FloatArray) {
+        val qx = wx / VARIANT_CELL; val qy = wy / VARIANT_CELL
+        out[0] = smoothstep(VARIANT_EDGE0, VARIANT_EDGE1, valueNoise(qx + 41f, qy + 7f))
+        out[1] = smoothstep(VARIANT_EDGE0, VARIANT_EDGE1, valueNoise(qx * 1.3f - 23f, qy * 1.3f + 61f))
+    }
+
     /** Smooth value noise in 0..1, matching the shader's `vnoise`. */
     fun valueNoise(x: Float, y: Float): Float {
         val ix = kotlin.math.floor(x); val iy = kotlin.math.floor(y)
@@ -182,6 +195,9 @@ object ShadingModel {
     const val DETILE_SHIFT_V = 0.19f
     const val DETILE_CELL = 6f
     const val TINT_CELL = 13f
+    const val VARIANT_CELL = 9f
+    const val VARIANT_EDGE0 = 0.5f
+    const val VARIANT_EDGE1 = 0.64f
     const val TONE_GAIN = 1.25f
     const val HEIGHT_FOG_DEPTH = 6f
     const val HEIGHT_FOG_MAX = 0.55f

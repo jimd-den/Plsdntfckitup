@@ -241,6 +241,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         attribute(4, 2, Vertex.U, stride)
         attribute(5, 1, Vertex.LAYER, stride)
         attribute(6, 1, Vertex.EMISSIVE, stride)
+        attribute(7, 2, Vertex.VARIANT_A, stride)
         GLES30.glBindVertexArray(0)
         mesh.count = batch.indices.size
     }

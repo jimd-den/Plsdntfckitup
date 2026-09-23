@@ -89,12 +89,13 @@ class AssetForge(
             if (decoded == null) { lastFailure = "could not decode ${generated.mimeType}"; return@repeat }
             // Tiles are judged as they arrive; a sprite is *meant* to be mostly
             // key colour, so it is judged only once the key has been removed.
-            if (order.kind != AssetKind.PROP_SPRITE) {
+            val cutOut = order.kind == AssetKind.PROP_SPRITE || order.kind == AssetKind.GROUND_DETAIL
+            if (!cutOut) {
                 Pixels.defect(decoded)?.let { lastFailure = "rejected: $it"; return@repeat }
             }
             val finished = runCatching { finish(order.kind, decoded) }
                 .getOrElse { lastFailure = it.message ?: "post-processing failed"; return@repeat }
-            if (order.kind == AssetKind.PROP_SPRITE) {
+            if (cutOut) {
                 Pixels.spriteDefect(finished)?.let { lastFailure = "rejected: $it"; return@repeat }
             }
             return ForgedAsset(order, finished)
@@ -105,7 +106,7 @@ class AssetForge(
     /** The clean-up each kind of asset needs. Public so imported art gets the same treatment. */
     fun finish(kind: AssetKind, image: Texture): Texture = when (kind) {
         AssetKind.GROUND_TILE, AssetKind.WALL_TILE -> Pixels.seamless(Pixels.downscale(Pixels.square(image), tileSize))
-        AssetKind.PROP_SPRITE -> {
+        AssetKind.PROP_SPRITE, AssetKind.GROUND_DETAIL -> {
             val keyed = Pixels.keyOut(image)
             val trimmed = Pixels.trim(keyed) ?: error("the sprite came back empty after keying")
             Pixels.downscale(trimmed, spriteSize)

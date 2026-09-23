@@ -56,7 +56,17 @@ class ForgeTest {
         assertTrue("prop:t:torch" in keys, "light sources get a sprite")
         assertTrue("prop:t:water" !in keys, "a liquid is a surface, not an object")
         assertEquals(keys.size, orders.size, "no key is ordered twice")
-        assertTrue(orders.size < 16)
+        assertTrue(orders.size < 24)
+    }
+
+    @Test
+    fun `grounds and props come in several individuals, and every region gets floor clutter`() {
+        val keys = ForgePlanner.plan(ArtDirection.HOUSE, pack).map { it.key }.toSet()
+        assertTrue(setOf("t:turf/top", "t:turf/top#1", "t:turf/top#2").all { it in keys })
+        assertTrue(setOf("prop:t:tree", "prop:t:tree#1", "prop:t:tree#2").all { it in keys })
+        assertEquals(ForgePlanner.DETAILS_PER_REGION, keys.count { it.startsWith("detail:t:grove") })
+        val single = ForgePlanner.plan(ArtDirection.HOUSE, pack, variants = 1).map { it.key }
+        assertTrue(single.none { '#' in it && !it.startsWith("detail:") }, "one variant means no numbered keys")
     }
 
     @Test

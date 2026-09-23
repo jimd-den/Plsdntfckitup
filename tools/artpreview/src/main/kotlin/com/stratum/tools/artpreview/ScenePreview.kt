@@ -6,6 +6,8 @@ import com.stratum.core.domain.art.ActorPresentation
 import com.stratum.core.domain.art.ActorRole
 import com.stratum.core.domain.art.ArtDirection
 import com.stratum.core.domain.art.BiomeArtKit
+import com.stratum.core.domain.art.CombatCue
+import com.stratum.core.domain.art.CombatMoment
 import com.stratum.core.domain.art.StyleLexicon
 import com.stratum.core.domain.art.StyleSheetArtDirector
 import com.stratum.core.domain.art.WorldTime
@@ -57,6 +59,8 @@ object ScenePreview {
         Triple("06-neon", "neon synthwave", "house"),
         Triple("07-frozen", "frozen arctic winter", "house"),
         Triple("08-untextured", "stratum house style", ""),
+        Triple("09-fight-dark", "dark grimdark diablo", "dark"),
+        Triple("10-fight-hades", "inked chiaroscuro sacred", "hades"),
     )
 
     @JvmStatic
@@ -70,12 +74,12 @@ object ScenePreview {
             val kitDir = forged?.let { root ->
                 if (kit.isEmpty()) null else File(root, kit).takeIf { it.isDirectory } ?: File(root, "house")
             }
-            ImageIO.write(render(prompt, kitDir), "png", file)
+            ImageIO.write(render(prompt, kitDir, fight = "fight" in name), "png", file)
             println("wrote ${file.absolutePath} in ${System.currentTimeMillis() - started}ms")
         }
     }
 
-    fun render(prompt: String, forged: File?): java.awt.image.BufferedImage {
+    fun render(prompt: String, forged: File?, fight: Boolean = false): java.awt.image.BufferedImage {
         val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack))
         val config = WorldConfig(seed = SEED, simulationRadius = 3)
         val generator = StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain))
@@ -102,15 +106,46 @@ object ScenePreview {
             aspect = WIDTH.toFloat() / HEIGHT,
         )
         val stand = ground + 1f
+        // In the fight, the brute has closed in and is being struck.
+        val brute = if (fight) Vec3(VANTAGE_X + 2.2f, VANTAGE_Y - 0.9f, surfaceAt(world, VANTAGE_X + 2, VANTAGE_Y - 1))
+        else Vec3(VANTAGE_X + 4.5f, VANTAGE_Y - 2.5f, surfaceAt(world, VANTAGE_X + 4, VANTAGE_Y - 3))
         val actors = listOf(
             SceneActor(VANTAGE_X + 0.5f, VANTAGE_Y + 0.5f, stand, ActorPresentation("p", ActorRole.PLAYER), 1f, -0.3f, spriteKey = "actor:igbo:dike_ozo"),
-            SceneActor(VANTAGE_X + 4.5f, VANTAGE_Y - 2.5f, surfaceAt(world, VANTAGE_X + 4, VANTAGE_Y - 3), ActorPresentation("m1", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0.5f, spriteKey = "actor:igbo:ogu_brute"),
+            SceneActor(brute.x, brute.y, brute.z, ActorPresentation("m1", ActorRole.ENEMY, EnemyRank.MINION, flash = if (fight) 0.7f else 0f), -1f, 0.5f, spriteKey = "actor:igbo:ogu_brute"),
             SceneActor(VANTAGE_X + 5.5f, VANTAGE_Y - 0.5f, surfaceAt(world, VANTAGE_X + 5, VANTAGE_Y - 1), ActorPresentation("m2", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0f, spriteKey = "actor:igbo:shadow_leopard"),
             SceneActor(VANTAGE_X + 6.5f, VANTAGE_Y + 2.5f, surfaceAt(world, VANTAGE_X + 6, VANTAGE_Y + 2), ActorPresentation("e", ActorRole.ENEMY, EnemyRank.ELITE), -1f, -0.4f, spriteKey = "actor:igbo:catacomb_guardian"),
             SceneActor(VANTAGE_X - 1.5f, VANTAGE_Y + 3.5f, surfaceAt(world, VANTAGE_X - 2, VANTAGE_Y + 3), ActorPresentation("l", ActorRole.LOOT)),
         )
-        val frame = builder.build(world, camera, actors, WorldTime(dayFraction = 0.42f, elapsedSeconds = 7f))
+        val effects = if (fight) stageFight(director, actors, brute) else emptyList()
+        val frame = builder.build(world, camera, actors, WorldTime(dayFraction = 0.42f, elapsedSeconds = 7f), effects = effects)
         return SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
+    }
+
+    /**
+     * One moment of a fight, frozen: loot beaming where the last kill fell, the
+     * hero's swing still trailing, a critical landing on the brute and a
+     * lighter hit on the leopard. Played through an [com.stratum.engine.scene.EffectTrack]
+     * and advanced in steps, exactly as the game would reach this instant.
+     */
+    private fun stageFight(
+        director: StyleSheetArtDirector,
+        actors: List<SceneActor>,
+        brute: Vec3,
+    ): List<com.stratum.engine.scene.ActiveEffect> {
+        val track = com.stratum.engine.scene.EffectTrack(director)
+        val palette = director.direction.palette
+        val hero = actors.first()
+        val leopard = actors[2]
+        val loot = actors.last()
+        track.play(CombatCue(CombatMoment.LOOT_DROP, palette.resource), loot.x, loot.y, loot.z)
+        track.advance(0.35f)
+        track.play(CombatCue(CombatMoment.SWING, palette.heroRim, 0.8f), hero.x, hero.y, hero.z, hero.facingX, hero.facingY)
+        track.advance(0.1f)
+        track.play(CombatCue(CombatMoment.CRITICAL, palette.hostile, 1f), brute.x, brute.y, brute.z)
+        track.advance(0.05f)
+        track.play(CombatCue(CombatMoment.HIT, palette.sacred, 0.5f), leopard.x, leopard.y, leopard.z)
+        track.advance(0.04f)
+        return track.active
     }
 
     /** Standing height at a column: the ground, not whatever grows on it. */
@@ -129,6 +164,7 @@ object ScenePreview {
         val wall = registry.indexOf("igbo:mud_wall")
         val floor = registry.indexOf("igbo:red_earth")
         val brazier = registry.indexOf("igbo:bronze_brazier")
+        val paving = registry.indexOf("igbo:laterite_paving")
         val minX = VANTAGE_X - 7; val maxX = VANTAGE_X - 2
         val minY = VANTAGE_Y - 7; val maxY = VANTAGE_Y - 2
         for (y in minY..maxY) for (x in minX..maxX) {
@@ -139,7 +175,15 @@ object ScenePreview {
             if (edge && !door) {
                 world.setBlock(BlockPos(x, y, ground + 1), wall)
                 world.setBlock(BlockPos(x, y, ground + 2), wall)
+            } else if (!edge || door) {
+                // A paved courtyard, laid over the earth rather than in it.
+                world.setBlock(BlockPos(x, y, ground + 1), paving)
             }
+        }
+        // And a paved path out of the door.
+        for (y in maxY + 1..maxY + 3) for (x in minX + 2..minX + 3) {
+            val z = world.surfaceAt(x, y) + 1
+            if (world.blockAt(BlockPos(x, y, z - 1)).isSolid) world.setBlock(BlockPos(x, y, z), paving)
         }
         world.setBlock(BlockPos(minX + 1, maxY + 1, ground + 1), brazier)
         world.setBlock(BlockPos(minX + 4, maxY + 1, ground + 1), brazier)

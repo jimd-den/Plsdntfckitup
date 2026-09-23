@@ -111,9 +111,13 @@ fun Scene3DView(
     val builder = remember(input.director, library) {
         SceneBuilder(input.director, library, input.biomeAt)
     }
+    val theatre = remember(input.director) { CombatTheatre(input.director) }
+    theatre.update(input)
 
     val camera = SceneCamera(
-        target = Vec3(input.camera.x, input.camera.y, input.camera.z),
+        // The shake moves the camera's aim, not the world: taps still land
+        // where the finger is, because picking uses this same camera.
+        target = Vec3(input.camera.x, input.camera.y, input.camera.z) + theatre.track.shake(),
         aspect = size.width.toFloat() / size.height.coerceAtLeast(1),
         distance = (BASE_DISTANCE / input.zoom).coerceIn(SceneCamera.MIN_DISTANCE, SceneCamera.MAX_DISTANCE),
     )
@@ -129,6 +133,7 @@ fun Scene3DView(
             ghosts = input.buildPreview,
             ghostsAffordable = input.buildAffordable,
             highlight = input.highlight,
+            effects = theatre.track.active,
         )
         renderer.submit(frame)
         surface?.requestRender()

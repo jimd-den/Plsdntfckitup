@@ -2,6 +2,7 @@ package com.stratum.engine.scene
 
 import com.stratum.core.domain.art.ActorPresentation
 import com.stratum.core.domain.art.ActorStyle
+import com.stratum.core.domain.art.EffectKind
 import com.stratum.core.domain.art.MoteKind
 import com.stratum.core.domain.art.PartRole
 import com.stratum.core.domain.art.PropCue
@@ -15,6 +16,7 @@ import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.world.World
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
@@ -105,6 +107,8 @@ class SceneBuilder(
         ghostsAffordable: Boolean = true,
         /** The cell the player is about to act on. */
         highlight: com.stratum.core.domain.world.BlockPos? = null,
+        /** Combat theatre in progress; see [EffectTrack]. */
+        effects: List<ActiveEffect> = emptyList(),
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
@@ -148,6 +152,7 @@ class SceneBuilder(
         val eyeLevel = floor(camera.target.z).toInt()
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
+        terrain.details.forEach(::litter)
         terrain.props.forEach { prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
         terrain.lights.forEach { light ->
             // A light you can see the source of. Point lights colour the ground;
@@ -166,13 +171,18 @@ class SceneBuilder(
             decal(cell.x + 0.5f, cell.y + 0.5f, cell.z + 1f, HIGHLIGHT_RADIUS, palette.heroRim, HIGHLIGHT_OPACITY, Vertex.RING)
         }
         motes(camera, time, biome)
+        val flashes = ArrayList<PointLight>()
+        effects.forEach { effect(it, camera, flashes) }
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
             ?.takeIf { lighting.heroLight > 0f }
             ?.let { PointLight(it.x, it.y, it.z + HERO_LIGHT_HEIGHT, lighting.sunColor, lighting.heroLight, lighting.heroLightRadius) }
-        val nearest = listOfNotNull(hero) + terrain.lights
+        // A hit lights the ground around it for a moment — the cheapest way to
+        // make an impact feel like it has weight. The brightest few win.
+        val bursts = flashes.sortedByDescending { it.strength }.take(MAX_EFFECT_LIGHTS)
+        val nearest = listOfNotNull(hero) + bursts + terrain.lights
             .sortedBy { abs(it.x - camera.target.x) + abs(it.y - camera.target.y) }
-            .take(SceneFrame.MAX_LIGHTS - (if (hero != null) 1 else 0))
+            .take(SceneFrame.MAX_LIGHTS - (if (hero != null) 1 else 0) - bursts.size)
             .map { it.copy(strength = it.strength * lighting.pointLightGain) }
 
         return SceneFrame(
@@ -231,12 +241,19 @@ class SceneBuilder(
 
         decal(baseX, baseY, baseZ, PROP_SHADOW_RADIUS * style.scale, director.direction.palette.ink, style.contactShadow, Vertex.DISC)
 
-        val sprite = textures.layerOf("prop:${prop.block.id}")
-        if (sprite >= 0) {
+        // One of the forged individuals, picked by place: neighbours differ,
+        // and the same tree is the same tree every time you walk past it.
+        val paintings = textures.variantsOf("prop:${prop.block.id}")
+        if (paintings.isNotEmpty()) {
+            val sprite = paintings[(variant ushr 3) % paintings.size]
             val texture = textures.textureAt(sprite)!!
-            val height = SPRITE_HEIGHT * style.scale
+            val size = 1f + (((variant ushr 11) and 0xFF) / 255f - 0.5f) * PROP_SIZE_SPREAD
+            val height = SPRITE_HEIGHT * style.scale * size
             val width = height * texture.width / texture.height
-            billboard(camera, baseX, baseY, baseZ, width, height, style.fill or Tint.OPAQUE, sprite.toFloat(), opacity)
+            billboard(
+                camera, baseX, baseY, baseZ, width, height, style.fill or Tint.OPAQUE, sprite.toFloat(), opacity,
+                mirrored = (variant ushr 19) and 1 == 1,
+            )
         } else {
             silhouette(camera, baseX, baseY, baseZ, style, opacity)
         }
@@ -256,7 +273,7 @@ class SceneBuilder(
      */
     private fun billboard(
         camera: SceneCamera, x: Float, y: Float, z: Float, width: Float, height: Float,
-        tint: Long, layer: Float, opacity: Float = 1f, mirrored: Boolean = false,
+        tint: Long, layer: Float, opacity: Float = 1f, mirrored: Boolean = false, emissive: Float = 0f,
     ) {
         val u0 = if (mirrored) 1f else 0f
         val u1 = 1f - u0
@@ -268,10 +285,10 @@ class SceneBuilder(
         // For cut-outs the occlusion slot carries opacity: below one, the
         // backends drop a dithered share of the pixels (screen-door fade),
         // which needs no sorting and keeps depth writes intact.
-        val a = cutout.vertex(x - right.x * hw, y - right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u0, 1f, layer)
-        val b = cutout.vertex(x + right.x * hw, y + right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u1, 1f, layer)
-        val c = cutout.vertex(x + right.x * hw + tx, y + right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u1, 0f, layer)
-        val d = cutout.vertex(x - right.x * hw + tx, y - right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u0, 0f, layer)
+        val a = cutout.vertex(x - right.x * hw, y - right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u0, 1f, layer, emissive)
+        val b = cutout.vertex(x + right.x * hw, y + right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u1, 1f, layer, emissive)
+        val c = cutout.vertex(x + right.x * hw + tx, y + right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u1, 0f, layer, emissive)
+        val d = cutout.vertex(x - right.x * hw + tx, y - right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u0, 0f, layer, emissive)
         cutout.quad(a, b, c, d)
     }
 
@@ -347,6 +364,8 @@ class SceneBuilder(
             billboard(
                 camera, actor.x, actor.y, actor.z, height * texture.width / texture.height, height,
                 Tint.OPAQUE or 0xFFFFFF, sprite.toFloat(), mirrored = screenwise < -0.01f,
+                // Struck, the painted body blanches for a moment, like Hades'.
+                emissive = actor.presentation.flash.coerceIn(0f, 1f) * SPRITE_FLASH,
             )
             return
         }
@@ -415,6 +434,127 @@ class SceneBuilder(
         faces.forEach { (n, c, _) ->
             val idx = c.map { p -> out.vertex(p[0], p[1], p[2], n[0], n[1], n[2], color, 1f, 0f, 0f, Vertex.ACTOR) }
             out.quad(idx[0], idx[1], idx[2], idx[3])
+        }
+    }
+
+    /** A piece of ground litter, lying flat and turned its own way. */
+    private fun litter(detail: GroundDetail) {
+        val texture = textures.textureAt(detail.layer) ?: return
+        val hw = detail.size / 2f
+        val hh = hw * texture.height / texture.width
+        val c = cos(detail.angle); val sn = sin(detail.angle)
+        val z = detail.z + DETAIL_LIFT
+        fun corner(u: Float, v: Float): Int {
+            val lx = (u * 2f - 1f) * hw; val ly = (1f - v * 2f) * hh
+            return cutout.vertex(
+                detail.x + lx * c - ly * sn, detail.y + lx * sn + ly * c, z,
+                0f, 0f, 1f, Tint.OPAQUE or 0xFFFFFF, 1f, u, v, detail.layer.toFloat(),
+            )
+        }
+        cutout.quad(corner(0f, 1f), corner(1f, 1f), corner(1f, 0f), corner(0f, 0f))
+    }
+
+    /**
+     * One piece of combat theatre, as decals and glows.
+     *
+     * Everything here is additive light or a soft decal: no textures, no
+     * sorting, the same on both backends, and nothing a style cannot recolour.
+     */
+    private fun effect(active: ActiveEffect, camera: SceneCamera, lights: MutableList<PointLight>) {
+        val fx = active.effect
+        val p = active.progress
+        val fade = 1f - p
+        val color = fx.color or Tint.OPAQUE
+        val x = active.x; val y = active.y; val z = active.z
+        when (fx.kind) {
+            EffectKind.IMPACT_RING -> {
+                val grow = 1f - fade * fade
+                decal(x, y, z, fx.radius * (0.25f + 0.75f * grow), color, fade * RING_EFFECT_OPACITY, Vertex.RING)
+                decal(x, y, z, fx.radius * 0.55f, color, fade * fade * SCORCH_OPACITY, Vertex.DISC)
+                lights += PointLight(x, y, z + 0.6f, color, fade * IMPACT_LIGHT, 2f + fx.radius * 2f)
+            }
+            EffectKind.HIT_FLASH -> {
+                val burst = fade * fade
+                glow(camera, x, y, z + BODY_CENTRE, (0.55f + 0.7f * p) * (0.8f + fx.intensity * 0.5f), color, burst * fx.intensity * FLASH_OPACITY)
+                // Sparks thrown out across the screen from the point of impact.
+                val spin = unit(active.seed, 9) * TAU
+                for (i in 0 until FLASH_SPARKS) {
+                    val a = spin + i * TAU / FLASH_SPARKS
+                    val reach = (0.3f + 0.9f * (1f - fade * fade)) * (0.7f + 0.6f * unit(active.seed * 17 + i, 3))
+                    val sx = cos(a) * reach; val sz = sin(a) * reach
+                    glow(
+                        camera,
+                        x + camera.right.x * sx + camera.up.x * sz,
+                        y + camera.right.y * sx + camera.up.y * sz,
+                        z + BODY_CENTRE + camera.up.z * sz,
+                        SPARK_SIZE * (0.6f + fade), color, burst * 1.2f,
+                    )
+                }
+                lights += PointLight(x, y, z + 1f, color, burst * fx.intensity * FLASH_LIGHT, 4.5f)
+            }
+            EffectKind.DEBRIS -> {
+                val count = (DEBRIS_MIN + DEBRIS_EXTRA * fx.intensity).toInt()
+                for (i in 0 until count) {
+                    val salt = active.seed * 131 + i
+                    val a = unit(salt, 1) * TAU
+                    val out = fx.radius * (0.4f + 0.9f * unit(salt, 2)) * (1f - fade * fade)
+                    // A thrown arc that lands where it ends.
+                    val lift = DEBRIS_HEIGHT * (0.5f + unit(salt, 3))
+                    val dz = 0.8f * fade + lift * 4f * p * fade
+                    val size = DEBRIS_SIZE * (0.7f + 0.6f * unit(salt, 4))
+                    glow(camera, x + cos(a) * out, y + sin(a) * out, z + dz, size, color, sqrt(fade) * 1.1f)
+                }
+            }
+            EffectKind.BEAM -> {
+                val envelope = ShadingModel.smoothstep(0f, 0.12f, p) * (1f - ShadingModel.smoothstep(0.65f, 1f, p))
+                for (k in 0 until BEAM_SEGMENTS) {
+                    val share = k / BEAM_SEGMENTS.toFloat()
+                    val pulse = 0.85f + 0.15f * sin(active.age * 11f + k * 0.9f)
+                    glow(
+                        camera, x, y, z + 0.3f + k * BEAM_STEP,
+                        fx.radius * (1.1f - share * 0.7f) * pulse, color,
+                        envelope * fx.intensity * (1f - share) * BEAM_OPACITY,
+                    )
+                }
+                decal(x, y, z, fx.radius * 1.6f, color, envelope * 0.7f, Vertex.DISC)
+                lights += PointLight(x, y, z + 1.5f, color, envelope * fx.intensity * BEAM_LIGHT, 5f)
+            }
+            EffectKind.WEAPON_ARC -> {
+                // A slash sweeping across the front of the body, trailing light.
+                val facing = atan2(active.facingY, active.facingX)
+                val head = -ARC_HALF + 2f * ARC_HALF * (1f - fade * fade * fade)
+                for (k in 0 until ARC_SEGMENTS) {
+                    val share = k / ARC_SEGMENTS.toFloat()
+                    val a = head - share * ARC_TRAIL
+                    if (a < -ARC_HALF) break
+                    val angle = facing + a
+                    val lean = sin(a) * 0.35f
+                    glow(
+                        camera,
+                        x + cos(angle) * fx.radius, y + sin(angle) * fx.radius, z + BODY_CENTRE + lean,
+                        ARC_SIZE * (1f - share * 0.6f), color,
+                        fade * fx.intensity * (1f - share) * ARC_OPACITY,
+                    )
+                }
+            }
+            EffectKind.AFTERIMAGE -> {
+                val len = sqrt(active.facingX * active.facingX + active.facingY * active.facingY).coerceAtLeast(1e-3f)
+                val bx = -active.facingX / len; val by = -active.facingY / len
+                for (k in 1..AFTERIMAGES) {
+                    val back = k * AFTERIMAGE_STEP * (0.5f + p)
+                    val o = fade * fx.intensity * (1f - k / (AFTERIMAGES + 1f)) * AFTERIMAGE_OPACITY
+                    glow(camera, x + bx * back, y + by * back, z + 0.5f, 0.45f, color, o)
+                    glow(camera, x + bx * back, y + by * back, z + 1.15f, 0.4f, color, o)
+                }
+            }
+            EffectKind.GROUND_DECAL -> {
+                val envelope = ShadingModel.smoothstep(0f, 0.15f, p) * fade
+                val pulse = 0.92f + 0.08f * sin(active.age * 9f)
+                decal(x, y, z, fx.radius * pulse, color, envelope * 0.75f, Vertex.DISC)
+                decal(x, y, z, fx.radius * 1.15f * pulse, color, envelope, Vertex.RING)
+                lights += PointLight(x, y, z + 0.8f, color, envelope * GROUND_LIGHT, 3f + fx.radius)
+            }
+            EffectKind.SCREEN_SHAKE, EffectKind.NUMBER -> Unit
         }
     }
 
@@ -519,6 +659,37 @@ class SceneBuilder(
         const val FILL_LIFT = 0.45f
 
         const val SPRITE_HEIGHT = 2.6f
+        /** How much forged props vary in size, as a share either way. */
+        const val PROP_SIZE_SPREAD = 0.3f
+        const val DETAIL_LIFT = 0.03f
+        const val SPRITE_FLASH = 0.9f
+
+        const val MAX_EFFECT_LIGHTS = 3
+        const val BODY_CENTRE = 0.9f
+        const val RING_EFFECT_OPACITY = 1.1f
+        const val SCORCH_OPACITY = 0.45f
+        const val IMPACT_LIGHT = 1.4f
+        const val FLASH_OPACITY = 1.5f
+        const val FLASH_SPARKS = 7
+        const val SPARK_SIZE = 0.13f
+        const val FLASH_LIGHT = 2.2f
+        const val DEBRIS_MIN = 6
+        const val DEBRIS_EXTRA = 12
+        const val DEBRIS_HEIGHT = 0.9f
+        const val DEBRIS_SIZE = 0.12f
+        const val BEAM_SEGMENTS = 12
+        const val BEAM_STEP = 0.5f
+        const val BEAM_OPACITY = 0.7f
+        const val BEAM_LIGHT = 1.6f
+        const val ARC_HALF = 1.3f
+        const val ARC_TRAIL = 1.4f
+        const val ARC_SEGMENTS = 14
+        const val ARC_SIZE = 0.3f
+        const val ARC_OPACITY = 1.2f
+        const val AFTERIMAGES = 4
+        const val AFTERIMAGE_STEP = 0.35f
+        const val AFTERIMAGE_OPACITY = 0.45f
+        const val GROUND_LIGHT = 1f
 
         /** How close in front of an actor a prop must be to fade, across and along the view. */
         const val FADE_WIDTH = 1.6f

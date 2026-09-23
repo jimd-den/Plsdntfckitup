@@ -15,6 +15,13 @@ enum class AssetKind {
 
     /** One object on a keyable background, cut out and stood up in the world. */
     PROP_SPRITE,
+
+    /**
+     * Small things lying on the ground — leaves, pebbles, flowers, roots —
+     * seen from above, cut out, and laid flat across the floor. Cleaned up
+     * like a sprite; drawn like a decal.
+     */
+    GROUND_DETAIL,
 }
 
 /**
@@ -55,6 +62,14 @@ object ForgePlanner {
         biomeIds: Set<String> = emptySet(),
         /** Also order one still sprite per hero class and per monster. */
         includeActors: Boolean = true,
+        /**
+         * How many individuals of each prop and each ground to paint.
+         *
+         * One of each is a world of clones: a forest of the identical tree and
+         * a field of the identical grass is the tell that nobody made it.
+         * Three is enough that no two neighbours need match.
+         */
+        variants: Int = DEFAULT_VARIANTS,
     ): List<ForgeOrder> {
         val blocks = pack.blocks.associateBy { it.id }
         val orders = LinkedHashMap<String, ForgeOrder>()
@@ -67,7 +82,9 @@ object ForgePlanner {
             blocks[biome.surfaceBlockId]?.let { surface ->
                 add(tile(direction, surface, AssetKind.GROUND_TILE, setting, kit))
                 add(tile(direction, surface, AssetKind.WALL_TILE, setting, kit))
+                for (v in 1 until variants) add(tile(direction, surface, AssetKind.GROUND_TILE, setting, kit, v))
             }
+            for (v in 0 until DETAILS_PER_REGION) add(detail(direction, biome.id, setting, kit, v))
             blocks[biome.subsurfaceBlockId]?.let {
                 add(tile(direction, it, AssetKind.WALL_TILE, setting, kit))
                 // Dug out, built on, trodden into paths: the layer under the
@@ -76,8 +93,10 @@ object ForgePlanner {
             }
             blocks[biome.bedrockFillerBlockId]?.let { add(tile(direction, it, AssetKind.WALL_TILE, setting, kit)) }
             biome.scatter.forEach { rule ->
-                blocks[rule.blockId]?.let { add(sprite(direction, it, setting, kit)) }
-                rule.capBlockId?.let { cap -> blocks[cap]?.let { add(sprite(direction, it, setting, kit)) } }
+                val scattered = listOfNotNull(blocks[rule.blockId], rule.capBlockId?.let { blocks[it] })
+                scattered.forEach { block ->
+                    for (v in 0 until variants) add(sprite(direction, block, setting, kit, v))
+                }
             }
         }
         // What the player builds with is part of the world's look whichever
@@ -85,6 +104,9 @@ object ForgePlanner {
         pack.blocks.filter { it.shape == BlockShape.WALL }.forEach { wall ->
             add(tile(direction, wall, AssetKind.WALL_TILE, "a built compound wall", null))
             add(tile(direction, wall, AssetKind.GROUND_TILE, "the top of a built compound wall", null))
+        }
+        pack.blocks.filter { it.shape == BlockShape.FLOOR }.forEach { floor ->
+            add(tile(direction, floor, AssetKind.GROUND_TILE, "a laid, built floor of fitted pieces", null))
         }
         // Light sources are the props a player looks at most.
         // Liquids are surfaces, not objects: asked for as a sprite, "spirit
@@ -134,7 +156,14 @@ object ForgePlanner {
         return ForgeOrder(key, AssetKind.PROP_SPRITE, tier, name, prompt)
     }
 
-    private fun tile(direction: ArtDirection, block: BlockType, kind: AssetKind, setting: String, kit: BiomeArtKit?): ForgeOrder {
+    private fun tile(
+        direction: ArtDirection,
+        block: BlockType,
+        kind: AssetKind,
+        setting: String,
+        kit: BiomeArtKit?,
+        variant: Int = 0,
+    ): ForgeOrder {
         val face = if (kind == AssetKind.GROUND_TILE) "top" else "side"
         val material = block.displayName.lowercase()
         val view = if (kind == AssetKind.GROUND_TILE) {
@@ -151,6 +180,7 @@ object ForgePlanner {
             // teal, which is the grove's colour and not the earth's.
             append(", dominant base colour $base")
             if (setting.isNotBlank()) append(", found in $setting")
+            if (variant > 0) append(". ").append(GROUND_VARIATIONS[(variant - 1) % GROUND_VARIATIONS.size])
             append(". The texture fills the entire square frame edge to edge and wraps seamlessly on all four sides. ")
             append("Hand-painted stylized action RPG surface, broad readable brush strokes, subtle large-scale variation, ")
             append("even flat lighting with no directional shadows, no objects, no horizon, no perspective, no border, no vignette. ")
@@ -160,8 +190,51 @@ object ForgePlanner {
             append(direction.diction.forbidden)
             append(".")
         }
-        return ForgeOrder("${block.id}/$face", kind, AssetTier.SYSTEMIC, "$material ($face)", prompt)
+        return ForgeOrder(variantKey("${block.id}/$face", variant), kind, AssetTier.SYSTEMIC, "$material ($face)", prompt)
     }
+
+    /** A handful of small things lying on a region's floor, seen from above. */
+    private fun detail(direction: ArtDirection, biomeId: String, setting: String, kit: BiomeArtKit?, variant: Int): ForgeOrder {
+        val subject = DETAIL_SUBJECTS[variant % DETAIL_SUBJECTS.size]
+        val prompt = buildString {
+            append("A small loose cluster of $subject lying on the ground")
+            if (setting.isNotBlank()) append(", as found in $setting")
+            append(", seen from directly above, flat, as a ground-clutter decal for an isometric action RPG like Diablo or Hades. ")
+            append("Isolated on a solid $KEY_NAME background that fills everything around the cluster; no ground texture, ")
+            append("no soil or grass background, no shadow, no magenta or pink in the objects. ")
+            append(direction.diction.house)
+            append(". ")
+            append(ArtBible.paletteNote(direction, kit))
+            direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
+            append(" ")
+            append(direction.diction.forbidden)
+            append(".")
+        }
+        return ForgeOrder(variantKey("detail:$biomeId", variant), AssetKind.GROUND_DETAIL, AssetTier.SYSTEMIC, subject, prompt)
+    }
+
+    /** Variant 0 keeps the plain key, so a kit forged before variants existed still loads. */
+    fun variantKey(key: String, variant: Int): String = if (variant == 0) key else "$key#$variant"
+
+    const val DEFAULT_VARIANTS = 3
+    const val DETAILS_PER_REGION = 4
+
+    private val GROUND_VARIATIONS = listOf(
+        "A worn variation: more bare earth showing through, scattered pebbles, trodden patches",
+        "A lush variation: denser growth, roots and fallen leaves, deeper shade in the gaps",
+    )
+
+    private val DETAIL_SUBJECTS = listOf(
+        "fallen leaves and small twigs",
+        "scattered pebbles and small flat stones",
+        "tiny wildflowers and grass tufts",
+        "exposed roots, moss and a mushroom or two",
+    )
+
+    private val PROP_VARIATIONS = listOf(
+        "A different individual from the usual one: younger, smaller and more slender, with its own distinct shape.",
+        "A different individual from the usual one: older, larger and weathered, with an asymmetric, characterful shape.",
+    )
 
     private fun shapeWords(family: PropSilhouette): String = when (family) {
         PropSilhouette.CANOPY -> "a living tree with a trunk and a broad leafy crown"
@@ -174,9 +247,10 @@ object ForgePlanner {
         PropSilhouette.SIGIL -> "a carved standing marker or banner"
     }
 
-    private fun sprite(direction: ArtDirection, block: BlockType, setting: String, kit: BiomeArtKit?): ForgeOrder {
+    private fun sprite(direction: ArtDirection, block: BlockType, setting: String, kit: BiomeArtKit?, variant: Int = 0): ForgeOrder {
         val subject = block.displayName
         val prompt = buildString {
+            if (variant > 0) append(PROP_VARIATIONS[(variant - 1) % PROP_VARIATIONS.size]).append(' ')
             append("A single ")
             append(subject.lowercase())
             // The shape family, in plain words. A block's name alone misleads:
@@ -200,6 +274,6 @@ object ForgePlanner {
             append(direction.diction.forbidden)
             append(".")
         }
-        return ForgeOrder("prop:${block.id}", AssetKind.PROP_SPRITE, AssetTier.PROP, subject, prompt)
+        return ForgeOrder(variantKey("prop:${block.id}", variant), AssetKind.PROP_SPRITE, AssetTier.PROP, subject, prompt)
     }
 }

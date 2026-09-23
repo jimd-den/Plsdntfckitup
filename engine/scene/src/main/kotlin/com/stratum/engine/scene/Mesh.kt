@@ -28,12 +28,12 @@ enum class MaterialKind {
 /**
  * The one vertex layout every backend reads.
  *
- * Fourteen floats. Wasteful for a GPU that could pack normals into bytes, and
+ * Sixteen floats. Wasteful for a GPU that could pack normals into bytes, and
  * worth it: a single layout means a single mesher, and the rasteriser that
  * produces the preview images reads exactly the buffer the phone uploads.
  */
 object Vertex {
-    const val STRIDE = 14
+    const val STRIDE = 16
     const val PX = 0
     const val NX = 3
     const val R = 6
@@ -50,6 +50,14 @@ object Vertex {
      */
     const val LAYER = 12
     const val EMISSIVE = 13
+
+    /**
+     * Two more paintings of the same surface, or -1. Opaque ground blends
+     * towards them in slow patches (see [ShadingModel.variants]), so a field
+     * is three paintings woven together rather than one repeated.
+     */
+    const val VARIANT_A = 14
+    const val VARIANT_B = 15
 
     const val FLAT = -1f
 
@@ -102,6 +110,8 @@ class MeshBuilder(private val kind: MaterialKind) {
         u: Float, v: Float,
         layer: Float,
         emissive: Float = 0f,
+        variantA: Float = -1f,
+        variantB: Float = -1f,
     ): Int {
         if (vertexFloats + Vertex.STRIDE > vertices.size) vertices = vertices.copyOf(vertices.size * 2)
         val o = vertexFloats
@@ -114,6 +124,8 @@ class MeshBuilder(private val kind: MaterialKind) {
         vertices[o + 10] = u; vertices[o + 11] = v
         vertices[o + 12] = layer
         vertices[o + 13] = emissive
+        vertices[o + 14] = variantA
+        vertices[o + 15] = variantB
         vertexFloats += Vertex.STRIDE
         return o / Vertex.STRIDE
     }
@@ -163,10 +175,36 @@ class TextureLibrary {
         }
         textures += texture
         layers[key] = textures.lastIndex
+        variantCache.clear()
         return textures.lastIndex
     }
 
     fun layerOf(key: String?): Int = key?.let(layers::get) ?: -1
+
+    private val variantCache = HashMap<String, IntArray>()
+
+    /**
+     * Every painting of [key]: the key itself, then "key#1", "key#2" and on
+     * while they exist. Empty when there is none. Callers pick one per
+     * instance, so a grove is several trees rather than one tree many times.
+     */
+    fun variantsOf(key: String): IntArray = variantCache.getOrPut(key) {
+        val base = layerOf(key)
+        if (base < 0) return@getOrPut IntArray(0)
+        val found = arrayListOf(base)
+        var n = 1
+        while (n < MAX_VARIANTS) {
+            val next = layerOf("$key#$n")
+            if (next < 0) break
+            found += next
+            n++
+        }
+        found.toIntArray()
+    }
+
+    private companion object {
+        const val MAX_VARIANTS = 8
+    }
 
     fun textureAt(layer: Int): Texture? = textures.getOrNull(layer)
 }

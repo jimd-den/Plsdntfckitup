@@ -18,6 +18,7 @@ internal object SceneShaders {
         layout(location = 4) in vec2 aUv;
         layout(location = 5) in float aLayer;
         layout(location = 6) in float aEmissive;
+        layout(location = 7) in vec2 aVariants;
     """
 
     val LIT_VERTEX = """#version 300 es
@@ -32,6 +33,7 @@ internal object SceneShaders {
         flat out float vLayer;
         out float vEmissive;
         out vec4 vShadow;
+        flat out vec2 vVariants;
         void main() {
             vWorld = aPos;
             vNormal = aNormal;
@@ -40,6 +42,7 @@ internal object SceneShaders {
             vUv = aUv;
             vLayer = aLayer;
             vEmissive = aEmissive;
+            vVariants = aVariants;
             vShadow = uShadowViewProj * vec4(aPos + aNormal * 0.04, 1.0);
             gl_Position = uViewProj * vec4(aPos, 1.0);
         }
@@ -56,6 +59,7 @@ internal object SceneShaders {
         flat in float vLayer;
         in float vEmissive;
         in vec4 vShadow;
+        flat in vec2 vVariants;
         uniform sampler2DArray uTextures;
         uniform sampler2D uShadowMap;
         uniform float uShadowSize;
@@ -127,7 +131,20 @@ internal object SceneShaders {
             float w = smoothstep(0.35, 0.65, vnoise(p / 6.0));
             float tint = 0.88 + 0.24 * vnoise(p / 13.0 + vec2(17.0, 5.0));
             vec3 second = texture(uTextures, vec3(uv2, vLayer)).rgb;
-            return mix(first, second, w) * tint;
+            vec3 c = mix(first, second, w);
+            // Port of ShadingModel.variants: sister paintings in slow patches.
+            // Branching only on the flat per-face layers, so every pixel of a
+            // 2x2 quad samples alike and mip selection stays well defined.
+            vec2 q = world.xy / 9.0;
+            if (vVariants.x >= 0.0) {
+                float wa = smoothstep(0.5, 0.64, vnoise(q + vec2(41.0, 7.0)));
+                c = mix(c, texture(uTextures, vec3(uv, vVariants.x)).rgb, wa);
+            }
+            if (vVariants.y >= 0.0) {
+                float wb = smoothstep(0.5, 0.64, vnoise(q * 1.3 + vec2(-23.0, 61.0)));
+                c = mix(c, texture(uTextures, vec3(uv2, vVariants.y)).rgb, wb);
+            }
+            return c * tint;
         }
 
         void main() {

@@ -195,6 +195,9 @@ class SceneRasterizer(
         val writesDepth = kind == MaterialKind.OPAQUE || kind == MaterialKind.CUTOUT
         val p = FloatArray(Vertex.STRIDE)
         val detile = FloatArray(4)
+        val weights = FloatArray(2)
+        val variantA = a[0][Vertex.VARIANT_A].takeIf { it >= 0f }?.let { textures.textureAt(it.toInt()) }
+        val variantB = a[0][Vertex.VARIANT_B].takeIf { it >= 0f }?.let { textures.textureAt(it.toInt()) }
 
         for (py in minY..maxY) {
             for (px in minX..maxX) {
@@ -237,9 +240,26 @@ class SceneRasterizer(
                         ShadingModel.detile(p[Vertex.U], p[Vertex.V], p[Vertex.PX], p[Vertex.PX + 1], p[Vertex.PX + 2], detile)
                         val other = sample(texture, detile[0], detile[1], clampEdges = false)
                         val w = detile[2]
-                        tr = (tr + ((((other shr 16) and 0xFF) / 255f) - tr) * w) * detile[3]
-                        tg = (tg + ((((other shr 8) and 0xFF) / 255f) - tg) * w) * detile[3]
-                        tb = (tb + (((other and 0xFF) / 255f) - tb) * w) * detile[3]
+                        tr += ((((other shr 16) and 0xFF) / 255f) - tr) * w
+                        tg += ((((other shr 8) and 0xFF) / 255f) - tg) * w
+                        tb += (((other and 0xFF) / 255f) - tb) * w
+                        // Sister paintings, in slow patches. See ShadingModel.variants.
+                        if (variantA != null || variantB != null) {
+                            ShadingModel.variants(p[Vertex.PX], p[Vertex.PX + 1], weights)
+                            if (variantA != null && weights[0] > 0f) {
+                                val t = sample(variantA, p[Vertex.U], p[Vertex.V], clampEdges = false)
+                                tr += ((((t shr 16) and 0xFF) / 255f) - tr) * weights[0]
+                                tg += ((((t shr 8) and 0xFF) / 255f) - tg) * weights[0]
+                                tb += (((t and 0xFF) / 255f) - tb) * weights[0]
+                            }
+                            if (variantB != null && weights[1] > 0f) {
+                                val t = sample(variantB, detile[0], detile[1], clampEdges = false)
+                                tr += ((((t shr 16) and 0xFF) / 255f) - tr) * weights[1]
+                                tg += ((((t shr 8) and 0xFF) / 255f) - tg) * weights[1]
+                                tb += (((t and 0xFF) / 255f) - tb) * weights[1]
+                            }
+                        }
+                        tr *= detile[3]; tg *= detile[3]; tb *= detile[3]
                     }
                     ar *= tr; ag *= tg; ab *= tb
                 }

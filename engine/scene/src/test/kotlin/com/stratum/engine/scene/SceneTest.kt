@@ -8,6 +8,7 @@ import com.stratum.core.domain.world.BlockMaterial
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.BlockShape
+import com.stratum.core.domain.world.BlockShapes
 import com.stratum.core.domain.world.BlockType
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.ChunkPos
@@ -24,10 +25,11 @@ class SceneTest {
     private val grass = BlockType("t:grass", "Grass", BlockMaterial.SOIL, topColor = 0xFF4E8B45, sideColor = 0xFF6B4A2A)
     private val wall = BlockType("t:wall", "Wall", shape = BlockShape.WALL, isOpaque = false)
     private val tree = BlockType("t:tree", "Tree", BlockMaterial.FOLIAGE, glyph = "T", isOpaque = false)
+    private val paving = BlockType("t:paving", "Paving", BlockMaterial.STONE, shape = BlockShape.FLOOR, isSolid = false, isOpaque = false)
 
     /** A flat plain at z = 3, with optional extra blocks on top. */
     private inner class FlatWorld(private val extra: Map<BlockPos, BlockType> = emptyMap()) : World {
-        override val registry = BlockRegistry.build(listOf(grass, wall, tree))
+        override val registry = BlockRegistry.build(listOf(grass, wall, tree, paving))
         override val loadedChunks: Collection<Chunk> = emptyList()
         override fun chunkAt(pos: ChunkPos): Chunk? = null
         override fun blockAt(pos: BlockPos): BlockType = extra[pos] ?: if (pos.z in 0..3) grass else BlockType.AIR
@@ -55,6 +57,51 @@ class SceneTest {
         assertTrue(ys.isNotEmpty(), "the wall has vertices inside its cell")
         val thickness = ys.max() - ys.min()
         assertEquals(1f / 3f, thickness, 0.01f)
+    }
+
+    @Test
+    fun `a floor tile is a thin slab on the ground, joined to its neighbours`() {
+        val world = FlatWorld(mapOf(BlockPos(5, 5, 4) to paving, BlockPos(6, 5, 4) to paving))
+        val mesh = TerrainMesher(director, TextureLibrary()).mesh(world, 5, 6, 5, 5).mesh
+        val zs = (0 until mesh.vertexCount).map { mesh.vertices[it * Vertex.STRIDE + 2] }.filter { it > 4f }
+        assertTrue(zs.isNotEmpty(), "the paving has a lid above the ground")
+        assertEquals(4f + BlockShapes.FLOOR_THICKNESS, zs.max(), 0.001f)
+        val seam = (0 until mesh.vertexCount).filter {
+            abs(mesh.vertices[it * Vertex.STRIDE + Vertex.NX]) == 1f && mesh.vertices[it * Vertex.STRIDE] == 6f
+        }
+        assertTrue(seam.isEmpty(), "the edge two tiles share is not drawn")
+    }
+
+    @Test
+    fun `ground tops carry their sister paintings and walls do not`() {
+        val textures = TextureLibrary()
+        val key = assertNotNull(director.surfaceFor(grass, com.stratum.core.domain.art.SurfaceFace.TOP, null).texture)
+        val pixel = Texture(1, 1, intArrayOf(-1))
+        textures.put(key, pixel)
+        val a = textures.put("$key#1", pixel)
+        val b = textures.put("$key#2", pixel)
+        val mesh = TerrainMesher(director, textures).mesh(FlatWorld(), 0, 0, 0, 0).mesh
+        val lids = (0 until mesh.vertexCount).filter { mesh.vertices[it * Vertex.STRIDE + 5] == 1f }
+        assertTrue(lids.isNotEmpty())
+        lids.forEach {
+            assertEquals(a.toFloat(), mesh.vertices[it * Vertex.STRIDE + Vertex.VARIANT_A])
+            assertEquals(b.toFloat(), mesh.vertices[it * Vertex.STRIDE + Vertex.VARIANT_B])
+        }
+        assertEquals(listOf(0, a, b), textures.variantsOf(key).toList())
+    }
+
+    @Test
+    fun `ground litter scatters over the region's own surface, only where it was painted`() {
+        val biome = com.stratum.core.domain.content.BiomeDefinition(
+            "t:plain", "Plain", "", surfaceBlockId = grass.id, subsurfaceBlockId = grass.id, bedrockFillerBlockId = grass.id,
+        )
+        val bare = TerrainMesher(director, TextureLibrary()) { _, _ -> biome }.mesh(FlatWorld(), 0, 29, 0, 29)
+        assertTrue(bare.details.isEmpty(), "no painted litter, no litter")
+        val textures = TextureLibrary().apply { put("detail:t:plain", Texture(2, 1, IntArray(2) { -1 })) }
+        val littered = TerrainMesher(director, textures) { _, _ -> biome }.mesh(FlatWorld(), 0, 29, 0, 29)
+        val share = littered.details.size / 900f
+        assertTrue(share in 0.08f..0.25f, "about one cell in six has litter, got $share")
+        assertTrue(littered.details.all { it.z == 4f })
     }
 
     @Test

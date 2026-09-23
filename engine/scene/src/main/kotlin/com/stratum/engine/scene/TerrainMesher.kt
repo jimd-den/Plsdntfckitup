@@ -13,6 +13,12 @@ import com.stratum.core.domain.world.World
 /** A block drawn as a sprite standing on the ground rather than as a cube. */
 data class PropInstance(val x: Int, val y: Int, val z: Int, val block: BlockType, val biomeId: String?)
 
+/**
+ * A small painted thing lying flat on the ground — leaves, pebbles, flowers —
+ * at a place, a turn and a size of its own.
+ */
+data class GroundDetail(val x: Float, val y: Float, val z: Float, val layer: Int, val angle: Float, val size: Float)
+
 /** A light-emitting block, as a point light the backends can use. */
 data class PointLight(val x: Float, val y: Float, val z: Float, val color: Long, val strength: Float, val radius: Float)
 
@@ -36,18 +42,26 @@ class TerrainMesher(
 ) {
 
     /** Result of meshing a region: the geometry, plus what stands and glows in it. */
-    class Result(val mesh: MeshBatch, val props: List<PropInstance>, val lights: List<PointLight>)
+    class Result(
+        val mesh: MeshBatch,
+        val props: List<PropInstance>,
+        val lights: List<PointLight>,
+        val details: List<GroundDetail> = emptyList(),
+    )
 
     fun mesh(world: World, minX: Int, maxX: Int, minY: Int, maxY: Int): Result {
         val out = MeshBuilder(MaterialKind.OPAQUE)
         val props = ArrayList<PropInstance>()
         val lights = ArrayList<PointLight>()
+        val details = ArrayList<GroundDetail>()
 
         for (y in minY..maxY) {
             for (x in minX..maxX) {
                 val surface = world.surfaceAt(x, y)
                 if (surface < 0) continue
-                val biomeId = biomeAt(x, y)?.id
+                val biome = biomeAt(x, y)
+                val biomeId = biome?.id
+                if (biome != null) scatterDetail(world, x, y, surface, biome, details)
                 val floor = maxOf(0, surface - DEPTH)
                 for (z in floor..surface) {
                     val block = world.blockAt(BlockPos(x, y, z))
@@ -67,11 +81,45 @@ class TerrainMesher(
                     when (block.shape) {
                         BlockShape.CUBE -> cube(world, out, x, y, z, block, biomeId)
                         BlockShape.WALL -> wall(world, out, x, y, z, block, biomeId)
+                        BlockShape.FLOOR -> floor(world, out, x, y, z, block, biomeId)
                     }
                 }
             }
         }
-        return Result(out.build(), props, lights)
+        return Result(out.build(), props, lights, details)
+    }
+
+    /**
+     * Litter on open ground: a leaf fall, a few stones, a tuft of flowers.
+     *
+     * Only on the region's own surface block with open sky above it, so paths,
+     * paving and walls stay clean, and only where the forge has painted some.
+     * Placement is a hash of the cell, so the same ground always has the same
+     * litter and nothing flickers when the terrain is remeshed.
+     */
+    private fun scatterDetail(world: World, x: Int, y: Int, surface: Int, biome: BiomeDefinition, out: MutableList<GroundDetail>) {
+        val paintings = textures.variantsOf("detail:${biome.id}")
+        if (paintings.isEmpty()) return
+        val h = hash(x, y)
+        if (h % 100 >= DETAIL_PERCENT) return
+        val ground = world.blockAt(BlockPos(x, y, surface))
+        if (ground.id != biome.surfaceBlockId || ground.shape != BlockShape.CUBE || ground.glyph != null) return
+        val jitterX = ((h ushr 8) and 0xFF) / 255f
+        val jitterY = ((h ushr 16) and 0xFF) / 255f
+        out += GroundDetail(
+            x + 0.2f + jitterX * 0.6f,
+            y + 0.2f + jitterY * 0.6f,
+            surface + 1f,
+            paintings[(h / 100) % paintings.size],
+            angle = ((h ushr 4) and 0x3FF) / 1023f * TAU,
+            size = DETAIL_MIN_SIZE + ((h ushr 20) and 0xFF) / 255f * (DETAIL_MAX_SIZE - DETAIL_MIN_SIZE),
+        )
+    }
+
+    private fun hash(x: Int, y: Int): Int {
+        var h = x * 668265263 + y * 374761393
+        h = (h xor (h ushr 13)) * 1274126177
+        return (h xor (h ushr 16)) and 0x7FFFFFFF
     }
 
     private fun cube(world: World, out: MeshBuilder, x: Int, y: Int, z: Int, block: BlockType, biomeId: String?) {
@@ -80,6 +128,9 @@ class TerrainMesher(
         val topLayer = textures.layerOf(top.texture).toFloat()
         val sideLayer = textures.layerOf(side.texture).toFloat()
         val emissive = top.emissive
+        // Ground has sister paintings, keyed "<top>#1" and "<top>#2".
+        val variantA = textures.layerOf(top.texture?.let { "$it#1" }).toFloat()
+        val variantB = textures.layerOf(top.texture?.let { "$it#2" }).toFloat()
         FACES.forEach { face ->
             val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z + face.dz))
             // This camera never sees an underside, and neither does the sun.
@@ -93,6 +144,8 @@ class TerrainMesher(
                 out, face,
                 x.toFloat(), y.toFloat(), z.toFloat(), x + 1f, y + 1f, z + 1f,
                 albedo, layer, emissive,
+                if (face.dz == 1) variantA else -1f,
+                if (face.dz == 1) variantB else -1f,
             ) { cornerX, cornerY, cornerZ -> occlusion(world, x, y, z, face, cornerX, cornerY, cornerZ) }
         }
     }
@@ -124,6 +177,40 @@ class TerrainMesher(
     }
 
     /**
+     * A paving tile: a thin slab on the ground. Edges against another tile are
+     * dropped, so a paved courtyard is one continuous surface with a lip only
+     * where it meets the grass.
+     */
+    private fun floor(world: World, out: MeshBuilder, x: Int, y: Int, z: Int, block: BlockType, biomeId: String?) {
+        val top = director.surfaceFor(block, SurfaceFace.TOP, biomeId)
+        val side = director.surfaceFor(block, SurfaceFace.SIDE, biomeId)
+        val topLayer = textures.layerOf(top.texture).toFloat()
+        val sideLayer = textures.layerOf(side.texture).toFloat()
+        val box = BlockShapes.boxes(BlockShape.FLOOR, 0).first()
+        FACES.forEach { face ->
+            if (face.dz == -1) return@forEach
+            if (face.dz == 0) {
+                val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z))
+                if (neighbour.shape == BlockShape.FLOOR || (neighbour.isOpaque && neighbour.shape == BlockShape.CUBE)) return@forEach
+            }
+            val layer = if (face.dz == 1) topLayer else sideLayer
+            val albedo = (if (face.dz == 1) top else side).albedo
+            emitFace(
+                out, face,
+                x + box.minX, y + box.minY, z + box.minZ, x + box.maxX, y + box.maxY, z + box.maxZ,
+                if (layer >= 0f) textured(albedo) else albedo,
+                layer,
+                0f,
+            ) { cornerX, cornerY, cornerZ ->
+                // The top takes the same corner occlusion as the ground it lies
+                // on, so a paved alley is as dark in its corners as a bare one.
+                if (face.dz == 1) occlusion(world, x, y, z - 1, face, cornerX, cornerY, cornerZ)
+                else if (cornerZ == 0) WALL_FOOT_AO else 1f
+            }
+        }
+    }
+
+    /**
      * One quad. Corners come from [Face.corners] as 0/1 choices of the box's
      * min and max on each axis; [ao] is asked for each corner by those choices.
      */
@@ -134,6 +221,8 @@ class TerrainMesher(
         albedo: Long,
         layer: Float,
         emissive: Float,
+        variantA: Float = -1f,
+        variantB: Float = -1f,
         ao: (Int, Int, Int) -> Float,
     ) {
         val c = face.corners
@@ -158,7 +247,7 @@ class TerrainMesher(
             idx[i] = out.vertex(
                 px, py, pz,
                 face.dx.toFloat(), face.dy.toFloat(), face.dz.toFloat(),
-                albedo, occ[i], u, v, layer, emissive,
+                albedo, occ[i], u, v, layer, emissive, variantA, variantB,
             )
         }
         // Split along the brighter diagonal. The other split draws a visible
@@ -218,6 +307,12 @@ class TerrainMesher(
         const val TEXTURE_SCALE = 0.5f
 
         const val LIGHT_RADIUS = 7f
+
+        /** Share of open ground cells, in per cent, that get a piece of litter. */
+        const val DETAIL_PERCENT = 16
+        const val DETAIL_MIN_SIZE = 0.7f
+        const val DETAIL_MAX_SIZE = 1.25f
+        const val TAU = 6.2831855f
         const val WALL_FOOT_AO = 0.72f
         const val TEXTURE_TINT = 0.25f
 
