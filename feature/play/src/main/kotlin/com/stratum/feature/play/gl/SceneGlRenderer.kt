@@ -140,6 +140,8 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         vec3(lit, "uSun", t.sun)
         vec3(lit, "uFill", t.fill)
         GLES30.glUniform1f(loc(lit, "uFillStrength"), t.fillStrength)
+        GLES30.glUniform1f(loc(lit, "uFloorDetail"), t.floorDetail)
+        GLES30.glUniform1f(loc(lit, "uFloorSaturation"), t.floorSaturation)
         vec3(lit, "uSunColor", t.sunColor)
         vec3(lit, "uSky", t.sky)
         vec3(lit, "uGround", t.ground)

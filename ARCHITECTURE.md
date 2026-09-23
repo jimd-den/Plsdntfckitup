@@ -406,6 +406,29 @@ forged before variants existed still loads.
   lays the quads). Only on the region's own surface block, so paths, paving
   and walls stay clean.
 
+## A visual hierarchy, or it looks like noise
+
+Every screen of Diablo or Hades is ranked: a quiet floor, calm scenery that
+frames the space, and only then the loud layer — characters, monsters, loot
+and spell effects, the things a player must read in a fraction of a second.
+Saturated colour and glow are spent on that layer and nowhere else. Without
+the ranking, every painted asset competes and the result reads as noise
+however good each piece is. Three rules enforce it:
+
+- **The floor is quiet.** Painted floors keep only part of their contrast
+  (`SceneLighting.floorDetail`, pulled towards the painting's own average —
+  its one-pixel mip on the GPU) and part of their saturation; walls keep a
+  little more, because cliffs also say where you can walk
+  (`ShadingModel.calm`, ported to the shader). Litter is sparse.
+- **Scenery frames, it does not fill.** The pack clusters scatter strongly
+  (`scatterClustering`, `scatterClusterScale`) into groves and nearly bare
+  clearings a few screens across: fights happen in glades, not in thickets.
+- **Scenery does not glow.** Forge prompts for tiles, props and litter carry
+  `ArtBible.SCENERY_RULE` and `FLOOR_RULE` and ask for no accent colour, and
+  they name a region rather than quoting its description: "thick with emerald
+  spirit mist" put a glowing wisp on every tree. Light sources are the one
+  exception, because a lit brazier is a landmark.
+
 ## Combat theatre
 
 The art director already described each moment of combat as data

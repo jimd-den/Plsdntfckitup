@@ -196,6 +196,7 @@ class SceneRasterizer(
         val p = FloatArray(Vertex.STRIDE)
         val detile = FloatArray(4)
         val weights = FloatArray(2)
+        val calmed = FloatArray(3)
         val variantA = a[0][Vertex.VARIANT_A].takeIf { it >= 0f }?.let { textures.textureAt(it.toInt()) }
         val variantB = a[0][Vertex.VARIANT_B].takeIf { it >= 0f }?.let { textures.textureAt(it.toInt()) }
 
@@ -260,6 +261,10 @@ class SceneRasterizer(
                             }
                         }
                         tr *= detile[3]; tg *= detile[3]; tb *= detile[3]
+                        // Background stays background. See ShadingModel.calm.
+                        calmed[0] = tr; calmed[1] = tg; calmed[2] = tb
+                        ShadingModel.calm(s.terms, calmed, meanOf(texture), p[Vertex.NX + 2])
+                        tr = calmed[0]; tg = calmed[1]; tb = calmed[2]
                     }
                     ar *= tr; ag *= tg; ab *= tb
                 }
@@ -288,6 +293,16 @@ class SceneRasterizer(
                 if (writesDepth) depth[o] = d
             }
         }
+    }
+
+    private val means = java.util.IdentityHashMap<Texture, FloatArray>()
+
+    /** A texture's average colour: the one-pixel mip level the GPU samples for the same thing. */
+    private fun meanOf(t: Texture): FloatArray = means.getOrPut(t) {
+        var r = 0.0; var g = 0.0; var b = 0.0
+        t.argb.forEach { c -> r += (c shr 16) and 0xFF; g += (c shr 8) and 0xFF; b += c and 0xFF }
+        val n = t.argb.size * 255.0
+        floatArrayOf((r / n).toFloat(), (g / n).toFloat(), (b / n).toFloat())
     }
 
     private fun untoneFog(t: ShadingModel.Terms, channel: Int): Float = untone(t.fog[channel], t.exposure)

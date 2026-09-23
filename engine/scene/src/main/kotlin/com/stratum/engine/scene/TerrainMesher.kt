@@ -309,7 +309,7 @@ class TerrainMesher(
         const val LIGHT_RADIUS = 7f
 
         /** Share of open ground cells, in per cent, that get a piece of litter. */
-        const val DETAIL_PERCENT = 16
+        const val DETAIL_PERCENT = 6
         const val DETAIL_MIN_SIZE = 0.7f
         const val DETAIL_MAX_SIZE = 1.25f
         const val TAU = 6.2831855f

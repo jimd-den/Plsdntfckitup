@@ -38,8 +38,8 @@ internal object IgboPackBiomes {
         heightBias = 1,
         roughness = 0.7f,
         scatter = listOf(
-            ScatterRule(IgboPackBlocks.irokoCanopy.id, chance = 0.055f, height = 1),
-            ScatterRule(IgboPackBlocks.palmReed.id, chance = 0.05f, height = 1),
+            ScatterRule(IgboPackBlocks.irokoCanopy.id, chance = 0.045f, height = 1),
+            ScatterRule(IgboPackBlocks.palmReed.id, chance = 0.03f, height = 1),
         ),
         deposits = listOf(bronzeVein, ironVein),
         ambientLight = 11,

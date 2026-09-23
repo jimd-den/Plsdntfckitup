@@ -220,6 +220,12 @@ object IgboContentPack {
         // terribly: every terrace edge was a drop a player could not climb
         // back up, so the world was a series of one-way doors.
         terraceStep = 1,
+        // Groves and clearings, not an even sprinkle. An action RPG is played
+        // in the open: scenery frames the space a fight happens in rather than
+        // filling it, the way Diablo's forests are walls around a glade.
+        // Nearly bare clearings and thick groves, each a few screens across.
+        scatterClustering = 0.95f,
+        scatterClusterScale = 0.035f,
         strata = listOf(
             Stratum(IgboPackBlocks.redEarth.id, thickness = 2),
             Stratum(IgboPackBlocks.riverClay.id, thickness = 2),

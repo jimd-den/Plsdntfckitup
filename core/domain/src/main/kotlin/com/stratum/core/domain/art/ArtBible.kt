@@ -152,7 +152,27 @@ object ArtBible {
      * codes attached are followed far more often, because the model can tell
      * which colour is meant to dominate and which is a rare accent.
      */
-    fun paletteNote(direction: ArtDirection, kit: BiomeArtKit?): String {
+    /**
+     * The rule every piece of scenery is painted under.
+     *
+     * A readable action RPG has a hierarchy: a quiet floor, calm scenery that
+     * frames the space, and only then the loud things — characters, monsters,
+     * loot, spells. Asked to paint a "sacred grove thick with spirit mist", a
+     * model puts glowing wisps on every tree and a mosaic on every tile, and a
+     * world of those is noise with nothing to look at. Glow and saturated
+     * colour belong to what a player must react to, so scenery is told to
+     * leave them alone.
+     */
+    const val SCENERY_RULE = "This is background scenery, not the focus of the game: calm and readable, " +
+        "no magical effects, no glow, no mist, no smoke, no wisps, no sparkles, no floating particles, " +
+        "colour slightly less saturated than the characters who will stand in front of it"
+
+    /** Floors are the quietest layer of all. */
+    const val FLOOR_RULE = "A quiet background floor that characters and spell effects must stand out against: " +
+        "low contrast, soft, large gentle patches of closely related colour, only a few small shapes, " +
+        "no repeating pattern of stones, tiles or cells, no bright spots"
+
+    fun paletteNote(direction: ArtDirection, kit: BiomeArtKit?, accent: Boolean = true): String {
         val palette = direction.palette
         val mood = when {
             direction.contrast.terrainValueCeiling < 0.55f -> "dark, low-key values"
@@ -164,9 +184,9 @@ object ArtBible {
             direction.contrast.terrainSaturation > 0.9f -> "rich, saturated colour"
             else -> "moderately saturated colour"
         }
-        val accent = kit?.sacredAccent ?: palette.sacred
-        return "Palette: $mood, $saturation; light tinted ${hex(palette.sun)}, shadows tinted ${hex(palette.shadow)}, " +
-            "occasional accent ${hex(accent)}."
+        val accentColour = kit?.sacredAccent ?: palette.sacred
+        return "Palette: $mood, $saturation; light tinted ${hex(palette.sun)}, shadows tinted ${hex(palette.shadow)}" +
+            if (accent) ", occasional accent ${hex(accentColour)}." else "; no accent colours."
     }
 
     private fun paletteClause(direction: ArtDirection, kit: BiomeArtKit?): String {

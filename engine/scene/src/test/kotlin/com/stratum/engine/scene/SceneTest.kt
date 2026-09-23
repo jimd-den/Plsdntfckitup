@@ -100,7 +100,7 @@ class SceneTest {
         val textures = TextureLibrary().apply { put("detail:t:plain", Texture(2, 1, IntArray(2) { -1 })) }
         val littered = TerrainMesher(director, textures) { _, _ -> biome }.mesh(FlatWorld(), 0, 29, 0, 29)
         val share = littered.details.size / 900f
-        assertTrue(share in 0.08f..0.25f, "about one cell in six has litter, got $share")
+        assertTrue(share in 0.02f..0.1f, "a little litter, not a carpet of it: got $share")
         assertTrue(littered.details.all { it.z == 4f })
     }
 

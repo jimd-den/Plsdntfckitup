@@ -78,7 +78,11 @@ object ForgePlanner {
         val kits = BiomeArtKit.deriveAll(pack)
         pack.biomes.filter { biomeIds.isEmpty() || it.id in biomeIds }.forEach { biome ->
             val kit = kits[biome.id]
-            val setting = biome.description.ifBlank { biome.name }
+            // The region's name, never its description. Descriptions are
+            // written to sell a place ("mossy flagstones, thick with emerald
+            // spirit mist") and a model paints every word of that into every
+            // tile and every tree.
+            val setting = biome.name
             blocks[biome.surfaceBlockId]?.let { surface ->
                 add(tile(direction, surface, AssetKind.GROUND_TILE, setting, kit))
                 add(tile(direction, surface, AssetKind.WALL_TILE, setting, kit))
@@ -179,12 +183,14 @@ object ForgePlanner {
             // region's description wins: red earth in a mossy grove came back
             // teal, which is the grove's colour and not the earth's.
             append(", dominant base colour $base")
-            if (setting.isNotBlank()) append(", found in $setting")
+            if (setting.isNotBlank()) append(", in $setting")
             if (variant > 0) append(". ").append(GROUND_VARIATIONS[(variant - 1) % GROUND_VARIATIONS.size])
             append(". The texture fills the entire square frame edge to edge and wraps seamlessly on all four sides. ")
-            append("Hand-painted stylized action RPG surface, broad readable brush strokes, subtle large-scale variation, ")
+            if (kind == AssetKind.GROUND_TILE) append(ArtBible.FLOOR_RULE).append(". ")
+            append("Hand-painted stylized action RPG surface, broad soft brush strokes, subtle large-scale variation, ")
             append("even flat lighting with no directional shadows, no objects, no horizon, no perspective, no border, no vignette. ")
-            append(ArtBible.paletteNote(direction, kit))
+            append(ArtBible.SCENERY_RULE).append(". ")
+            append(ArtBible.paletteNote(direction, kit, accent = false))
             direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
             append(" ")
             append(direction.diction.forbidden)
@@ -202,9 +208,11 @@ object ForgePlanner {
             append(", seen from directly above, flat, as a ground-clutter decal for an isometric action RPG like Diablo or Hades. ")
             append("Isolated on a solid $KEY_NAME background that fills everything around the cluster; no ground texture, ")
             append("no soil or grass background, no shadow, no magenta or pink in the objects. ")
+            append("Muted, low contrast, colours close to the ground they lie on, so they read as texture rather than as objects. ")
+            append(ArtBible.SCENERY_RULE).append(". ")
             append(direction.diction.house)
             append(". ")
-            append(ArtBible.paletteNote(direction, kit))
+            append(ArtBible.paletteNote(direction, kit, accent = false))
             direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
             append(" ")
             append(direction.diction.forbidden)
@@ -220,8 +228,8 @@ object ForgePlanner {
     const val DETAILS_PER_REGION = 4
 
     private val GROUND_VARIATIONS = listOf(
-        "A worn variation: more bare earth showing through, scattered pebbles, trodden patches",
-        "A lush variation: denser growth, roots and fallen leaves, deeper shade in the gaps",
+        "A variation of the same ground: more bare earth showing through in broad soft trodden patches",
+        "A variation of the same ground: slightly darker and denser growth, in broad soft patches",
     )
 
     private val DETAIL_SUBJECTS = listOf(
@@ -266,9 +274,13 @@ object ForgePlanner {
             append("Isolated on a solid $KEY_NAME background that fills everything around the object. ")
             append("No ground plane, no base, no pedestal, no floor tile or platform under it, no cast shadow, no other objects, ")
             append("crisp clean silhouette edges, no magenta or pink anywhere on the object itself. ")
+            // Light sources are the one kind of scenery allowed to glow: a lit
+            // brazier is a landmark, and the player needs to find it.
+            val lit = block.lightEmission > 0
+            if (!lit) append(ArtBible.SCENERY_RULE).append(". ")
             append(direction.diction.house)
             append(". ")
-            append(ArtBible.paletteNote(direction, kit))
+            append(ArtBible.paletteNote(direction, kit, accent = lit))
             direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
             append(" ")
             append(direction.diction.forbidden)

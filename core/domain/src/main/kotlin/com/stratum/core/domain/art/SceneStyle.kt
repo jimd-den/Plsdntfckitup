@@ -96,6 +96,19 @@ data class SceneLighting(
     val fillY: Float = 0f,
     val fillZ: Float = 1f,
     val fillStrength: Float = 0.32f,
+    /**
+     * Share of a painted floor's contrast that survives; the rest is pulled
+     * towards the painting's own average colour.
+     *
+     * The floor is background. In Diablo and Hades it is the quietest thing on
+     * screen, so that characters, monsters, loot and spell effects — the things
+     * a player must read in a fraction of a second — stand out against it. An
+     * image model paints every tile as if it were the subject, and a field of
+     * those at full strength buries everything standing on it.
+     */
+    val floorDetail: Float = 0.45f,
+    /** Saturation of painted floors relative to the painting, for the same reason. */
+    val floorSaturation: Float = 0.75f,
 )
 
 /**

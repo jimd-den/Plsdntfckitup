@@ -32,6 +32,24 @@ object ShadingModel {
         val exposure = lighting.exposure
         val saturation = lighting.saturation
         val vignette = lighting.vignette
+        val floorDetail = lighting.floorDetail
+        val floorSaturation = lighting.floorSaturation
+    }
+
+    /**
+     * Quietens a painted surface in place so it reads as background: contrast
+     * pulled towards the painting's [mean] colour and saturation lowered.
+     * Floors (facing up) get the full treatment; walls keep a little more,
+     * because a cliff face is also what tells the player where they can go.
+     * The GLSL twin is `calm` in the shaders.
+     */
+    fun calm(t: Terms, rgb: FloatArray, mean: FloatArray, nz: Float) {
+        val floor = nz > FLOOR_FACING
+        val detail = if (floor) t.floorDetail else minOf(1f, t.floorDetail + WALL_DETAIL_BONUS)
+        val saturation = if (floor) t.floorSaturation else minOf(1f, t.floorSaturation + WALL_DETAIL_BONUS)
+        for (i in 0 until 3) rgb[i] = mean[i] + (rgb[i] - mean[i]) * detail
+        val luma = 0.299f * rgb[0] + 0.587f * rgb[1] + 0.114f * rgb[2]
+        for (i in 0 until 3) rgb[i] = luma + (rgb[i] - luma) * saturation
     }
 
     /**
@@ -195,6 +213,8 @@ object ShadingModel {
     const val DETILE_SHIFT_V = 0.19f
     const val DETILE_CELL = 6f
     const val TINT_CELL = 13f
+    const val FLOOR_FACING = 0.7f
+    const val WALL_DETAIL_BONUS = 0.25f
     const val VARIANT_CELL = 9f
     const val VARIANT_EDGE0 = 0.5f
     const val VARIANT_EDGE1 = 0.64f

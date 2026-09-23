@@ -68,6 +68,8 @@ internal object SceneShaders {
         uniform vec3 uSun;
         uniform vec3 uFill;
         uniform float uFillStrength;
+        uniform float uFloorDetail;
+        uniform float uFloorSaturation;
         uniform vec3 uSunColor;
         uniform vec3 uSky;
         uniform vec3 uGround;
@@ -147,6 +149,18 @@ internal object SceneShaders {
             return c * tint;
         }
 
+        // Port of ShadingModel.calm. The smallest mip level is the painting's
+        // average colour, which is what contrast is pulled towards.
+        vec3 calm(vec3 c, vec3 n) {
+            vec3 mean = textureLod(uTextures, vec3(0.5, 0.5, vLayer), 16.0).rgb;
+            bool floorFacing = n.z > 0.7;
+            float detail = floorFacing ? uFloorDetail : min(1.0, uFloorDetail + 0.25);
+            float saturation = floorFacing ? uFloorSaturation : min(1.0, uFloorSaturation + 0.25);
+            c = mean + (c - mean) * detail;
+            float luma = dot(c, vec3(0.299, 0.587, 0.114));
+            return vec3(luma) + (c - vec3(luma)) * saturation;
+        }
+
         void main() {
             if (uCutout && vAo < 0.999 && vAo <= dither(gl_FragCoord.xy)) discard;
             vec3 albedo = vColor;
@@ -154,7 +168,7 @@ internal object SceneShaders {
                 vec2 uv = uCutout ? clamp(vUv, 0.0, 1.0) : vUv;
                 vec4 texel = texture(uTextures, vec3(uv, vLayer));
                 if (uCutout && texel.a < 0.5) discard;
-                albedo *= uCutout ? texel.rgb : detiled(texel.rgb, uv, vWorld);
+                albedo *= uCutout ? texel.rgb : calm(detiled(texel.rgb, uv, vWorld), normalize(vNormal));
             }
             vec3 n = normalize(vNormal);
             vec3 toEye = uEye - vWorld;
