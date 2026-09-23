@@ -31,6 +31,13 @@ import com.stratum.engine.world.MineResult
 import com.stratum.engine.world.PlaceRejection
 import com.stratum.engine.world.PlaceResult
 import com.stratum.engine.world.ReviveResult
+import com.stratum.core.domain.art.ArtDirection
+import com.stratum.core.domain.art.BiomeArtKit
+import com.stratum.core.domain.art.StyleLexicon
+import com.stratum.core.domain.art.StyleSheetArtDirector
+import com.stratum.core.domain.art.WorldArtDirector
+import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.engine.world.WorldSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +63,22 @@ class PlayViewModel(
      * otherwise free of one.
      */
     private val spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+    /**
+     * What the player asked their world to look like, in their own words.
+     *
+     * Empty is the house style. Anything else is read by [StyleLexicon] into a
+     * set of rendering rules, so "dark", "kawaii" or "a weird old woodblock
+     * print" are all the same amount of work and none of them touch the
+     * simulation.
+     */
+    private val stylePrompt: String = "",
+    /**
+     * Draws new art for a style the player typed, or null when no image model
+     * is configured. OpenRouter with `meta/muse-image` in the shipped app.
+     */
+    private val imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+    /** Where kits forged on this device are kept between runs. */
+    private val kitDirectory: java.io.File? = null,
 ) : ViewModel() {
 
     /**
@@ -64,6 +87,24 @@ class PlayViewModel(
      * pointing at the world the player just left.
      */
     private var session = WorldSession(content, config, heroClassId)
+
+    /**
+     * The ingredients each region is drawn from, read out of the loaded packs.
+     *
+     * Derived rather than authored, so a pack a model generated a minute ago is
+     * art directed exactly as well as the one that shipped with the game.
+     */
+    private val artKits: Map<String, BiomeArtKit> = content.packs
+        .flatMap { BiomeArtKit.deriveAll(it).entries }
+        .associate { it.key to it.value }
+
+    private var artDirector: WorldArtDirector = directorFor(stylePrompt)
+
+    /** Accumulated play time, which is what the light and the weather drift on. */
+    private var elapsed = 0f
+
+    /** The current roll of the current prompt, so a reroll is the next one. */
+    private var styleSeed: Long = stylePrompt.lowercase().hashCode().toLong()
 
     private val _state = MutableStateFlow(initialState(content))
     val state: StateFlow<PlayUiState> = _state.asStateFlow()
@@ -107,6 +148,95 @@ class PlayViewModel(
      * the world run slow for a moment rather than teleporting the player through
      * a wall — falling behind is recoverable, tunnelling is not.
      */
+    /**
+     * Changes what the world looks like, without changing the world.
+     *
+     * The seed comes from the prompt, so asking for the same thing twice gives
+     * the same world back; passing a different one is the reroll. Nothing here
+     * touches a block, a monster or the player's bag — a restyle is a change of
+     * opinion about colour, not a new game.
+     */
+    fun restyle(prompt: String, seed: Long = prompt.lowercase().hashCode().toLong()) {
+        artDirector = directorFor(prompt, seed)
+        styleSeed = seed
+        _state.value = _state.value.copy(
+            artDirector = artDirector,
+            stylePrompt = prompt,
+            styleSummary = artDirector.direction.summary,
+            kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
+        )
+    }
+
+    /**
+     * Paints the current style's asset kit with the image model.
+     *
+     * One call per style, a dozen or so images, cents rather than dollars: the
+     * forge plans only the ground, cliff faces, walls and prop kinds of the
+     * region the player is standing in, never the world. What it finishes is
+     * saved and swapped in as it arrives, so the world repaints itself while
+     * the player watches, and anything that fails simply stays as it was.
+     */
+    fun forgeStyle() {
+        val model = imageModel ?: return publish(message = "Add an OpenRouter key in settings to forge art")
+        val root = kitDirectory ?: return publish(message = "No storage for forged art")
+        if (_state.value.forging != null) return
+        val direction = artDirector.direction
+        val folder = java.io.File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_")).apply { mkdirs() }
+        val biome = session.currentBiome.id
+        val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
+        val orders = com.stratum.core.domain.art.ForgePlanner.plan(direction, pack, setOf(biome))
+            .filterNot { java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(it.key)).exists() }
+        if (orders.isEmpty()) {
+            _state.value = _state.value.copy(kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath)
+            return publish(message = "This style is already forged")
+        }
+        val forge = com.stratum.engine.scene.forge.AssetForge(model, com.stratum.feature.play.gl.AndroidImageCodec)
+        _state.value = _state.value.copy(forging = "Forging 0/${orders.size}")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var done = 0
+            var made = 0
+            forge.forge(orders, concurrency = 3) { asset ->
+                done++
+                asset.texture?.let { texture ->
+                    java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(asset.order.key))
+                        .writeBytes(com.stratum.feature.play.gl.AndroidImageCodec.encodePng(texture))
+                    made++
+                }
+                _state.value = _state.value.copy(
+                    forging = "Forging $done/${orders.size}",
+                    kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath,
+                )
+            }
+            // Back on the main thread: publishing reads the session, which the
+            // game loop mutates there.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _state.value = _state.value.copy(forging = null)
+                publish(message = "Forged $made of ${orders.size}")
+            }
+        }
+    }
+
+    /** The same request again, somewhere else. Asking twice should not be futile. */
+    fun rerollStyle() {
+        restyle(_state.value.stylePrompt, styleSeed + 1)
+    }
+
+    fun toggle3D() {
+        _state.value = _state.value.copy(use3D = !_state.value.use3D)
+    }
+
+    fun toggleStyle() {
+        _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
+    }
+
+    private fun directorFor(
+        prompt: String,
+        seed: Long = prompt.lowercase().hashCode().toLong(),
+    ): WorldArtDirector = StyleSheetArtDirector(
+        direction = StyleLexicon.interpret(prompt, ArtDirection.HOUSE, seed).direction,
+        kits = artKits,
+    )
+
     private fun startLoop() {
         loopJob?.cancel()
         loopJob = viewModelScope.launch {
@@ -119,6 +249,7 @@ class PlayViewModel(
                     ((now - previousFrame) / NANOS_PER_SECOND).coerceIn(MIN_STEP, MAX_STEP)
                 }
                 previousFrame = now
+                elapsed += delta
 
                 val events = session.tick(delta)
                 if (events.isEmpty()) {
@@ -244,6 +375,14 @@ class PlayViewModel(
         projection = IsometricProjection(),
         palette = content.palette,
         biomeName = session.currentBiome.name,
+        artDirector = artDirector,
+        stylePrompt = stylePrompt,
+        styleSummary = artDirector.direction.summary,
+        kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
+        // A lambda rather than a bound reference: starting a fresh world
+        // replaces the session, and a captured reference would keep answering
+        // for the world the player just left.
+        biomeAt = { x, y -> session.biomeAt(x, y) },
     )
 
     /**
@@ -251,7 +390,10 @@ class PlayViewModel(
      * integrates it on its own clock, so this only records intent.
      */
     fun setMoveInput(dx: Float, dy: Float) {
-        session.setMoveInput(dx, dy)
+        // The stick is screen-relative: up walks up the screen, whichever way
+        // the world's axes happen to run under it.
+        val world = com.stratum.engine.world.IsometricProjection.screenToWorldDirection(dx, dy)
+        session.setMoveInput(world.x, world.y)
     }
 
     /** Single nudge, for anything that is not the stick. */
@@ -389,6 +531,7 @@ class PlayViewModel(
             BuildResult.OutOfBlocks -> publish(message = "Out of blocks")
             BuildResult.NothingSelected -> publish(message = "Nothing selected to build with")
             BuildResult.NothingToBuild -> publish()
+            is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
         }
     }
 
@@ -412,6 +555,7 @@ class PlayViewModel(
             player = snapshot.player,
             camera = snapshot.player.position,
             biomeName = snapshot.biome.name,
+            worldTime = WorldTime(elapsedSeconds = elapsed),
             miningTarget = snapshot.miningTarget,
             miningFraction = snapshot.miningFraction,
             worldRevision = snapshot.worldRevision,
@@ -480,10 +624,12 @@ class PlayViewModel(
             config: WorldConfig,
             heroClassId: String? = null,
             spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+            imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+            kitDirectory: java.io.File? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PlayViewModel(content, config, heroClassId, spriteResolver) as T
+                PlayViewModel(content, config, heroClassId, spriteResolver, imageModel = imageModel, kitDirectory = kitDirectory) as T
         }
     }
 }
@@ -529,6 +675,21 @@ data class PlayUiState(
     val skills: List<SkillDefinition> = emptyList(),
     /** Advances every tick so the canvas redraws while the fight is moving. */
     val frame: Int = 0,
+    /** How the world is drawn. Swapped by [PlayViewModel.restyle], never by the canvas. */
+    val artDirector: WorldArtDirector = StyleSheetArtDirector(),
+    val worldTime: WorldTime = WorldTime(),
+    val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
+    /** What the player last asked for, so the field can show it back to them. */
+    val stylePrompt: String = "",
+    /** What the game understood by it, which is how a player learns the vocabulary. */
+    val styleSummary: String = "",
+    val styleOpen: Boolean = false,
+    /** Which forged asset kit the 3D view draws with. */
+    val kit: String = "house",
+    /** The lit 3D view, or the flat 2D canvas it replaced. */
+    val use3D: Boolean = true,
+    /** Progress of an art forge in flight, or null when none is running. */
+    val forging: String? = null,
     val message: String? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive

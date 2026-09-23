@@ -3,6 +3,8 @@ package com.stratum.feature.forge
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.stratum.core.domain.ai.ClipRow
+import com.stratum.core.domain.ai.ClipRowRequest
 import com.stratum.core.domain.ai.BasePoseRequest
 import com.stratum.core.domain.ai.GeneratedImage
 import com.stratum.core.domain.ai.GenerationException
@@ -16,10 +18,11 @@ import com.stratum.core.domain.ai.PoseStep
 import com.stratum.core.domain.ai.PoseView
 import com.stratum.core.domain.ai.SavedCharacter
 import com.stratum.core.domain.character.CharacterRole
+import com.stratum.core.domain.sprite.PoseCell
+import com.stratum.core.domain.sprite.ClipSampling
 import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.PackedSheet
 import com.stratum.core.domain.sprite.Pose
-import com.stratum.core.domain.sprite.PoseCell
 import com.stratum.core.domain.sprite.PoseGuideMode
 import com.stratum.core.domain.sprite.PoseGuideStyle
 import com.stratum.core.domain.sprite.PoseGuides
@@ -73,6 +76,8 @@ class PoseForgeViewModel(
     private val savePose: (String, String, ByteArray) -> Unit,
     private val dropPose: (String, String) -> Unit,
     private val posesDrawn: (String) -> Set<String>,
+    /** Reads a frame back, so an opening pose already drawn is not paid for twice. */
+    private val loadPose: (String, String) -> ByteArray?,
     /** Composites the set into a sheet and puts it in the sprite library. */
     private val composeSheet: (String, PoseSheetPlan) -> PackedSheet?,
     /** Characters already on disk, newest first, so one can be picked up again. */
@@ -82,6 +87,16 @@ class PoseForgeViewModel(
     private val exportSheet: (String, String) -> Boolean,
     /** Writes every full-size pose out as one archive. */
     private val exportPoses: (String, String) -> Boolean,
+    /** Writes the T-pose the whole character is an edit of. */
+    private val exportReference: (String, String) -> Boolean,
+    /** Writes the clip an animation was cut from, which the sheet only samples. */
+    private val exportClip: (String, String, String) -> Boolean,
+    /** Which animations have a clip on disk and can be re-cut without paying again. */
+    private val clipsDrawn: (String) -> Set<String>,
+    /** Draws one animation as a clip and cuts a row of frames out of it. */
+    private val drawClipRow: suspend (ClipRowRequest, GenerationObserver) -> Result<ClipRow>,
+    /** Keeps the clip, so the rate can be changed later without paying again. */
+    private val saveClip: (String, String, ByteArray) -> Unit,
     private val isProviderConfigured: () -> Boolean,
 ) : ViewModel() {
 
@@ -314,7 +329,11 @@ class PoseForgeViewModel(
         _state.value = current.copy(busy = true, error = null, message = null, savedSheet = null)
         job = viewModelScope.launch {
             val result = drawReference(
-                BasePoseRequest(subject = current.subject.trim(), styleDirection = current.style),
+                BasePoseRequest(
+                    subject = current.subject.trim(),
+                    styleDirection = current.style,
+                    promptOverride = current.promptOverride,
+                ),
                 GenerationObserver.None,
             )
             _state.value = result.fold(
@@ -343,6 +362,14 @@ class PoseForgeViewModel(
      * arriving after they have already decided to stop.
      */
     fun buildAnimations() {
+        // One button, two paths, chosen by the toggle beside it. Keeping the
+        // choice here rather than in a second button means a person picks how
+        // the character is drawn once, where the trade-off is written down,
+        // rather than by which control they happened to press.
+        if (_state.value.drawsFromClip) {
+            drawFromClips()
+            return
+        }
         val current = _state.value
         val setId = current.setId
         if (setId == null) {
@@ -472,12 +499,22 @@ class PoseForgeViewModel(
                 val hasExistingSheet = savedCharacters().firstOrNull { it.setId == currentSetId }?.sheetId != null
                 if (!hasExistingSheet || failures.isEmpty()) {
                     val onDisk = current.scope.scriptFor(current.frames, PoseView.entries)
-                    val counts = onDisk.drawnCounts(drawnNow)
+                    // Counted off the keys, not against the script. A row
+                    // cut from a clip is as long as the clip and the rate make
+                    // it, which a script capped at twelve cannot describe.
+                    val counts = PoseCell.rowLengths(
+                        drawnNow,
+                        onDisk.drawnViews(drawnNow).ifEmpty { listOf(PoseView.FRONT) }
+                            .map { it.keySuffix },
+                    )
                     val plan = PoseSheetPlanner.plan(
                         id = currentSetId,
                         name = current.subject.trim().ifBlank { "Character" },
                         frameCounts = counts,
                         cellSize = current.cellSize,
+                        // The rate the frames were cut at, so a row plays at
+                        // the speed it was made for.
+                        frameRate = current.frameRate,
                         views = onDisk.drawnViews(drawnNow)
                             .ifEmpty { listOf(PoseView.FRONT) }
                             .map { it.keySuffix to it.serves },
@@ -572,13 +609,17 @@ class PoseForgeViewModel(
         // script itself; the view model used to do this arithmetic too, and
         // having two copies is how it came to be right in one and wrong in
         // the other.
-        val counts = onDisk.drawnCounts(drawn)
+        val counts = PoseCell.rowLengths(
+            drawn,
+            onDisk.drawnViews(drawn).ifEmpty { listOf(PoseView.FRONT) }.map { it.keySuffix },
+        )
 
         val plan = PoseSheetPlanner.plan(
             id = setId,
             name = current.subject.trim().ifBlank { "Character" },
             frameCounts = counts,
             cellSize = current.cellSize,
+            frameRate = current.frameRate,
             // Only the angles that actually came back. Planning a block of
             // rows for an away view nobody drew would leave the bottom half
             // of the sheet empty and the renderer would walk the character
@@ -711,6 +752,183 @@ class PoseForgeViewModel(
         }
     }
 
+    /**
+     * How finely to cut a clip.
+     *
+     * Clamped to what reads as animation: below the floor it is a slideshow,
+     * and above the ceiling the frames are closer together than the model drew
+     * distinct ones, so the sheet grows without the walk improving.
+     */
+    fun setFrameRate(fps: Int) {
+        _state.value = _state.value.copy(
+            frameRate = fps.coerceIn(ClipSampling.MIN_FPS, ClipSampling.MAX_FPS),
+        )
+    }
+
+    /** Chooses between drawing every frame and cutting them out of one clip. */
+    fun setDrawsFromClip(on: Boolean) {
+        _state.value = _state.value.copy(drawsFromClip = on)
+    }
+
+    /**
+     * Draws each animation as a clip and cuts its row out.
+     *
+     * One request an animation rather than one a frame, which is the whole
+     * difference: the frames of a row come out of a single generation, so they
+     * cannot disagree about the costume or the scale the way separately drawn
+     * ones do. The clip is kept, because changing the frame rate afterwards
+     * should not cost anything.
+     *
+     * Runs on the same scope as the frame-by-frame path, for the same reason --
+     * it is long enough that a person will leave the screen.
+     */
+    fun drawFromClips() {
+        val current = _state.value
+        val setId = current.setId
+        if (current.busy) return
+        if (setId == null || !current.hasReference) {
+            _state.value = current.copy(error = "Draw the reference first.")
+            return
+        }
+        val reference = loadReference(setId)
+        if (reference == null) {
+            _state.value = current.copy(error = "The reference could not be read.")
+            return
+        }
+
+        val states = current.script.states
+        _state.value = current.copy(busy = true, error = null, message = null, failures = emptyMap())
+
+        job = PoseRun.start {
+            var failures = emptyMap<String, String>()
+            var drawn = 0
+
+            states.forEachIndexed { index, state ->
+                PoseRun.report(current.subject, index, states.size)
+
+                // The clip is pinned to this, and for a cycle it is pinned to
+                // it at both ends -- so it has to be the animation's own first
+                // pose, not the reference. Handing over the T-pose asks the
+                // model to start in a T-pose, finish in a T-pose and not move
+                // the body between, and it obliges: the first version of this
+                // passed the reference and every clip came back a T-pose held
+                // for four seconds.
+                val opening = current.script.stepsFor(state).firstOrNull()
+                if (opening == null) {
+                    failures = failures + (state.name.lowercase() to "no first pose to open on")
+                    return@forEachIndexed
+                }
+                // Drawn under its stick figure exactly as the frame-by-frame
+                // path draws it, and reused when it is already on disk, so
+                // switching between the two paths does not pay for it twice.
+                val openingBytes = withContext(Dispatchers.IO) {
+                    loadPose(setId, opening.key) ?: runCatching {
+                        drawPose(
+                            PoseFrameRequest(
+                                reference = ImageReference(reference),
+                                step = opening,
+                                guide = guideFor(opening, current.guides),
+                                styleDirection = current.style,
+                            ),
+                            GenerationObserver.None,
+                        ).getOrNull()?.bytes?.also { savePose(setId, opening.key, it) }
+                    }.getOrNull()
+                }
+                if (openingBytes == null) {
+                    failures = failures + (state.name.lowercase() to "the opening pose could not be drawn")
+                    return@forEachIndexed
+                }
+
+                val result = drawClipRow(
+                    ClipRowRequest(
+                        state = state,
+                        motion = state.clipMotion,
+                        openingPose = ImageReference(openingBytes),
+                        fps = current.frameRate,
+                        styleDirection = current.style,
+                    ),
+                    GenerationObserver.None,
+                )
+                result.onSuccess { row ->
+                    withContext(Dispatchers.IO) {
+                        row.frames.forEach { (key, bytes) -> savePose(setId, key, bytes) }
+                        saveClip(setId, state.name.lowercase(), row.clip.bytes)
+                    }
+                    drawn += row.frameCount
+                }.onFailure { failure ->
+                    failures = failures + (state.name.lowercase() to (failure.message ?: "failed"))
+                }
+            }
+
+            _state.value = _state.value.copy(
+                busy = false,
+                drawn = posesDrawn(setId),
+                clips = clipsDrawn(setId),
+                rowLengths = PoseCell.rowLengths(
+                    posesDrawn(setId),
+                    _state.value.views.map { it.keySuffix },
+                ),
+                failures = failures,
+                message = if (drawn > 0) "Cut $drawn frames from ${states.size} clips." else null,
+                error = if (drawn == 0) "No clip could be drawn." else null,
+            )
+        }
+    }
+
+    /** Edits the reference prompt. Blank clears back to the built-in one. */
+    fun editBasePrompt(text: String) {
+        _state.value = _state.value.copy(promptOverride = text.takeIf { it.isNotBlank() })
+    }
+
+    /** Puts the built-in prompt back, which is what clearing the field means. */
+    fun resetBasePrompt() {
+        _state.value = _state.value.copy(promptOverride = null, message = "Prompt reset.")
+    }
+
+    /**
+     * Writes out the T-pose the character is built from.
+     *
+     * Separate from the sheet because it is not in the sheet: every animation
+     * frame is an edit of this one drawing and none of them is it, so until
+     * now the one image the character actually depends on was the one image
+     * that could not leave.
+     */
+    fun exportReference() {
+        val setId = _state.value.setId
+        if (setId == null || !_state.value.hasReference) {
+            _state.value = _state.value.copy(error = "There is no reference to export yet.")
+            return
+        }
+        val name = _state.value.subject.trim().ifBlank { "character" }
+        _state.value = if (exportReference(setId, name)) {
+            _state.value.copy(message = "Reference exported.", error = null)
+        } else {
+            _state.value.copy(error = "The reference could not be exported.")
+        }
+    }
+
+    /**
+     * Writes out the clip an animation was cut from.
+     *
+     * The sheet is a sampling of this and a coarse one -- four seconds holds
+     * nearly a hundred pictures and a twelve frame row takes ten. Anyone who
+     * wants the motion rather than the grid, or who wants to re-cut it
+     * somewhere better than a fixed cell, needs the clip.
+     */
+    fun exportClip(key: String) {
+        val setId = _state.value.setId
+        if (setId == null || key !in _state.value.clips) {
+            _state.value = _state.value.copy(error = "There is no clip for that animation.")
+            return
+        }
+        val name = _state.value.subject.trim().ifBlank { "character" }
+        _state.value = if (exportClip(setId, name, key)) {
+            _state.value.copy(message = "Clip exported.", error = null)
+        } else {
+            _state.value.copy(error = "The clip could not be exported.")
+        }
+    }
+
     fun exportPoses() {
         val setId = _state.value.setId
         if (setId == null || _state.value.drawn.isEmpty()) {
@@ -745,6 +963,16 @@ class PoseForgeViewModel(
          */
         val CELL_SIZES = listOf(96, 128, 192, 256, 384)
 
+        /**
+         * The rates offered.
+         *
+         * Twelve is the default and the one hand-drawn animation has used for a
+         * century. Six is for a sheet that has to stay small, and twenty-four is
+         * for motion smooth enough to bear slowing down -- past which the frames
+         * are closer together than the model drew distinct ones.
+         */
+        val FRAME_RATES = listOf(6, 8, 12, 16, 24)
+
         fun factory(
             drawReference: suspend (BasePoseRequest, GenerationObserver) -> Result<GeneratedImage>,
             drawPose: suspend (PoseFrameRequest, GenerationObserver) -> Result<GeneratedImage>,
@@ -759,19 +987,27 @@ class PoseForgeViewModel(
             savePose: (String, String, ByteArray) -> Unit,
             dropPose: (String, String) -> Unit,
             posesDrawn: (String) -> Set<String>,
+            loadPose: (String, String) -> ByteArray? = { _, _ -> null },
             composeSheet: (String, PoseSheetPlan) -> PackedSheet?,
             savedCharacters: () -> List<SavedCharacter> = { emptyList() },
             deleteCharacter: (String) -> Unit = {},
             exportSheet: (String, String) -> Boolean = { _, _ -> false },
             exportPoses: (String, String) -> Boolean = { _, _ -> false },
+            drawClipRow: suspend (ClipRowRequest, GenerationObserver) -> Result<ClipRow> =
+                { _, _ -> Result.failure(IllegalStateException("No video model is wired")) },
+            saveClip: (String, String, ByteArray) -> Unit = { _, _, _ -> },
+            exportReference: (String, String) -> Boolean = { _, _ -> false },
+            exportClip: (String, String, String) -> Boolean = { _, _, _ -> false },
+            clipsDrawn: (String) -> Set<String> = { emptySet() },
             isProviderConfigured: () -> Boolean,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PoseForgeViewModel(
                 drawReference, drawPose, guideFor, readGuideImage, readGuideJson, loadGuides,
                 saveGuides, saveReference, loadReference, hasReference, savePose, dropPose,
-                posesDrawn, composeSheet, savedCharacters, deleteCharacter, exportSheet,
-                exportPoses, isProviderConfigured,
+                posesDrawn, loadPose, composeSheet, savedCharacters, deleteCharacter, exportSheet,
+                exportPoses, exportReference, exportClip, clipsDrawn, drawClipRow, saveClip,
+                isProviderConfigured,
             ) as T
         }
     }
@@ -788,6 +1024,25 @@ class PoseForgeViewModel(
  * set id, so the art is filed where the game looks for that kind of actor.
  */
 typealias CharacterRole = com.stratum.core.domain.character.CharacterRole
+
+/**
+ * The movement, in words, for a clip that has no stick figure to follow.
+ *
+ * Short and plain. A clip is given no per-frame guide, so this is the whole of
+ * what it knows about the motion -- and a long description is worse than a
+ * short one here, because every extra clause is something the model can decide
+ * to illustrate with a camera move.
+ */
+private val AnimationState.clipMotion: String
+    get() = when (this) {
+        AnimationState.IDLE -> "A character standing still, breathing, weight settling"
+        AnimationState.WALK -> "A steady walk cycle"
+        AnimationState.ATTACK -> "One weapon swing, wind-up through follow-through"
+        AnimationState.SPECIAL -> "Gathering, then throwing both arms wide"
+        AnimationState.HURT -> "Taking a hit and staggering back"
+        AnimationState.ROLL -> "A forward roll and back onto the feet"
+        AnimationState.DIE -> "Collapsing to the ground and going still"
+    }
 
 /**
  * How many animations to draw.
@@ -856,6 +1111,46 @@ data class PoseForgeUiState(
      */
     val drawsAwayView: Boolean = false,
     val cellSize: Int = PoseSheetPlanner.DEFAULT_CELL,
+    /**
+     * Frames a second a clip is cut into.
+     *
+     * The rate rather than the count, because a count is a number nobody can
+     * reason about: twelve frames of a walk means nothing on its own, and
+     * twelve frames a second means the walk plays at twelve frames a second.
+     * How many cells the row ends up with falls out of the rate and the length
+     * of the clip, which is also what lets the same clip be re-cut into a
+     * different sheet without the model being asked anything again.
+     */
+    val frameRate: Int = ClipSampling.DEFAULT_FPS,
+    /**
+     * An edited reference prompt, or null for the built-in one.
+     *
+     * Null rather than a copy of the default, so the default can be improved
+     * later without every character that never touched the field being stuck
+     * on the old wording.
+     */
+    val promptOverride: String? = null,
+    /** Animations with a clip saved, which can be re-cut for nothing. */
+    val clips: Set<String> = emptySet(),
+    /**
+     * How long each animation actually is on disk.
+     *
+     * Read off the keys rather than taken from the script, because a row cut
+     * from a clip is as long as the clip and the frame rate make it and the
+     * script is capped at twelve. The screen drew twelve chips for a nineteen
+     * frame row, so a long cycle and a short one looked the same.
+     */
+    val rowLengths: Map<AnimationState, Int> = emptyMap(),
+    /**
+     * Whether each animation is drawn as one clip rather than frame by frame.
+     *
+     * Off by default, because the still path is the one that draws the authored
+     * poses. A clip takes no per-frame stick figure, so its middle is whatever
+     * the model thought walking looks like -- what it buys instead is that the
+     * frames cannot disagree with each other, which separately drawn ones
+     * measurably do.
+     */
+    val drawsFromClip: Boolean = false,
     val setId: String? = null,
     val hasReference: Boolean = false,
     /** Pose keys already on disk. */
@@ -878,6 +1173,23 @@ data class PoseForgeUiState(
 ) {
     val views: List<PoseView>
         get() = if (drawsAwayView) listOf(PoseView.FRONT, PoseView.AWAY) else listOf(PoseView.FRONT)
+
+    /**
+     * The prompt that would be sent, default or edited.
+     *
+     * What the editor shows when it opens. The default used to be unreachable
+     * from here, so the one prompt every frame of every animation is an edit of
+     * was the one prompt nobody could read.
+     */
+    val basePrompt: String
+        get() = BasePoseRequest(
+            subject = subject.trim(),
+            styleDirection = style,
+            promptOverride = promptOverride,
+        ).prompt
+
+    /** True once the prompt has been changed from the built-in one. */
+    val basePromptEdited: Boolean get() = !promptOverride.isNullOrBlank()
 
     val script: PoseScript get() = scope.scriptFor(frames, views)
 

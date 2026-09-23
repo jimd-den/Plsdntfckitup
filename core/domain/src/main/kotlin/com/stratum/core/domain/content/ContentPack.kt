@@ -102,7 +102,64 @@ data class BiomeDefinition(
     /** Ores and their depth bands. */
     val deposits: List<DepositRule> = emptyList(),
     val ambientLight: Int = 12,
+    /** How the region is laid out beyond its noise. See [BiomeComposition]. */
+    val composition: BiomeComposition = BiomeComposition(),
 )
+
+/**
+ * The deliberate part of a region's layout: where people walk and what they
+ * built.
+ *
+ * Noise alone makes a texture, not a place. Diablo's overworld reads as
+ * designed because it is: roads wind between set pieces, and set pieces sit in
+ * clearings the scenery frames. A pack says which blocks a region's paths and
+ * landmarks are made of; the generator decides where they go, deterministically
+ * and one column at a time, so chunks still generate in any order.
+ */
+data class BiomeComposition(
+    /** Surface block of the paths that wind through the region; null for none. */
+    val pathBlockId: String? = null,
+    /** Rough path width, in blocks. */
+    val pathWidth: Float = 2f,
+    /** A set piece placed in open ground every so often; null for none. */
+    val landmark: Landmark? = null,
+)
+
+/**
+ * A small built place: a centrepiece, a ring around it, a floor under both.
+ *
+ * The ground under it is levelled, scenery is kept back from it, and it only
+ * stands in a clearing, so it is always something the player walks up to
+ * rather than something found half-buried in a thicket.
+ */
+data class Landmark(
+    val centreBlockId: String,
+    val ringBlockId: String? = null,
+    val ringRadius: Int = 3,
+    val ringCount: Int = 4,
+    /** A floor-shaped block laid around the centre; null for bare ground. */
+    val floorBlockId: String? = null,
+    val floorRadius: Int = 3,
+    /**
+     * Share of candidate sites that get one. Sites sit on a fixed world grid
+     * about three screens apart, so this is how often a region has a set
+     * piece rather than how far apart they are.
+     */
+    val chance: Float = 0.7f,
+    /** Kept free of scatter around the centre. */
+    val clearRadius: Int = 6,
+) {
+    init {
+        require(clearRadius in 1..MAX_CLEAR_RADIUS) { "A landmark's clearing must be 1..$MAX_CLEAR_RADIUS blocks, not $clearRadius" }
+        require(ringRadius <= clearRadius && floorRadius <= clearRadius) { "A landmark must fit inside its clearing" }
+        require(chance in 0f..1f) { "Landmark chance of $chance is not a share" }
+    }
+
+    companion object {
+        /** The largest clearing the generator's site grid can hold without neighbours overlapping. */
+        const val MAX_CLEAR_RADIUS = 10
+    }
+}
 
 data class ScatterRule(
     val blockId: String,

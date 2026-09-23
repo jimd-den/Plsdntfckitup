@@ -51,7 +51,7 @@ object IgboContentPack {
             strength = 16,
             agility = 11,
             insight = 8,
-            startingBlockIds = listOf(IgboPackBlocks.redEarth.id, IgboPackBlocks.graniteStone.id),
+            startingBlockIds = listOf(IgboPackBlocks.redEarth.id, IgboPackBlocks.graniteStone.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:mma_nkwu_cleave", "$NS:ikenga_tremor"),
             baseStats = CombatStats(
                 maxHealth = 260,
@@ -76,7 +76,7 @@ object IgboContentPack {
             strength = 8,
             agility = 12,
             insight = 18,
-            startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id),
+            startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark"),
             baseStats = CombatStats(
                 maxHealth = 180,
@@ -102,7 +102,7 @@ object IgboContentPack {
             strength = 9,
             agility = 13,
             insight = 17,
-            startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id),
+            startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova"),
             baseStats = CombatStats(
                 maxHealth = 200,
@@ -129,7 +129,7 @@ object IgboContentPack {
             strength = 19,
             agility = 15,
             insight = 6,
-            startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id),
+            startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:ikenga_tremor", "$NS:mma_nkwu_cleave"),
             baseStats = CombatStats(
                 maxHealth = 300,
@@ -212,11 +212,20 @@ object IgboContentPack {
     val terrain = TerrainRecipe(
         elevation = listOf(
             // One broad landform, so a region has a shape rather than a texture.
-            NoiseLayer(scale = 0.010f, amplitude = 1f),
+            NoiseLayer(scale = 0.008f, amplitude = 0.7f),
             // A quieter second octave, enough to break up the plateau edges.
             NoiseLayer(scale = 0.045f, amplitude = 0.3f, seedOffset = 101),
         ),
-        terraceStep = 3,
+        // One-block steps. Three-block terraces read beautifully and played
+        // terribly: every terrace edge was a drop a player could not climb
+        // back up, so the world was a series of one-way doors.
+        terraceStep = 1,
+        // Groves and clearings, not an even sprinkle. An action RPG is played
+        // in the open: scenery frames the space a fight happens in rather than
+        // filling it, the way Diablo's forests are walls around a glade.
+        // Nearly bare clearings and thick groves, each a few screens across.
+        scatterClustering = 0.95f,
+        scatterClusterScale = 0.035f,
         strata = listOf(
             Stratum(IgboPackBlocks.redEarth.id, thickness = 2),
             Stratum(IgboPackBlocks.riverClay.id, thickness = 2),

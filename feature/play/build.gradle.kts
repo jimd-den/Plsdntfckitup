@@ -8,6 +8,8 @@ android { namespace = "com.stratum.feature.play" }
 dependencies {
   implementation(project(":core:domain"))
   implementation(project(":engine:world"))
+  implementation(project(":engine:render"))
+  implementation(project(":engine:scene"))
   implementation(project(":core:designsystem"))
 
   implementation(libs.androidx.core.ktx)
