@@ -469,8 +469,16 @@ class SceneBuilder(
         when (fx.kind) {
             EffectKind.IMPACT_RING -> {
                 val grow = 1f - fade * fade
-                decal(x, y, z, fx.radius * (0.25f + 0.75f * grow), color, fade * RING_EFFECT_OPACITY, Vertex.RING)
+                val r = fx.radius * (0.25f + 0.75f * grow)
+                decal(x, y, z, r, color, fade * RING_EFFECT_OPACITY, Vertex.RING)
                 decal(x, y, z, fx.radius * 0.55f, color, fade * fade * SCORCH_OPACITY, Vertex.DISC)
+                // The ring itself burns: beads of light around the rim, so it
+                // reads as energy against any ground, dark or bright.
+                val beads = (RING_BEADS * (0.6f + fx.radius * 0.3f)).toInt()
+                for (i in 0 until beads) {
+                    val a = i * TAU / beads
+                    glow(camera, x + cos(a) * r * 0.82f, y + sin(a) * r * 0.82f, z + 0.12f, RING_BEAD_SIZE * (0.6f + 0.4f * r), color, fade * RING_BEAD_OPACITY)
+                }
                 lights += PointLight(x, y, z + 0.6f, color, fade * IMPACT_LIGHT, 2f + fx.radius * 2f)
             }
             EffectKind.HIT_FLASH -> {
@@ -487,7 +495,14 @@ class SceneBuilder(
                         x + camera.right.x * sx + camera.up.x * sz,
                         y + camera.right.y * sx + camera.up.y * sz,
                         z + BODY_CENTRE + camera.up.z * sz,
-                        SPARK_SIZE * (0.6f + fade), color, burst * 1.2f,
+                        SPARK_SIZE * (0.6f + fade), color, burst * SPARK_OPACITY,
+                    )
+                    glow(
+                        camera,
+                        x + camera.right.x * sx + camera.up.x * sz,
+                        y + camera.right.y * sx + camera.up.y * sz,
+                        z + BODY_CENTRE + camera.up.z * sz,
+                        SPARK_SIZE * 0.45f, HOT_CORE, burst * SPARK_OPACITY,
                     )
                 }
                 lights += PointLight(x, y, z + 1f, color, burst * fx.intensity * FLASH_LIGHT, 4.5f)
@@ -502,7 +517,8 @@ class SceneBuilder(
                     val lift = DEBRIS_HEIGHT * (0.5f + unit(salt, 3))
                     val dz = 0.8f * fade + lift * 4f * p * fade
                     val size = DEBRIS_SIZE * (0.7f + 0.6f * unit(salt, 4))
-                    glow(camera, x + cos(a) * out, y + sin(a) * out, z + dz, size, color, sqrt(fade) * 1.1f)
+                    glow(camera, x + cos(a) * out, y + sin(a) * out, z + dz, size, color, sqrt(fade) * DEBRIS_OPACITY)
+                    glow(camera, x + cos(a) * out, y + sin(a) * out, z + dz, size * 0.4f, HOT_CORE, fade * DEBRIS_OPACITY)
                 }
             }
             EffectKind.BEAM -> {
@@ -529,12 +545,11 @@ class SceneBuilder(
                     if (a < -ARC_HALF) break
                     val angle = facing + a
                     val lean = sin(a) * 0.35f
-                    glow(
-                        camera,
-                        x + cos(angle) * fx.radius, y + sin(angle) * fx.radius, z + BODY_CENTRE + lean,
-                        ARC_SIZE * (1f - share * 0.6f), color,
-                        fade * fx.intensity * (1f - share) * ARC_OPACITY,
-                    )
+                    val ax = x + cos(angle) * fx.radius; val ay = y + sin(angle) * fx.radius; val az = z + BODY_CENTRE + lean
+                    val strength = fade * fx.intensity * (1f - share)
+                    glow(camera, ax, ay, az, ARC_SIZE * (1f - share * 0.6f), color, strength * ARC_OPACITY)
+                    // A white-hot edge on the leading part of the blade's path.
+                    if (share < 0.5f) glow(camera, ax, ay, az, ARC_SIZE * 0.4f, HOT_CORE, strength * ARC_OPACITY)
                 }
             }
             EffectKind.AFTERIMAGE -> {
@@ -666,26 +681,33 @@ class SceneBuilder(
 
         const val MAX_EFFECT_LIGHTS = 3
         const val BODY_CENTRE = 0.9f
-        const val RING_EFFECT_OPACITY = 1.1f
+        const val RING_EFFECT_OPACITY = 1f
+        const val RING_BEADS = 20
+        const val RING_BEAD_SIZE = 0.3f
+        const val RING_BEAD_OPACITY = 1.6f
+        const val SPARK_OPACITY = 2.6f
+        const val DEBRIS_OPACITY = 2.2f
+        /** The white-hot centre of sparks and blades. */
+        const val HOT_CORE = 0xFFFFF4E0
         const val SCORCH_OPACITY = 0.45f
         const val IMPACT_LIGHT = 1.4f
-        const val FLASH_OPACITY = 1.5f
+        const val FLASH_OPACITY = 2.4f
         const val FLASH_SPARKS = 7
-        const val SPARK_SIZE = 0.13f
+        const val SPARK_SIZE = 0.26f
         const val FLASH_LIGHT = 2.2f
         const val DEBRIS_MIN = 6
         const val DEBRIS_EXTRA = 12
         const val DEBRIS_HEIGHT = 0.9f
-        const val DEBRIS_SIZE = 0.12f
+        const val DEBRIS_SIZE = 0.22f
         const val BEAM_SEGMENTS = 12
         const val BEAM_STEP = 0.5f
-        const val BEAM_OPACITY = 0.7f
+        const val BEAM_OPACITY = 1.1f
         const val BEAM_LIGHT = 1.6f
         const val ARC_HALF = 1.3f
         const val ARC_TRAIL = 1.4f
         const val ARC_SEGMENTS = 14
-        const val ARC_SIZE = 0.3f
-        const val ARC_OPACITY = 1.2f
+        const val ARC_SIZE = 0.5f
+        const val ARC_OPACITY = 2.2f
         const val AFTERIMAGES = 4
         const val AFTERIMAGE_STEP = 0.35f
         const val AFTERIMAGE_OPACITY = 0.45f

@@ -142,9 +142,9 @@ object ScenePreview {
         track.play(CombatCue(CombatMoment.SWING, palette.heroRim, 0.8f), hero.x, hero.y, hero.z, hero.facingX, hero.facingY)
         track.advance(0.1f)
         track.play(CombatCue(CombatMoment.CRITICAL, palette.hostile, 1f), brute.x, brute.y, brute.z)
-        track.advance(0.05f)
+        track.advance(0.03f)
         track.play(CombatCue(CombatMoment.HIT, palette.sacred, 0.5f), leopard.x, leopard.y, leopard.z)
-        track.advance(0.04f)
+        track.advance(0.03f)
         return track.active
     }
 
