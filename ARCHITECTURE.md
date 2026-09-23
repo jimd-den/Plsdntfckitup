@@ -331,6 +331,46 @@ One lesson is recorded in the code: Muse Image answers in WebP by default,
 and the JVM WebP plugin decoded some of those as a flat green channel — which
 looked exactly like a bad generation. The JVM client now asks for PNG.
 
+## Characters in 3D
+
+An actor is drawn from the best art it has:
+
+1. An animated sprite sheet made in the sprite forge. The 3D view projects the
+   actor's feet and head through its camera and draws the current frame at
+   that size over the scene, with the same code the 2D canvas uses — clips,
+   procedural motion, weapon rig, mirroring and hit flash all come along. The
+   scene still lays its contact shadow and rank ring on the real ground.
+2. Otherwise, a still sprite from the asset forge (`actor:<class or enemy id>`),
+   drawn as a depth-correct, shadow-casting billboard in both renderers and
+   mirrored when it walks towards screen-left.
+3. Otherwise, the low-poly stand-in body.
+
+Animated sheets are drawn over the scene rather than inside it, so a character
+standing behind a wall shows through it. That is a known limitation, chosen
+because it reuses the proven sprite code rather than duplicating it on the GPU.
+
+## A world you cannot get stuck in
+
+The Igbo world used to be built from three-block terraces with a one-block
+step, so every terrace edge was a one-way drop and any pit a player dug was a
+trap. Three changes, each covered by tests:
+
+- Holding into a ledge up to three blocks tall climbs it after a moment
+  (`PlayerMotion.CLIMB_UP`). Thin walls cannot be climbed; that would make
+  building one pointless.
+- Biome height offsets are blended smoothly across borders, which used to be
+  sheer walls as tall as the difference between two regions' biases.
+- The pack's terrain uses one-block steps. `WalkableTerrainTest` checks the
+  real generator on several seeds: no step taller than a climb, and fewer than
+  one border in a hundred needing one.
+
+Walking into a column whose chunk is not loaded is refused rather than read as
+air, which would drop the player to the bottom of the world.
+
+Painted ground no longer repeats visibly: every textured pixel is blended with
+a rotated, rescaled second sample by a slow world-space noise, and a second
+noise varies its brightness (`ShadingModel.detile`, ported to the shader).
+
 ## Walls a third of a block thick
 
 `BlockShape.WALL` is a pane a third of a block thick that joins neighbouring

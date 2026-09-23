@@ -1,3 +1,13 @@
+actor~igbo~agbara_priest.png
+actor~igbo~amadioha_invoker.png
+actor~igbo~catacomb_guardian.png
+actor~igbo~dibia_nzu.png
+actor~igbo~dike_ozo.png
+actor~igbo~ikenga_berserker.png
+actor~igbo~marsh_revenant.png
+actor~igbo~ogu_brute.png
+actor~igbo~shadow_leopard.png
+actor~igbo~storm_wisp.png
 igbo~granite__side.png
 igbo~grove_turf__side.png
 igbo~grove_turf__top.png

@@ -76,14 +76,63 @@ class LayeredTerrainGenerator(
 
     fun surfaceHeight(worldX: Int, worldY: Int, biome: BiomeDefinition): Int {
         val signed = elevationAt(worldX, worldY)
-        val variation = config.surfaceVariation * biome.roughness
-        val raw = config.seaLevel + biome.heightBias + (signed * variation).toInt()
+        // Bias and roughness are blended across borders rather than taken from
+        // this column's biome alone. Taken raw, a border between a high region
+        // and a low one was a sheer wall as tall as the difference in their
+        // biases -- nine blocks between the thunder peaks and the catacombs --
+        // which no player could climb and no monster could path over.
+        //
+        // The blend is smooth, not merely averaged: biases are read at the
+        // nodes of a coarse world-aligned grid, each node averaged with its
+        // neighbours, and interpolated between nodes. A plain moving average
+        // sampled on a grid jumped by most of a block whenever a row of its
+        // samples crossed a border together, and those jumps were exactly the
+        // two-block steps the blend was meant to remove.
+        //
+        // Applied as an offset to the biome the caller named, so asking for a
+        // particular biome's surface still gets that biome's height.
+        val here = biomeAt(worldX, worldY)
+        val (blendedBias, blendedRoughness) = blendedAt(worldX, worldY)
+        val bias = biome.heightBias + (blendedBias - here.heightBias)
+        val roughness = (biome.roughness + (blendedRoughness - here.roughness)).coerceAtLeast(0f)
+        val variation = config.surfaceVariation * roughness
+        val raw = config.seaLevel + kotlin.math.round(bias).toInt() + (signed * variation).toInt()
 
         // Terraced before clamping, so the plateaus stay aligned across biomes
         // with different height biases: a ledge that steps by two in one region
         // and by one in the next reads as a bug rather than as a landscape.
         val terraced = recipe.terraced(raw)
         return terraced.coerceIn(2, Chunk.HEIGHT - TOP_MARGIN)
+    }
+
+    /** Height bias and roughness, smoothly blended across biome borders. */
+    private fun blendedAt(worldX: Int, worldY: Int): Pair<Float, Float> {
+        val gx = Math.floorDiv(worldX, BLEND_GRID)
+        val gy = Math.floorDiv(worldY, BLEND_GRID)
+        val tx = (worldX - gx * BLEND_GRID).toFloat() / BLEND_GRID
+        val ty = (worldY - gy * BLEND_GRID).toFloat() / BLEND_GRID
+        val n00 = node(gx, gy); val n10 = node(gx + 1, gy)
+        val n01 = node(gx, gy + 1); val n11 = node(gx + 1, gy + 1)
+        fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+        // Smoothstepped weights, so the slope eases in and out of a border
+        // instead of kinking at every grid line.
+        val sx = tx * tx * (3f - 2f * tx)
+        val sy = ty * ty * (3f - 2f * ty)
+        val bias = lerp(lerp(n00.first, n10.first, sx), lerp(n01.first, n11.first, sx), sy)
+        val rough = lerp(lerp(n00.second, n10.second, sx), lerp(n01.second, n11.second, sx), sy)
+        return bias to rough
+    }
+
+    /** One grid node: the biome bias and roughness around it, averaged. */
+    private fun node(gx: Int, gy: Int): Pair<Float, Float> {
+        var bias = 0f
+        var rough = 0f
+        for (j in -1..1) for (i in -1..1) {
+            val b = biomeAt((gx + i) * BLEND_GRID, (gy + j) * BLEND_GRID)
+            bias += b.heightBias
+            rough += b.roughness
+        }
+        return bias / 9f to rough / 9f
     }
 
     /**
@@ -245,6 +294,13 @@ class LayeredTerrainGenerator(
     }
 
     private companion object {
+        /**
+         * Spacing of the biome-blend grid, in blocks. A border's height change
+         * is spread over about two of these, which keeps even the largest bias
+         * difference a pack ships under one block per step.
+         */
+        const val BLEND_GRID = 10
+
         const val TERRAIN_SCALE = 0.018f
         /**
          * Widens the noise's usable range. Kept low deliberately: this is a

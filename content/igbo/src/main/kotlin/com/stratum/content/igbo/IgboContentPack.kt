@@ -212,11 +212,14 @@ object IgboContentPack {
     val terrain = TerrainRecipe(
         elevation = listOf(
             // One broad landform, so a region has a shape rather than a texture.
-            NoiseLayer(scale = 0.010f, amplitude = 1f),
+            NoiseLayer(scale = 0.008f, amplitude = 0.7f),
             // A quieter second octave, enough to break up the plateau edges.
             NoiseLayer(scale = 0.045f, amplitude = 0.3f, seedOffset = 101),
         ),
-        terraceStep = 3,
+        // One-block steps. Three-block terraces read beautifully and played
+        // terribly: every terrace edge was a drop a player could not climb
+        // back up, so the world was a series of one-way doors.
+        terraceStep = 1,
         strata = listOf(
             Stratum(IgboPackBlocks.redEarth.id, thickness = 2),
             Stratum(IgboPackBlocks.riverClay.id, thickness = 2),

@@ -53,6 +53,8 @@ object ForgePlanner {
         pack: ContentPack,
         /** Regions to cover; empty means all of them. */
         biomeIds: Set<String> = emptySet(),
+        /** Also order one still sprite per hero class and per monster. */
+        includeActors: Boolean = true,
     ): List<ForgeOrder> {
         val blocks = pack.blocks.associateBy { it.id }
         val orders = LinkedHashMap<String, ForgeOrder>()
@@ -90,7 +92,46 @@ object ForgePlanner {
         pack.blocks
             .filter { it.glyph != null && it.lightEmission > 0 && it.material != BlockMaterial.LIQUID }
             .forEach { add(sprite(direction, it, "", null)) }
+        if (includeActors) {
+            pack.heroClasses.forEach { hero ->
+                add(actor(direction, "actor:${hero.id}", hero.name, "${hero.title}. ${hero.description}", AssetTier.HERO, hero = true))
+            }
+            pack.enemies.forEach { enemy ->
+                add(actor(direction, "actor:${enemy.id}", enemy.name, enemy.description, AssetTier.PROP, hero = false))
+            }
+        }
         return orders.values.toList()
+    }
+
+    /**
+     * One character, standing, cut out.
+     *
+     * A still, not an animation: it is what an actor looks like until someone
+     * forges it a proper sheet, and it is already far more of a character than
+     * the stand-in body. Drawn facing down and to the right, the way this
+     * camera sees a character walking towards it; the renderer mirrors it for
+     * the other way.
+     */
+    private fun actor(direction: ArtDirection, key: String, name: String, about: String, tier: AssetTier, hero: Boolean): ForgeOrder {
+        val prompt = buildString {
+            append("A single full-body game character sprite for an isometric action RPG like Diablo or Hades: ")
+            append(name)
+            if (about.isNotBlank()) append(" — ").append(about.trim().trimEnd('.')).append('.')
+            append(if (hero) " The player's hero: heroic, readable, strong silhouette. " else " A hostile monster: menacing, readable silhouette. ")
+            append("Standing in a ready stance, whole body visible from head to feet, seen from a high three-quarter camera, ")
+            append("turned towards the lower right of the frame, feet at the bottom of the frame. ")
+            append("Isolated on a solid $KEY_NAME background that fills everything around the character. ")
+            append("No ground, no base, no shadow, no other figures, no text, crisp clean silhouette edges, ")
+            append("no magenta or pink anywhere on the character. ")
+            append(direction.diction.house)
+            append(". ")
+            append(ArtBible.paletteNote(direction, null))
+            direction.diction.flavour.takeIf(String::isNotBlank)?.let { append(" Style: $it.") }
+            append(" ")
+            append(direction.diction.forbidden)
+            append(".")
+        }
+        return ForgeOrder(key, AssetKind.PROP_SPRITE, tier, name, prompt)
     }
 
     private fun tile(direction: ArtDirection, block: BlockType, kind: AssetKind, setting: String, kit: BiomeArtKit?): ForgeOrder {

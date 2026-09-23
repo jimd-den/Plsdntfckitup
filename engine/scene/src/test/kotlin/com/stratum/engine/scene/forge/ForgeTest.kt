@@ -60,6 +60,20 @@ class ForgeTest {
     }
 
     @Test
+    fun `heroes and monsters get one still sprite each`() {
+        val withCast = pack.copy(
+            heroClasses = listOf(com.stratum.core.domain.content.HeroClassDefinition("t:hero", "Warden", title = "Keeper")),
+            enemies = listOf(
+                com.stratum.core.domain.actor.EnemyDefinition(id = "t:brute", name = "Brute", damageTypeId = "t:blunt"),
+            ),
+        )
+        val actors = ForgePlanner.plan(ArtDirection.HOUSE, withCast).filter { it.key.startsWith("actor:") }
+        assertEquals(setOf("actor:t:hero", "actor:t:brute"), actors.map { it.key }.toSet())
+        assertTrue(actors.all { "#FF00FF" in it.prompt && "full-body" in it.prompt })
+        assertTrue(ForgePlanner.plan(ArtDirection.HOUSE, withCast, includeActors = false).none { it.key.startsWith("actor:") })
+    }
+
+    @Test
     fun `every prompt carries the style and the prohibitions`() {
         val dark = StyleLexicon.interpret("dark").direction
         ForgePlanner.plan(dark, pack).forEach { order ->

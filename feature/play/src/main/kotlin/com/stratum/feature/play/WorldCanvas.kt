@@ -423,6 +423,34 @@ private fun DrawScope.drawSprite(
     playback: AnimationPlayback,
     facing: SpriteFacing,
     flash: Float,
+) = drawActorSprite(
+    x = x,
+    groundY = y + projection.tileHeight * projection.zoom * 0.25f,
+    pixelHeight = projection.tileWidth * projection.zoom * SPRITE_HEIGHT_TILES,
+    sprite = sprite,
+    playback = playback,
+    facing = facing,
+    flash = flash,
+)
+
+/**
+ * One animated character frame, standing on [groundY] and [pixelHeight] tall.
+ *
+ * Shared by the 2D canvas and the 3D view: the 3D view works out the height by
+ * projecting the actor's feet and head through its camera, and everything
+ * else -- clip choice, procedural motion, weapon rig, mirroring, hit flash --
+ * is the same drawing either way. [shadow] is off in 3D, where the scene
+ * already lays a contact shadow on the real ground.
+ */
+internal fun DrawScope.drawActorSprite(
+    x: Float,
+    groundY: Float,
+    pixelHeight: Float,
+    sprite: DrawableSprite,
+    playback: AnimationPlayback,
+    facing: SpriteFacing,
+    flash: Float,
+    shadow: Boolean = true,
 ) {
     val sheet = sprite.sheet
     val clip = sheet.clipOrFallback(playback.state)
@@ -438,7 +466,7 @@ private fun DrawScope.drawSprite(
     // depending on which poses their sheet happened to contain. Height is
     // what a viewer reads as scale -- a character is "about two tiles tall"
     // -- and it is the measurement that stays put across a whole set.
-    val baseHeight = projection.tileWidth * projection.zoom * SPRITE_HEIGHT_TILES
+    val baseHeight = pixelHeight
     val baseWidth = baseHeight * (rect.width.toFloat() / rect.height.coerceAtLeast(1))
 
     // Motion the art does not supply. A clip playing frames drawn for another
@@ -458,7 +486,6 @@ private fun DrawScope.drawSprite(
     // Anchored at the feet rather than the centre, so a tall sprite grows
     // upward instead of sinking into the ground -- and so a body that sags as
     // it dies keeps its contact with the floor while it does.
-    val groundY = y + projection.tileHeight * projection.zoom * 0.25f
     val left = (x - drawWidth / 2f + motion.offsetX * baseWidth).toInt()
     val top = (groundY - drawHeight + motion.offsetY * baseHeight).toInt()
 
@@ -476,11 +503,13 @@ private fun DrawScope.drawSprite(
     // through that would nail the character to the floor it is leaving.
     val lifted = ((groundY - (top + drawHeight)) / drawHeight).coerceIn(0f, 1f)
     val shadowWidth = drawWidth * SHADOW_WIDTH * (1f - lifted * 0.45f)
-    drawOval(
-        color = Color.Black.copy(alpha = SHADOW_ALPHA * (1f - lifted * 0.6f)),
-        topLeft = Offset(x - shadowWidth / 2f, groundY - shadowWidth * SHADOW_SQUASH / 2f),
-        size = Size(shadowWidth, shadowWidth * SHADOW_SQUASH),
-    )
+    if (shadow) {
+        drawOval(
+            color = Color.Black.copy(alpha = SHADOW_ALPHA * (1f - lifted * 0.6f)),
+            topLeft = Offset(x - shadowWidth / 2f, groundY - shadowWidth * SHADOW_SQUASH / 2f),
+            size = Size(shadowWidth, shadowWidth * SHADOW_SQUASH),
+        )
+    }
 
     val blit: (Float, ColorFilter?) -> Unit = { alpha, tint ->
         drawImage(
@@ -1001,7 +1030,7 @@ data class DrawableWeapon(
  * fraction of a tile per frame is still going north, and truncating would call
  * that no movement at all and leave it facing whatever the default is.
  */
-private fun facingOf(dx: Float, dy: Float): SpriteFacing = SpriteFacing.of(
+internal fun facingOf(dx: Float, dy: Float): SpriteFacing = SpriteFacing.of(
     if (dx > 0f) 1 else if (dx < 0f) -1 else 0,
     if (dy > 0f) 1 else if (dy < 0f) -1 else 0,
 )

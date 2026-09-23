@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.util.Log
-import com.stratum.engine.scene.MaterialKind
 import com.stratum.engine.scene.MeshBatch
 import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
@@ -139,6 +138,8 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         val eye = frame.camera.eye
         GLES30.glUniform3f(loc(lit, "uEye"), eye.x, eye.y, eye.z)
         vec3(lit, "uSun", t.sun)
+        vec3(lit, "uFill", t.fill)
+        GLES30.glUniform1f(loc(lit, "uFillStrength"), t.fillStrength)
         vec3(lit, "uSunColor", t.sunColor)
         vec3(lit, "uSky", t.sky)
         vec3(lit, "uGround", t.ground)

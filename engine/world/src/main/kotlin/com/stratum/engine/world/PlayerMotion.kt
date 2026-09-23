@@ -2,6 +2,7 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockShapes
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.Direction
@@ -39,6 +40,9 @@ class PlayerMotion(private val world: World) {
     private var rollDirection: WorldPoint = WorldPoint.ZERO
     private var invulnerableFor: Float = 0f
     private var rollCooldown: Float = 0f
+
+    /** How long the player has been pushing against a ledge they could climb. */
+    private var climbHeld: Float = 0f
 
     val isRolling: Boolean get() = rollRemaining > 0f
 
@@ -110,9 +114,31 @@ class PlayerMotion(private val world: World) {
             return settled(player)
         }
 
-        var position = player.position
+        val start = player.position
+        var position = start
         position = tryAxis(position, velocity.x * deltaSeconds, 0f) ?: position
         position = tryAxis(position, 0f, velocity.y * deltaSeconds) ?: position
+
+        // Nothing moved: is it a ledge the player could scramble up? Holding
+        // into one for a moment climbs it. Without this, a terrace taller than
+        // a step was a one-way drop and a dug pit was a grave: the only fix
+        // was a new game.
+        if (position == start && rollRemaining <= 0f) {
+            val climbX = tryAxis(start, velocity.x * deltaSeconds, 0f, CLIMB_UP)
+            val climbY = tryAxis(start, 0f, velocity.y * deltaSeconds, CLIMB_UP)
+            val climb = climbX ?: climbY
+            if (climb != null) {
+                climbHeld += deltaSeconds
+                if (climbHeld >= CLIMB_DELAY) {
+                    climbHeld = 0f
+                    return settled(player.copy(position = climb))
+                }
+            } else {
+                climbHeld = 0f
+            }
+        } else {
+            climbHeld = 0f
+        }
 
         return settled(player.copy(position = position))
     }
@@ -144,6 +170,7 @@ class PlayerMotion(private val world: World) {
         rollDirection = WorldPoint.ZERO
         invulnerableFor = 0f
         rollCooldown = 0f
+        climbHeld = 0f
     }
 
     /** Drops the player if there is nothing under them, e.g. after mining. */
@@ -163,12 +190,15 @@ class PlayerMotion(private val world: World) {
      * One axis of movement, or null when the way is blocked. Climbing a single
      * step is free; anything taller is a wall.
      */
-    private fun tryAxis(from: WorldPoint, dx: Float, dy: Float): WorldPoint? {
+    private fun tryAxis(from: WorldPoint, dx: Float, dy: Float, maxStep: Int = STEP_UP): WorldPoint? {
         if (dx == 0f && dy == 0f) return from
 
         val target = from.translated(dx, dy, 0f)
         val columnX = floor(target.x).toInt()
         val columnY = floor(target.y).toInt()
+        // Unloaded ground reads as air, and walking onto air drops the player
+        // to the bottom of the world. A column that is not there yet is a wall.
+        if (!world.isLoaded(BlockPos(columnX, columnY, 0).chunkPos)) return null
         val currentZ = from.toBlockPos().z
 
         // Tested against the block's real shape, not the cell. A wall a third
@@ -178,7 +208,7 @@ class PlayerMotion(private val world: World) {
         val localX = target.x - columnX
         val localY = target.y - columnY
         var highestSolid = -1
-        for (z in (currentZ + STEP_UP) downTo 0) {
+        for (z in (currentZ + maxStep) downTo 0) {
             if (BlockShapes.occupies(world, BlockPos(columnX, columnY, z), localX, localY, BODY_MARGIN)) {
                 highestSolid = z
                 break
@@ -186,8 +216,20 @@ class PlayerMotion(private val world: World) {
         }
 
         val standingZ = highestSolid + 1
-        if (standingZ - currentZ > STEP_UP) return null
-        if (standingZ >= Chunk.HEIGHT) return null
+        if (standingZ - currentZ > maxStep) return null
+        // Climbing is for terrain. A player who could scramble over any wall
+        // would make building one pointless.
+        if (standingZ - currentZ > STEP_UP &&
+            world.blockAt(BlockPos(columnX, columnY, highestSolid)).shape != BlockShape.CUBE
+        ) {
+            return null
+        }
+        if (standingZ + 1 >= Chunk.HEIGHT) return null
+        // Room to stand: a body is two blocks tall, and climbing under an
+        // overhang would put the player's head inside it.
+        for (z in standingZ..standingZ + 1) {
+            if (BlockShapes.occupies(world, BlockPos(columnX, columnY, z), localX, localY, BODY_MARGIN)) return null
+        }
         return WorldPoint(target.x, target.y, standingZ.toFloat())
     }
 
@@ -201,6 +243,18 @@ class PlayerMotion(private val world: World) {
     companion object {
         /** How far the player climbs without a jump. */
         const val STEP_UP = 1
+
+        /**
+         * The tallest ledge a player can scramble up by holding into it.
+         *
+         * Three, because that is the tallest terrace a pack is likely to make
+         * and the deepest a player usually digs before noticing. Taller than
+         * that is a cliff, and cliffs should still mean something.
+         */
+        const val CLIMB_UP = 3
+
+        /** Seconds of pushing before a climb happens, so brushing past a ledge never scales it. */
+        const val CLIMB_DELAY = 0.35f
 
         /**
          * How far outside a thin shape the body is still stopped, in blocks.

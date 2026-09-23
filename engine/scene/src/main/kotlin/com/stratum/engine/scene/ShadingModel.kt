@@ -18,6 +18,8 @@ object ShadingModel {
     /** Unpacked lighting, so the per-pixel path does no bit shifting. */
     class Terms(lighting: SceneLighting) {
         val sun = floatArrayOf(lighting.sunX, lighting.sunY, lighting.sunZ)
+        val fill = floatArrayOf(lighting.fillX, lighting.fillY, lighting.fillZ)
+        val fillStrength = lighting.fillStrength
         val sunColor = rgb(lighting.sunColor, lighting.sunIntensity)
         val sky = rgb(lighting.skyAmbient, lighting.ambientIntensity)
         val ground = rgb(lighting.groundAmbient, lighting.ambientIntensity)
@@ -63,6 +65,12 @@ object ShadingModel {
         r += t.sunColor[0] * ndl * shadow
         g += t.sunColor[1] * ndl * shadow
         b += t.sunColor[2] * ndl * shadow
+
+        // Fill light from the camera's side; see SceneLighting.fillX.
+        val fdl = max(0f, nx * t.fill[0] + ny * t.fill[1] + nz * t.fill[2])
+        r += t.sunColor[0] * fdl * t.fillStrength
+        g += t.sunColor[1] * fdl * t.fillStrength
+        b += t.sunColor[2] * fdl * t.fillStrength
 
         for (i in lights.indices) {
             val light = lights[i]
@@ -114,6 +122,46 @@ object ShadingModel {
         for (i in 0 until 3) rgb[i] = (rgb[i] * v).coerceIn(0f, 1f)
     }
 
+    /**
+     * Breaking up a repeating texture, the cheap way.
+     *
+     * A painted tile repeating every two blocks draws a visible grid across a
+     * whole field however good the painting is. Every textured pixel is
+     * sampled twice — once as laid, once rotated, rescaled and shifted — and
+     * the two are blended by a slow noise field in world space, with a second
+     * slow field varying the brightness. The eye loses the period; the tile
+     * does not need to be any larger, and no extra art is asked for.
+     *
+     * [out] receives the second sample's u, v, the blend weight towards it,
+     * and a brightness multiplier. The GLSL twin is `detile` in the shaders.
+     */
+    fun detile(u: Float, v: Float, wx: Float, wy: Float, wz: Float, out: FloatArray) {
+        val c = DETILE_COS; val sn = DETILE_SIN
+        out[0] = (u * c - v * sn) * DETILE_SCALE + DETILE_SHIFT_U
+        out[1] = (u * sn + v * c) * DETILE_SCALE + DETILE_SHIFT_V
+        // Walls vary along their height as well as their run.
+        val px = wx + wz * 0.7f
+        val py = wy - wz * 0.7f
+        out[2] = smoothstep(0.35f, 0.65f, valueNoise(px / DETILE_CELL, py / DETILE_CELL))
+        out[3] = 0.88f + 0.24f * valueNoise(px / TINT_CELL + 17f, py / TINT_CELL + 5f)
+    }
+
+    /** Smooth value noise in 0..1, matching the shader's `vnoise`. */
+    fun valueNoise(x: Float, y: Float): Float {
+        val ix = kotlin.math.floor(x); val iy = kotlin.math.floor(y)
+        val fx = x - ix; val fy = y - iy
+        val ux = fx * fx * (3f - 2f * fx); val uy = fy * fy * (3f - 2f * fy)
+        val a = hash(ix, iy); val b = hash(ix + 1f, iy)
+        val c = hash(ix, iy + 1f); val d = hash(ix + 1f, iy + 1f)
+        return (a + (b - a) * ux) + ((c + (d - c) * ux) - (a + (b - a) * ux)) * uy
+    }
+
+    /** The classic shader hash; matches `hash21` in GLSL closely enough for noise. */
+    private fun hash(x: Float, y: Float): Float {
+        val h = kotlin.math.sin((x * 127.1f + y * 311.7f).toDouble()) * 43758.5453
+        return (h - kotlin.math.floor(h)).toFloat()
+    }
+
     fun smoothstep(a: Float, b: Float, x: Float): Float {
         val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)
@@ -126,6 +174,14 @@ object ShadingModel {
     )
 
     const val EMISSIVE_GAIN = 1.6f
+
+    const val DETILE_COS = 0.8253356f   // cos(0.6)
+    const val DETILE_SIN = 0.5646425f   // sin(0.6)
+    const val DETILE_SCALE = 0.71f
+    const val DETILE_SHIFT_U = 0.37f
+    const val DETILE_SHIFT_V = 0.19f
+    const val DETILE_CELL = 6f
+    const val TINT_CELL = 13f
     const val TONE_GAIN = 1.25f
     const val HEIGHT_FOG_DEPTH = 6f
     const val HEIGHT_FOG_MAX = 0.55f

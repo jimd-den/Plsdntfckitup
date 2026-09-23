@@ -84,6 +84,18 @@ data class SceneLighting(
      */
     val heroLight: Float = 0f,
     val heroLightRadius: Float = 7f,
+    /**
+     * Unit vector towards the fill light, which the scene sets from the camera.
+     *
+     * The fill sits on the camera's side, as in any three-point setup, so that
+     * every face the player can see receives some light. Placed opposite the
+     * sun instead, faces turned neither to the sun nor to the fill — every
+     * south-facing step on a west-lit map — drew as black strips.
+     */
+    val fillX: Float = 0f,
+    val fillY: Float = 0f,
+    val fillZ: Float = 1f,
+    val fillStrength: Float = 0.32f,
 )
 
 /**

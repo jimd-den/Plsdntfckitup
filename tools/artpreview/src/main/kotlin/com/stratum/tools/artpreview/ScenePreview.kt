@@ -103,10 +103,10 @@ object ScenePreview {
         )
         val stand = ground + 1f
         val actors = listOf(
-            SceneActor(VANTAGE_X + 0.5f, VANTAGE_Y + 0.5f, stand, ActorPresentation("p", ActorRole.PLAYER), 1f, -0.3f),
-            SceneActor(VANTAGE_X + 4.5f, VANTAGE_Y - 2.5f, surfaceAt(world, VANTAGE_X + 4, VANTAGE_Y - 3), ActorPresentation("m1", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0.5f),
-            SceneActor(VANTAGE_X + 5.5f, VANTAGE_Y - 0.5f, surfaceAt(world, VANTAGE_X + 5, VANTAGE_Y - 1), ActorPresentation("m2", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0f),
-            SceneActor(VANTAGE_X + 6.5f, VANTAGE_Y + 2.5f, surfaceAt(world, VANTAGE_X + 6, VANTAGE_Y + 2), ActorPresentation("e", ActorRole.ENEMY, EnemyRank.ELITE), -1f, -0.4f),
+            SceneActor(VANTAGE_X + 0.5f, VANTAGE_Y + 0.5f, stand, ActorPresentation("p", ActorRole.PLAYER), 1f, -0.3f, spriteKey = "actor:igbo:dike_ozo"),
+            SceneActor(VANTAGE_X + 4.5f, VANTAGE_Y - 2.5f, surfaceAt(world, VANTAGE_X + 4, VANTAGE_Y - 3), ActorPresentation("m1", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0.5f, spriteKey = "actor:igbo:ogu_brute"),
+            SceneActor(VANTAGE_X + 5.5f, VANTAGE_Y - 0.5f, surfaceAt(world, VANTAGE_X + 5, VANTAGE_Y - 1), ActorPresentation("m2", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0f, spriteKey = "actor:igbo:shadow_leopard"),
+            SceneActor(VANTAGE_X + 6.5f, VANTAGE_Y + 2.5f, surfaceAt(world, VANTAGE_X + 6, VANTAGE_Y + 2), ActorPresentation("e", ActorRole.ENEMY, EnemyRank.ELITE), -1f, -0.4f, spriteKey = "actor:igbo:catacomb_guardian"),
             SceneActor(VANTAGE_X - 1.5f, VANTAGE_Y + 3.5f, surfaceAt(world, VANTAGE_X - 2, VANTAGE_Y + 3), ActorPresentation("l", ActorRole.LOOT)),
         )
         val frame = builder.build(world, camera, actors, WorldTime(dayFraction = 0.42f, elapsedSeconds = 7f))

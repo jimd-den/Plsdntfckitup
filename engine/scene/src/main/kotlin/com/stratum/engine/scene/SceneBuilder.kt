@@ -30,6 +30,12 @@ data class SceneActor(
     val facingY: Float = 1f,
     /** A forged sprite to draw instead of the low-poly body, by texture key. */
     val spriteKey: String? = null,
+    /**
+     * True when the platform draws this actor's animated sprite itself, over
+     * the scene. The scene then lays only its footing — shadow, rank ring,
+     * halo — and no stand-in body, which would otherwise show behind the art.
+     */
+    val drawnElsewhere: Boolean = false,
 )
 
 /**
@@ -119,11 +125,24 @@ class SceneBuilder(
         val biome = biomeAt(cx, cy)
         val styled = scene.lightingFor(biome?.id, time)
         // Fog is authored relative to the focus; backends measure from the eye.
+        // The fog is also what hides the edge of the world. Terrain only exists
+        // as far as the engine has loaded it, and past that the sky showed
+        // through as a black staircase; fog is total before the meshed edge,
+        // and the sky leans towards the fog colour, so the boundary dissolves.
+        val edge = camera.distance + radius * EDGE_FOG_SHARE
         val lighting = styled.copy(
             fogFloor = camera.target.z - FOG_FLOOR_DEPTH,
-            fogStart = styled.fogStart + camera.distance,
-            fogEnd = styled.fogEnd + camera.distance,
-        )
+            fogStart = minOf(styled.fogStart + camera.distance, edge - MIN_FOG_SPAN),
+            fogEnd = minOf(styled.fogEnd + camera.distance, edge),
+            skyTop = Tint.mix(styled.skyTop, styled.fogColor, SKY_TO_FOG),
+            skyBottom = Tint.mix(styled.skyBottom, styled.fogColor, SKY_TO_FOG),
+        ).let { lit ->
+            // Fill from behind the lens, a little raised: every face this
+            // camera can see gets some of it.
+            val toEye = (camera.eye - camera.target).let { Vec3(it.x, it.y, 0f).normalized() }
+            val fill = Vec3(toEye.x, toEye.y, FILL_LIFT).normalized()
+            lit.copy(fillX = fill.x, fillY = fill.y, fillZ = fill.z)
+        }
 
         cutout.clear(); decals.clear(); glows.clear(); actorMesh.clear()
         val eyeLevel = floor(camera.target.z).toInt()
@@ -235,7 +254,12 @@ class SceneBuilder(
      * what Diablo and Hades both do — their scenery is drawn for the camera,
      * not for the world — and the base stays planted where it stands.
      */
-    private fun billboard(camera: SceneCamera, x: Float, y: Float, z: Float, width: Float, height: Float, tint: Long, layer: Float, opacity: Float = 1f) {
+    private fun billboard(
+        camera: SceneCamera, x: Float, y: Float, z: Float, width: Float, height: Float,
+        tint: Long, layer: Float, opacity: Float = 1f, mirrored: Boolean = false,
+    ) {
+        val u0 = if (mirrored) 1f else 0f
+        val u1 = 1f - u0
         val right = camera.right
         val up = camera.up
         val n = billboardNormal(camera)
@@ -244,10 +268,10 @@ class SceneBuilder(
         // For cut-outs the occlusion slot carries opacity: below one, the
         // backends drop a dithered share of the pixels (screen-door fade),
         // which needs no sorting and keeps depth writes intact.
-        val a = cutout.vertex(x - right.x * hw, y - right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, 0f, 1f, layer)
-        val b = cutout.vertex(x + right.x * hw, y + right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, 1f, 1f, layer)
-        val c = cutout.vertex(x + right.x * hw + tx, y + right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, 1f, 0f, layer)
-        val d = cutout.vertex(x - right.x * hw + tx, y - right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, 0f, 0f, layer)
+        val a = cutout.vertex(x - right.x * hw, y - right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u0, 1f, layer)
+        val b = cutout.vertex(x + right.x * hw, y + right.y * hw, z, n.x, n.y, n.z, white(tint), opacity, u1, 1f, layer)
+        val c = cutout.vertex(x + right.x * hw + tx, y + right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u1, 0f, layer)
+        val d = cutout.vertex(x - right.x * hw + tx, y - right.y * hw + ty, z + tz, n.x, n.y, n.z, white(tint), opacity, u0, 0f, layer)
         cutout.quad(a, b, c, d)
     }
 
@@ -309,11 +333,21 @@ class SceneBuilder(
             decal(actor.x, actor.y, actor.z, HALO_RADIUS * style.scale, style.halo, Tint.alpha(style.halo) / 255f + 0.2f, Vertex.DISC)
         }
 
+        if (actor.drawnElsewhere) return
         val sprite = textures.layerOf(actor.spriteKey)
         if (sprite >= 0) {
             val texture = textures.textureAt(sprite)!!
-            val height = ACTOR_SPRITE_HEIGHT * style.scale
-            billboard(camera, actor.x, actor.y, actor.z, height * texture.width / texture.height, height, Tint.OPAQUE or 0xFFFFFF, sprite.toFloat())
+            // Half the contract's size cheat. The cheat exists to lift a
+            // one-block marker off a field of blocks; a painted character does
+            // not need it, and at full strength stood as tall as the trees.
+            val height = ACTOR_SPRITE_HEIGHT * (1f + (style.scale - 1f) * 0.5f)
+            // Forged characters are drawn facing the lower right; one heading
+            // the other way on screen is the same art mirrored.
+            val screenwise = actor.facingX * camera.right.x + actor.facingY * camera.right.y
+            billboard(
+                camera, actor.x, actor.y, actor.z, height * texture.width / texture.height, height,
+                Tint.OPAQUE or 0xFFFFFF, sprite.toFloat(), mirrored = screenwise < -0.01f,
+            )
             return
         }
 
@@ -475,17 +509,22 @@ class SceneBuilder(
 
     companion object {
         /** Blocks meshed around the camera target in each direction. */
-        const val DEFAULT_RADIUS = 26
+        const val DEFAULT_RADIUS = 40
         const val REGION_STEP = 6
         const val FOG_FLOOR_DEPTH = 4f
+        /** Share of the meshed radius past the focus where fog becomes total. */
+        const val EDGE_FOG_SHARE = 0.8f
+        const val MIN_FOG_SPAN = 8f
+        const val SKY_TO_FOG = 0.65f
+        const val FILL_LIFT = 0.45f
 
-        const val SPRITE_HEIGHT = 2.0f
+        const val SPRITE_HEIGHT = 2.6f
 
         /** How close in front of an actor a prop must be to fade, across and along the view. */
         const val FADE_WIDTH = 1.6f
         const val FADE_DEPTH = 4.5f
-        const val FADED_OPACITY = 0.35f
-        const val ACTOR_SPRITE_HEIGHT = 1.9f
+        const val FADED_OPACITY = 0.22f
+        const val ACTOR_SPRITE_HEIGHT = 1.7f
         const val SILHOUETTE_UNIT = 1.25f
         const val PROP_SHADOW_RADIUS = 0.55f
         const val SHADOW_RADIUS = 0.42f

@@ -143,6 +143,35 @@ class SceneTest {
     }
 
     @Test
+    fun `an actor drawn by the platform keeps its footing but loses its stand-in body`() {
+        val frame = SceneBuilder(director, TextureLibrary()).build(
+            FlatWorld(),
+            SceneCamera(Vec3(5f, 5f, 4f)),
+            actors = listOf(SceneActor(5f, 5f, 4f, ActorPresentation("p", ActorRole.PLAYER), drawnElsewhere = true)),
+        )
+        assertEquals(1, frame.opaque.size, "only terrain: no body under the sprite")
+        assertEquals(1, frame.decals.triangleCount / 2, "the contact shadow stays")
+    }
+
+    @Test
+    fun `a forged character sprite stands in for the body and turns to face its way`() {
+        val library = TextureLibrary().apply { put("actor:hero", Texture(2, 4, IntArray(8) { -1 })) }
+        val camera = SceneCamera(Vec3(5f, 5f, 4f))
+        fun us(facingX: Float, facingY: Float): List<Float> {
+            val frame = SceneBuilder(director, library).build(
+                FlatWorld(), camera,
+                actors = listOf(SceneActor(5f, 5f, 4f, ActorPresentation("p", ActorRole.PLAYER), facingX, facingY, spriteKey = "actor:hero")),
+            )
+            assertEquals(1, frame.opaque.size, "a sprite replaces the stand-in body")
+            return (0 until 4).map { frame.cutout.vertices[it * Vertex.STRIDE + Vertex.U] }
+        }
+        // Screen-right and screen-left on this camera are the two diagonals.
+        val right = camera.right
+        assertEquals(listOf(0f, 1f, 1f, 0f), us(right.x, right.y))
+        assertEquals(listOf(1f, 0f, 0f, 1f), us(-right.x, -right.y))
+    }
+
+    @Test
     fun `lighting puts the sun where the 2D style said it was`() {
         // The house style lights from the upper left of the screen, which on
         // the ground is the west.

@@ -194,6 +194,7 @@ class SceneRasterizer(
         val texture = if (layer >= 0f) textures.textureAt(layer.toInt()) else null
         val writesDepth = kind == MaterialKind.OPAQUE || kind == MaterialKind.CUTOUT
         val p = FloatArray(Vertex.STRIDE)
+        val detile = FloatArray(4)
 
         for (py in minY..maxY) {
             for (px in minX..maxX) {
@@ -228,9 +229,19 @@ class SceneRasterizer(
                     val texel = sample(texture, p[Vertex.U], p[Vertex.V], clampEdges = kind == MaterialKind.CUTOUT)
                     val alpha = ((texel ushr 24) and 0xFF) / 255f
                     if (kind == MaterialKind.CUTOUT && alpha < 0.5f) continue
-                    ar *= ((texel shr 16) and 0xFF) / 255f
-                    ag *= ((texel shr 8) and 0xFF) / 255f
-                    ab *= (texel and 0xFF) / 255f
+                    var tr = ((texel shr 16) and 0xFF) / 255f
+                    var tg = ((texel shr 8) and 0xFF) / 255f
+                    var tb = (texel and 0xFF) / 255f
+                    if (kind == MaterialKind.OPAQUE) {
+                        // Tiles repeat; break the period. See ShadingModel.detile.
+                        ShadingModel.detile(p[Vertex.U], p[Vertex.V], p[Vertex.PX], p[Vertex.PX + 1], p[Vertex.PX + 2], detile)
+                        val other = sample(texture, detile[0], detile[1], clampEdges = false)
+                        val w = detile[2]
+                        tr = (tr + ((((other shr 16) and 0xFF) / 255f) - tr) * w) * detile[3]
+                        tg = (tg + ((((other shr 8) and 0xFF) / 255f) - tg) * w) * detile[3]
+                        tb = (tb + (((other and 0xFF) / 255f) - tb) * w) * detile[3]
+                    }
+                    ar *= tr; ag *= tg; ab *= tb
                 }
 
                 var nx = p[Vertex.NX]; var ny = p[Vertex.NX + 1]; var nz = p[Vertex.NX + 2]

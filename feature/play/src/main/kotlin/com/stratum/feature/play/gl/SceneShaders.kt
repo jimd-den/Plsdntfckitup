@@ -62,6 +62,8 @@ internal object SceneShaders {
         uniform bool uCutout;
         uniform vec3 uEye;
         uniform vec3 uSun;
+        uniform vec3 uFill;
+        uniform float uFillStrength;
         uniform vec3 uSunColor;
         uniform vec3 uSky;
         uniform vec3 uGround;
@@ -107,6 +109,27 @@ internal object SceneShaders {
 
         float untone(float v) { return -log(1.0 - clamp(v, 0.0, 0.999)) / (uExposure * TONE_GAIN); }
 
+        // Port of ShadingModel.detile / valueNoise.
+        float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vnoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = p - i;
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            float a = hash21(i);
+            float b = hash21(i + vec2(1.0, 0.0));
+            float c = hash21(i + vec2(0.0, 1.0));
+            float d = hash21(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+        }
+        vec3 detiled(vec3 first, vec2 uv, vec3 world) {
+            vec2 uv2 = mat2(0.8253356, 0.5646425, -0.5646425, 0.8253356) * uv * 0.71 + vec2(0.37, 0.19);
+            vec2 p = vec2(world.x + world.z * 0.7, world.y - world.z * 0.7);
+            float w = smoothstep(0.35, 0.65, vnoise(p / 6.0));
+            float tint = 0.88 + 0.24 * vnoise(p / 13.0 + vec2(17.0, 5.0));
+            vec3 second = texture(uTextures, vec3(uv2, vLayer)).rgb;
+            return mix(first, second, w) * tint;
+        }
+
         void main() {
             if (uCutout && vAo < 0.999 && vAo <= dither(gl_FragCoord.xy)) discard;
             vec3 albedo = vColor;
@@ -114,7 +137,7 @@ internal object SceneShaders {
                 vec2 uv = uCutout ? clamp(vUv, 0.0, 1.0) : vUv;
                 vec4 texel = texture(uTextures, vec3(uv, vLayer));
                 if (uCutout && texel.a < 0.5) discard;
-                albedo *= texel.rgb;
+                albedo *= uCutout ? texel.rgb : detiled(texel.rgb, uv, vWorld);
             }
             vec3 n = normalize(vNormal);
             vec3 toEye = uEye - vWorld;
@@ -127,6 +150,8 @@ internal object SceneShaders {
             float ndl = max(0.0, dot(n, uSun));
             float lit = ndl > 0.0 ? sunlit(ndl) : 0.0;
             light += uSunColor * ndl * (1.0 - uShadowStrength * (1.0 - lit));
+            // Fill light from the camera's side; see ShadingModel.
+            light += uSunColor * max(0.0, dot(n, uFill)) * uFillStrength;
             for (int i = 0; i < 8; i++) {
                 if (i >= uLightCount) break;
                 vec3 d = uLightPos[i] - vWorld;

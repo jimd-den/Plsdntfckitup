@@ -50,6 +50,8 @@ data class Scene3DInput(
     val playerFacingX: Float,
     val playerFacingY: Float,
     val playerAccent: Long?,
+    /** The hero class, which names the player's forged sprite. */
+    val playerClassId: String? = null,
     val playerFlash: Float,
     val enemies: List<EnemyInstance>,
     val groundLoot: List<GroundLoot>,
@@ -67,6 +69,10 @@ data class Scene3DInput(
     val biomeAt: (Int, Int) -> BiomeDefinition?,
     val revision: Int,
     val frame: Int,
+    /** Animated character art, when an actor has any. Null falls back to the stand-in body. */
+    val spriteFor: (com.stratum.feature.play.SpriteKey) -> com.stratum.feature.play.DrawableSprite? = { null },
+    val playerAnimation: com.stratum.core.domain.sprite.AnimationPlayback = com.stratum.core.domain.sprite.AnimationPlayback(),
+    val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
 )
 
 /**
@@ -171,6 +177,21 @@ fun Scene3DView(
                     )
                 },
         ) {
+            // Character art, back to front. Drawn over the lit scene rather
+            // than inside it: a sprite sheet is an animation with a weapon rig
+            // and a mirror, and the 2D canvas already draws all of that
+            // correctly, so the 3D view projects the actor's feet and head
+            // through its camera and hands the same drawing the height.
+            spritesOf(input).sortedBy { it.depth }.forEach { placed ->
+                val feet = ScenePicker.project(camera, placed.x, placed.y, placed.z, this.size.width, this.size.height)
+                    ?: return@forEach
+                val head = ScenePicker.project(camera, placed.x, placed.y, placed.z + SPRITE_WORLD_HEIGHT * placed.scale, this.size.width, this.size.height)
+                    ?: return@forEach
+                with(this) {
+                    drawActorSpriteFor(placed, feet.first, feet.second, (feet.second - head.second).coerceAtLeast(1f))
+                }
+            }
+
             val paint = Paint().apply {
                 isAntiAlias = true
                 textAlign = Paint.Align.CENTER
@@ -195,12 +216,72 @@ fun Scene3DView(
 private fun pick(world: World, camera: SceneCamera, x: Float, y: Float, size: IntSize): BlockPos? =
     ScenePicker.pick(world, camera, x, y, size.width.toFloat(), size.height.toFloat())?.block
 
+/** An actor whose art the overlay draws, with what it needs to draw it. */
+private class PlacedSprite(
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val sprite: com.stratum.feature.play.DrawableSprite,
+    val playback: com.stratum.core.domain.sprite.AnimationPlayback,
+    val facing: com.stratum.core.domain.sprite.SpriteFacing,
+    val flash: Float,
+    val scale: Float,
+) {
+    /** Painter's order for this camera, which looks towards -x, -y: larger x + y is nearer. */
+    val depth: Float get() = x + y
+}
+
+private fun spritesOf(input: Scene3DInput): List<PlacedSprite> = buildList {
+    input.spriteFor(com.stratum.feature.play.SpriteKey.Player)?.let { sprite ->
+        add(
+            PlacedSprite(
+                input.player.x, input.player.y, input.player.z, sprite, input.playerAnimation,
+                com.stratum.core.domain.sprite.SpriteFacing.of(input.playerFacingX.toInt(), input.playerFacingY.toInt()),
+                input.playerFlash, PLAYER_SPRITE_SCALE,
+            ),
+        )
+    }
+    input.enemies.filter { it.isAlive }.forEach { enemy ->
+        val sprite = input.spriteFor(com.stratum.feature.play.SpriteKey.Monster(enemy.definitionId)) ?: return@forEach
+        add(
+            PlacedSprite(
+                enemy.position.x, enemy.position.y, enemy.position.z, sprite,
+                input.animationFor(enemy.instanceId),
+                com.stratum.feature.play.facingOf(enemy.facingX, enemy.facingY),
+                input.flashFor(enemy.instanceId),
+                enemy.rank.spriteScale(),
+            ),
+        )
+    }
+}
+
+private fun com.stratum.core.domain.actor.EnemyRank.spriteScale(): Float = when (this) {
+    com.stratum.core.domain.actor.EnemyRank.MINION -> 1f
+    com.stratum.core.domain.actor.EnemyRank.ELITE -> 1.15f
+    com.stratum.core.domain.actor.EnemyRank.CHAMPION -> 1.3f
+    com.stratum.core.domain.actor.EnemyRank.BOSS -> 1.7f
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawActorSpriteFor(
+    placed: PlacedSprite,
+    x: Float,
+    groundY: Float,
+    height: Float,
+) {
+    with(com.stratum.feature.play.SpriteDrawing) {
+        draw(x, groundY, height, placed.sprite, placed.playback, placed.facing, placed.flash)
+    }
+}
+
 private fun actorsOf(input: Scene3DInput): List<SceneActor> = buildList {
+    val playerArt = input.spriteFor(com.stratum.feature.play.SpriteKey.Player) != null
     add(
         SceneActor(
             input.player.x, input.player.y, input.player.z,
             ActorPresentation("player", ActorRole.PLAYER, accent = input.playerAccent, flash = input.playerFlash),
             input.playerFacingX, input.playerFacingY,
+            spriteKey = input.playerClassId?.let { "actor:$it" },
+            drawnElsewhere = playerArt,
         ),
     )
     input.enemies.filter { it.isAlive }.forEach { enemy ->
@@ -212,6 +293,8 @@ private fun actorsOf(input: Scene3DInput): List<SceneActor> = buildList {
                     flash = input.flashFor(enemy.instanceId), impact = input.impactFor(enemy.instanceId),
                 ),
                 enemy.facingX, enemy.facingY,
+                spriteKey = "actor:${enemy.definitionId}",
+                drawnElsewhere = input.spriteFor(com.stratum.feature.play.SpriteKey.Monster(enemy.definitionId)) != null,
             ),
         )
     }
@@ -220,4 +303,8 @@ private fun actorsOf(input: Scene3DInput): List<SceneActor> = buildList {
 }
 
 private const val BASE_DISTANCE = 34f
+
+/** How tall a character sprite stands, in blocks, before rank scaling. */
+private const val SPRITE_WORLD_HEIGHT = 2.1f
+private const val PLAYER_SPRITE_SCALE = 1.1f
 private const val TEXT_SIZE = 38f
