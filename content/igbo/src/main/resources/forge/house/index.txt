@@ -8,9 +8,16 @@ actor~igbo~marsh_revenant.png
 actor~igbo~ogu_brute.png
 actor~igbo~shadow_leopard.png
 actor~igbo~storm_wisp.png
+detail~igbo~sacred_grove#1.png
+detail~igbo~sacred_grove#2.png
+detail~igbo~sacred_grove#3.png
+detail~igbo~sacred_grove.png
 igbo~granite__side.png
 igbo~grove_turf__side.png
+igbo~grove_turf__top#1.png
+igbo~grove_turf__top#2.png
 igbo~grove_turf__top.png
+igbo~laterite_paving__top.png
 igbo~mud_wall__side.png
 igbo~mud_wall__top.png
 igbo~plank_wall__side.png
@@ -18,6 +25,10 @@ igbo~plank_wall__top.png
 igbo~red_earth__side.png
 igbo~red_earth__top.png
 prop~igbo~bronze_brazier.png
+prop~igbo~iroko_canopy#1.png
+prop~igbo~iroko_canopy#2.png
 prop~igbo~iroko_canopy.png
+prop~igbo~palm_reed#1.png
+prop~igbo~palm_reed#2.png
 prop~igbo~palm_reed.png
 prop~igbo~storm_crystal.png
