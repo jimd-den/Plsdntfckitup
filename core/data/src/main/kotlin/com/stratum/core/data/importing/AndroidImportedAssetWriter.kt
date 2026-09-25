@@ -28,25 +28,22 @@ class AndroidImportedAssetWriter(
     /** Nearest-neighbour: every pixel is copied, none is blended. */
     private val crisp = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
 
+    /** One source image in memory at a time: every tile cut from it, then it is freed. */
     override fun writeTextures(packId: String, source: ImportSource, textures: List<ImportedTexture>) {
         val folder = store.textureDirectory(packId).apply { mkdirs() }
-        withImages(source, textures.map { it.region }) { image ->
-            textures.forEach { texture ->
-                val bitmap = image(texture.region.imagePath) ?: return@forEach
-                val scale = ImportedArtLayout.upscaleFactor(texture.region.width, texture.region.height)
-                val tile = draw(texture.region.width * scale, texture.region.height * scale) { canvas ->
-                    canvas.drawBitmap(bitmap, texture.region.toRect(), Rect(0, 0, canvas.width, canvas.height), crisp)
-                }
-                File(folder, TextureKeys.fileNameFor(texture.key)).writeBytes(tile.toPng())
-                tile.recycle()
+        textures.groupBy { it.region.imagePath }.forEach { (path, fromImage) ->
+            withImages(source) { image ->
+                val bitmap = image(path) ?: return@withImages
+                fromImage.forEach { texture -> File(folder, TextureKeys.fileNameFor(texture.key)).writeBytes(tile(bitmap, texture.region)) }
             }
         }
     }
 
+    /** One sheet's images in memory at a time. */
     override fun writeSpriteSheets(packId: String, source: ImportSource, sheets: List<ImportedSpriteSheet>) {
-        withImages(source, sheets.flatMap { it.frames }) { image ->
-            sheets.forEach { imported ->
-                val composed = compose(imported, image) ?: return@forEach
+        sheets.forEach { imported ->
+            withImages(source) { image ->
+                val composed = compose(imported, image)
                 sprites.save(imported.sheet, composed.toPng())
                 composed.recycle()
             }
@@ -54,8 +51,17 @@ class AndroidImportedAssetWriter(
         sprites.refresh()
     }
 
+    /** A tile scaled up by a whole number with no smoothing, as PNG bytes. */
+    private fun tile(bitmap: Bitmap, region: ImageRegion): ByteArray {
+        val scale = ImportedArtLayout.upscaleFactor(region.width, region.height)
+        val tile = draw(region.width * scale, region.height * scale) { canvas ->
+            canvas.drawBitmap(bitmap, region.toRect(), Rect(0, 0, canvas.width, canvas.height), crisp)
+        }
+        return tile.toPng().also { tile.recycle() }
+    }
+
     /** One grid image, each frame at the bottom centre of its cell. */
-    private fun compose(imported: ImportedSpriteSheet, image: (String) -> Bitmap?): Bitmap? {
+    private fun compose(imported: ImportedSpriteSheet, image: (String) -> Bitmap?): Bitmap {
         val sheet = imported.sheet
         return draw(sheet.columns * sheet.frameWidth, sheet.rows * sheet.frameHeight) { canvas ->
             imported.frames.forEachIndexed { index, region ->
@@ -68,16 +74,12 @@ class AndroidImportedAssetWriter(
         }
     }
 
-    /** Decodes each image file at most once for a whole batch, and frees them all after. */
-    private fun withImages(source: ImportSource, regions: List<ImageRegion>, block: ((String) -> Bitmap?) -> Unit) {
+    /** Decodes each image at most once inside [block], and frees them all after it. */
+    private fun withImages(source: ImportSource, block: ((String) -> Bitmap?) -> Unit) {
         val decoded = HashMap<String, Bitmap?>()
         val options = BitmapFactory.Options().apply { inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888 }
-        val image = { path: String ->
-            decoded.getOrPut(path) { source.read(path)?.let { BitmapFactory.decodeByteArray(it, 0, it.size, options) } }
-        }
-        regions.map { it.imagePath }.distinct().forEach { image(it) }
         try {
-            block(image)
+            block { path -> decoded.getOrPut(path) { source.read(path)?.let { BitmapFactory.decodeByteArray(it, 0, it.size, options) } } }
         } finally {
             decoded.values.forEach { it?.recycle() }
         }

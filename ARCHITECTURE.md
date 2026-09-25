@@ -26,6 +26,14 @@ wrapped in an ARPG shell, where the content is data rather than code.
                                                                 │
                                      :engine:scene ◄────────────┘
                                    (3D: -> :core:domain only)
+
+  Importers, beside the engine rather than in it:
+
+    :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
+          ▲                                        ▲
+        :app (registers them)          :core:data (keeps archives)
+                                                   ▲
+                                   :feature:library (-> :core:domain only)
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -40,11 +48,15 @@ Room, OkHttp or Compose exist.
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
 | `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
 | `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
+| `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
+| `:importer:flame` | Pure Kotlin | Flame games: their Tiled levels, and characters from Aseprite, TexturePacker and Dart. |
 | `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
 | `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
 | `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
 | `:feature:forge` | Android library | AI pack generation and its preview. |
+| `:feature:library` | Android library | Importing a game from a `.zip`, and the list of what has been imported. |
 | `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
 | `:legacy:data` | Android library | The original engine's Room and network layer. |
 | `:feature:studio` | Android library | The original creator studio screens. |
@@ -53,7 +65,8 @@ Room, OkHttp or Compose exist.
 ## How the boundary is enforced
 
 Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
-`:content:igbo`, `:tools:artpreview` and `:legacy:domain` apply only the Kotlin
+`:content:igbo`, the three `:importer:*` modules, `:tools:artpreview` and
+`:legacy:domain` apply only the Kotlin
 JVM plugin, so the Android SDK is not on
 their compile classpath and `import android.*` fails to compile.
 
@@ -126,6 +139,74 @@ terrain they control.
 An unknown generator id is an error rather than a silent fallback. A pack asking
 for something this build does not have should say so, not quietly hand the
 player a different world.
+
+## Importing Flame games and Tiled maps
+
+A player can bring in a level and its characters from another engine: a
+`.zip` of a Flame game, or of plain Tiled maps. What comes out is an ordinary
+`ContentPack` -- blocks, one region, the maps, sprite sheets and a playable
+hero -- so an imported game goes through the same assembly, validation,
+generation and rendering as the built-in pack, and is layered over it the
+same way. Whatever the import does not bring, such as monsters or weapons,
+comes from the packs underneath.
+
+**Ports in the domain, formats beside it.** `:core:domain` defines what an
+import is: an `ImportSource` (a read-only tree of files), a `ProjectImporter`,
+an `ImporterRegistry` that asks each importer in turn, and `ImportProjectUseCase`.
+Importers never decode an image. They describe art as `ImageRegion`s -- this
+rectangle of that file -- and an `ImportedAssetWriter` on each platform cuts
+it: Android crops bitmaps into app storage, the JVM tool writes PNGs. That is
+what lets the formats be pure Kotlin and tested without a bitmap.
+
+**A level is a stack, and the importer decides the heights.** Tiled has no
+depth: a floor, a hedge and a roof are three layers drawn in order.
+`TileMap` holds layers at an elevation and thickness, and `LayerRoles` decides
+them -- from the layer's own `elevation`, `thickness` and `solid` properties
+first, then from the names Flame RPGs conventionally use. The bottom layer is
+the floor; `walls` stand two blocks high; decoration becomes scenery drawn as
+standing sprites, the way the engine draws its own; anything that draws
+*over* the player in 2D is left out, because in 3D it would bury the camera.
+Collision rectangles on an object layer become a barrier.
+`TileMapTerrainGenerator`, registered as `stratum:tilemap`, builds chunks
+from the stack and walls in the map's edge. The map is centred on its player
+spawn, and enemy markers become fights where the author put them.
+
+**Characters without running Dart.** Aseprite and TexturePacker atlases are
+read directly. Most Flame games cut sheets in code instead, so
+`DartAnimationScanner` reads `SpriteAnimationData.sequenced(...)` and
+`SpriteSheet(...).createAnimation(...)` when their arguments are literals,
+following an image loaded into a variable. An animation built from computed
+values is reported, not guessed. Each character becomes one grid sheet with a
+clip per engine state, matched by the words in its animation names.
+
+**Nothing silent.** Every import returns warnings for what it understood but
+could not honour: a hidden layer, an image layer, a flipped tile, an
+animation it could not read, a map that failed. One bad map is left out and
+named; it does not fail the project.
+
+**Kept as the archive, not as a pack.** The app stores the `.zip` the player
+picked and re-imports it at launch. Importers are deterministic, so the pack
+comes back with the same ids, and there is no second pack format to keep in
+step with every field a pack can have. Only the cut art is stored.
+
+**Checked against real projects.** `./gradlew :tools:artpreview:importPreview`
+imports a project on the JVM, prints what came of it and renders its level.
+Run on Flame's `flame_tiled` example and on Bonfire's example game, it found
+map ids and tileset names that collided across folders, games built on
+Bonfire that were not recognised, and a texture-library bug where every tile
+past the 1024th was read as a ground map. Each has a test now.
+
+## The session is an orchestrator
+
+`WorldSession` owns the player and decides the order things happen in a
+tick. It does not hold the rules. Each concern keeps its own state and rules
+in its own part: `PlayerMotion` (movement, the roll), `MiningProgress`,
+`BuildSession` (tool, ghost preview, commit), `GroundItems` and `LootDrops`,
+`PlayerGear` (equip and sockets, as pure functions over `PlayerState`),
+`ActorAnimator`, and `SessionCues` (every floating number, named for what
+happened). The player is passed through them and handed back, because it is
+the one thing they all touch. Adding a system means adding a part and one
+line to the tick, not another two hundred lines to the session.
 
 ## Why the look is data
 
@@ -835,6 +916,9 @@ configuration: `stratum.jvm`, `stratum.android.library` and
 ./gradlew test                  # every module's unit tests
 ./gradlew architectureCheck     # boundary enforcement
 ./gradlew :app:assembleRelease  # the signed APK CI attaches to each pull request
+
+# Import a Flame game or Tiled project and render its level, no device needed
+./gradlew :tools:artpreview:importPreview --args="path/to/game build/import-preview [map]"
 ```
 
 Release builds are always signed; see `SIGNING.md` for which key and how to
