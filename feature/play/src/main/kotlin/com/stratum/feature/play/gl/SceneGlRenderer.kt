@@ -55,8 +55,9 @@ class SceneGlRenderer(
     private var profile: DeviceProfile = device
     private var lastFrameNanos = 0L
 
-    /** The textures last submitted, kept so a change of tier can size them again. */
+    /** The textures and maps last submitted, kept so a change of tier or a new GL context can upload them again. */
     private var textures: List<Texture> = emptyList()
+    private var maps: List<Texture> = emptyList()
 
     @Volatile private var pending: SceneFrame? = null
     @Volatile private var pendingTextures: List<Texture>? = null
@@ -119,8 +120,9 @@ class SceneGlRenderer(
         textureArray = 0
         settingsStale = true
         staticMeshes.clear()
-        pendingTextures = pendingTextures ?: emptyList()
-        pendingMaps = pendingMaps ?: emptyList()
+        // A new context has none of the old one's objects: queue the last art again.
+        pendingTextures = pendingTextures ?: textures
+        pendingMaps = pendingMaps ?: maps
         mapArray = 0
     }
 
@@ -134,7 +136,7 @@ class SceneGlRenderer(
         if (settingsStale) applySettings()
         pace()
         pendingTextures?.let { textures = it; uploadTextures(it); pendingTextures = null }
-        pendingMaps?.let { uploadMaps(it); pendingMaps = null }
+        pendingMaps?.let { maps = it; uploadMaps(it); pendingMaps = null }
         val frame = pending ?: run {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -157,7 +159,8 @@ class SceneGlRenderer(
         governor = FrameGovernor(settings)
         createShadowMap()
         createSceneTarget()
-        if (textures.isNotEmpty()) uploadTextures(textures)
+        // Queued art is uploaded right after this, at the new size; only re-size what is already up.
+        if (textures.isNotEmpty() && pendingTextures == null) uploadTextures(textures)
         Log.i(TAG, "Rendering at ${settings.tier} on ${profile.gpu.ifEmpty { "an unnamed GPU" }}")
         onSettings(settings)
     }

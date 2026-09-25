@@ -83,3 +83,15 @@ tasks.register<JavaExec>("importPreview") {
   workingDir = rootProject.projectDir
   maxHeapSize = "2g"
 }
+
+/**
+ * Validates a plugin folder and packs it into a .stratum file:
+ *   ./gradlew :tools:artpreview:packPlugin --args="examples/plugins/nri-chronicles build/nri-chronicles.stratum"
+ */
+tasks.register<JavaExec>("packPlugin") {
+  group = "plugins"
+  description = "Checks a plugin folder loads, and packs it into a .stratum file."
+  mainClass.set("com.stratum.tools.artpreview.PackPlugin")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+}

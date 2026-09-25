@@ -56,6 +56,11 @@ object PluginArchive {
         }.toByteArray()
     }
 
+    /** Zips a plugin's files as they are, so an author's own formatting and comments in art filenames survive. */
+    fun zip(files: Map<String, ByteArray>): ByteArray = ByteArrayOutputStream().also { out ->
+        ZipOutputStream(out).use { zip -> files.toSortedMap().forEach { (path, bytes) -> zip.put(path, bytes) } }
+    }.toByteArray()
+
     private fun ZipOutputStream.put(path: String, bytes: ByteArray) {
         putNextEntry(ZipEntry(path))
         write(bytes)

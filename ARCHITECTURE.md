@@ -29,7 +29,7 @@ wrapped in an ARPG shell, where the content is data rather than code.
 
   Importers, beside the engine rather than in it:
 
-    :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
+    :plugins ──► :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
           ▲                                        ▲
         :app (registers them)          :core:data (keeps archives)
                                                    ▲
@@ -51,12 +51,13 @@ Room, OkHttp or Compose exist.
 | `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
 | `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
 | `:importer:flame` | Pure Kotlin | Flame games: their Tiled levels, and characters from Aseprite, TexturePacker and Dart. |
+| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
 | `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
 | `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
 | `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
 | `:feature:forge` | Android library | AI pack generation and its preview. |
-| `:feature:library` | Android library | Importing a game from a `.zip`, and the list of what has been imported. |
+| `:feature:library` | Android library | The Plugins screen: install, order, switch, remove and share plugins. |
 | `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
 | `:legacy:data` | Android library | The original engine's Room and network layer. |
 | `:feature:studio` | Android library | The original creator studio screens. |
@@ -65,7 +66,7 @@ Room, OkHttp or Compose exist.
 ## How the boundary is enforced
 
 Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
-`:content:igbo`, the three `:importer:*` modules, `:tools:artpreview` and
+`:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
 `:legacy:domain` apply only the Kotlin
 JVM plugin, so the Android SDK is not on
 their compile classpath and `import android.*` fails to compile.
@@ -195,6 +196,72 @@ Run on Flame's `flame_tiled` example and on Bonfire's example game, it found
 map ids and tileset names that collided across folders, games built on
 Bonfire that were not recognised, and a texture-library bug where every tile
 past the 1024th was read as a ground map. Each has a test now.
+
+## Plugins and mods
+
+Everything the engine does not ship arrives as a plugin: a `.stratum` zip
+holding `plugin.json` (id, semantic version, author, SPDX license, plugin API
+level, dependencies), `pack.json` (an ordinary content pack) and art. Plugins
+are data, never code: nothing a player installs can run on their phone, and a
+plugin written in a text editor is as capable as one written by the engine's
+authors. The author's guide is [`docs/PLUGINS.md`](docs/PLUGINS.md).
+
+**A public format with its own schema.** `pack.json` is not the domain's
+classes serialised. It is `:plugins`' own schema, mapped both ways, so the
+engine can rename internals without breaking anyone's plugin. Its defaults
+are read from the domain's default values, so they are defined once. The whole
+built-in pack round-trips through it unchanged, which is the test that the
+schema is complete. Mistakes are reported by the field they are in.
+
+**Load order is the player's; the resolver only enforces what must be
+true.** `PluginResolver` keeps the player's order, moves a dependency ahead of
+what needs it, and leaves out -- with a reason shown in the Plugins screen --
+any plugin whose dependency is missing, switched off, the wrong version,
+refused or circular, or that needs a newer plugin API. What it leaves out,
+it leaves out whole, and nothing else stops loading. The built-in pack is
+known to the resolver, so a plugin can depend on it.
+
+**One registry for every format.** `Importers.standard()` tries a Stratum
+plugin, then a Flame game, then Tiled maps. Every import carries a manifest,
+derived from its pack when the project had none, so imported games are
+ordered, switched and removed exactly like plugins.
+
+**Tabletop rules are content.** A pen-and-paper system becomes a plugin
+through `checks`: dice notation (`2d6+3`, `4d6kh3`, `2d20kh1`), an attribute
+and a difficulty, with a `Boon` that changes real combat stats for a while on
+success and a bane on a natural one. `WorldSession.attemptCheck` rolls them
+from the session's seeded dice; running boons feed `playerStats`, which every
+swing reads. `examples/plugins/nri-chronicles` is the legacy tabletop
+rulebook rebuilt this way, and a test keeps it loading.
+
+## Scaling from a bare-bones phone to a flagship
+
+`RenderSettings` is every cost the renderer can trade away, as one value:
+render scale, shadow map size and filter, the high-range target, point
+lights, view and streaming radius, texture budget, litter, motes and target
+frame rate. Four presets, LOW to ULTRA. HIGH is exactly what the game drew
+before tiers existed; LOW is a 2 GB phone with no shadow map, a 60% render
+scale and 30 fps.
+
+- **Choosing.** `DeviceClassifier` picks a starting tier from memory, cores,
+  GL limits and known-weak GPUs, and `fittedTo` removes anything the device
+  cannot do. The player can override it from the Style panel; Auto keeps the
+  device's choice.
+- **Holding the frame rate.** `FrameGovernor` watches the median frame of
+  each window and lowers the render scale when frames run long, giving it back
+  after two calm windows. The median, because one hitch must not make the
+  picture pump.
+- **Not remeshing the world.** Terrain is meshed per chunk
+  (`ChunkMeshCache`) and each chunk's mesh is kept until it or a neighbour
+  changes, so a dug block remeshes nine chunks rather than every chunk in
+  view, and the GPU keeps each chunk's buffer until it changes.
+- **Texture memory.** Tile layers are sized to the tier's budget, and the
+  library refuses a tile rather than overflow into the ground-map range.
+
+The GL side reads the tier's settings; the CPU side (`SceneBuilder`) reads the
+same value for view radius, lights, litter and motes, so the two halves of
+the pipeline agree. The renderer settles the final settings on the GL thread,
+where the GPU's limits can be read, and reports them back.
 
 ## The session is an orchestrator
 
@@ -919,6 +986,9 @@ configuration: `stratum.jvm`, `stratum.android.library` and
 
 # Import a Flame game or Tiled project and render its level, no device needed
 ./gradlew :tools:artpreview:importPreview --args="path/to/game build/import-preview [map]"
+
+# Check a plugin folder loads and pack it into a .stratum file
+./gradlew :tools:artpreview:packPlugin --args="examples/plugins/nri-chronicles build/nri-chronicles.stratum"
 ```
 
 Release builds are always signed; see `SIGNING.md` for which key and how to
