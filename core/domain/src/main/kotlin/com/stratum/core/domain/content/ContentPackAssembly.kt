@@ -10,6 +10,7 @@ import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.BlockType
 import com.stratum.core.domain.world.TerrainContext
@@ -50,6 +51,7 @@ class ContentPackAssembler {
             rarityStyles = merger.merge(ContentPack::rarityStyles, { it.rarity.name }).associateBy(RarityStyle::rarity),
             spriteSheets = merger.merge(ContentPack::spriteSheets, SpriteSheet::id),
             maps = merger.merge(ContentPack::maps, TileMap::id, OverrideKind.MAP),
+            checks = merger.merge(ContentPack::checks, SkillCheck::id),
             overrides = merger.overrides,
         )
         ContentValidation.requireValid(content)
@@ -84,7 +86,7 @@ private class PackMerger(private val packs: List<ContentPack>) {
 internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
-        val problems = worldProblems(content) + combatProblems(content)
+        val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content)
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -104,6 +106,10 @@ internal object ContentValidation {
         map.referencedBlockIds().filterNot(known).map { "map '${map.id}' places unknown block '$it'" } +
             listOfNotNull(map.biomeId).filter { id -> biomes.none { it.id == id } }
                 .map { "map '${map.id}' belongs to unknown biome '$it'" }
+
+    /** Dice that do not parse would fail the first time a player tried the check. */
+    private fun tabletopProblems(content: AssembledContent): List<String> =
+        content.checks.filter { it.parsedDice == null }.map { "check '${it.id}' has dice '${it.dice}' that are not dice notation" }
 
     /**
      * A weapon or monster naming a damage type nobody defined would resolve
@@ -147,6 +153,8 @@ data class AssembledContent(
     val spriteSheets: List<SpriteSheet> = emptyList(),
     /** Hand-authored levels, such as imported Tiled maps. */
     val maps: List<TileMap> = emptyList(),
+    /** Tabletop checks from every loaded pack. */
+    val checks: List<SkillCheck> = emptyList(),
     /** Reported to the player so a pack silently reskinning another is visible. */
     val overrides: List<PackOverride> = emptyList(),
 ) {
@@ -157,6 +165,8 @@ data class AssembledContent(
         heroClasses.firstOrNull { it.id == id } ?: throw ContentPackException("Unknown class '$id'")
 
     fun map(id: String): TileMap? = maps.firstOrNull { it.id == id }
+
+    fun check(id: String): SkillCheck? = checks.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
     fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps)

@@ -13,6 +13,8 @@ import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.tabletop.Tabletop
 import com.stratum.core.domain.world.BiomeSource
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.BlockType
@@ -81,6 +83,7 @@ class WorldSession(
     private val mining = MiningProgress()
     private val building = BuildSession(streamingWorld, interaction, content.registry)
     private val roomScanner = RoomScanner(streamingWorld)
+    private val table = TableState()
 
     /** Stick intent, the dodge roll, collision and gravity. See [PlayerMotion]. */
     private val motion = PlayerMotion(streamingWorld)
@@ -271,6 +274,7 @@ class WorldSession(
             return events
         }
         cues.advance(deltaSeconds)
+        table.advance(deltaSeconds)
         hitFlashes.advance(deltaSeconds)
         animator.advanceHolds(deltaSeconds)
         advanceImpacts(deltaSeconds)
@@ -387,10 +391,35 @@ class WorldSession(
     fun insertOrNull(insertId: String): InsertDefinition? = content.insert(insertId)
 
     /**
-     * The player's stats with their weapon's inserts counted in. Every combat
-     * path reads this, so a rune is never in the tooltip but missing from the swing.
+     * The player's stats with their weapon's inserts and any running boons
+     * counted in. Every combat path reads this, so a rune or a blessing is
+     * never in the tooltip but missing from the swing.
      */
-    val playerStats: CombatStats get() = player.combatStatsWith(::insertOrNull)
+    val playerStats: CombatStats get() = table.applyTo(player.combatStatsWith(::insertOrNull))
+
+    // ---- the table ---------------------------------------------------------
+
+    /** Boons and banes running now, from tabletop checks. */
+    val activeBoons: List<ActiveBoon> get() = table.boons
+
+    /** Seconds before a check can be tried again; 0 when it is ready. */
+    fun checkCooldown(checkId: String): Float = table.cooldownOf(checkId)
+
+    /**
+     * Rolls a tabletop check with the hero's attributes and level, from the
+     * session's own dice, so a seeded run rolls the same. Success grants the
+     * check's boon; a natural one inflicts its bane.
+     */
+    fun attemptCheck(checkId: String): CheckAttempt {
+        val check = content.check(checkId) ?: return CheckAttempt.UnknownCheck
+        if (table.cooldownOf(checkId) > 0f) return CheckAttempt.OnCooldown(table.cooldownOf(checkId))
+        if (!player.isAlive) return CheckAttempt.Refused
+        val result = Tabletop.attempt(check, hero, player.level, random)
+        table.startCooldown(checkId, check.cooldownSeconds)
+        result.effect?.let(table::grant)
+        cues.checkRolled(result, player.position)
+        return CheckAttempt.Rolled(result)
+    }
 
     /** Inserts the player is carrying loose, resolved and sorted for display. */
     val heldInserts: List<HeldInsert>
@@ -437,6 +466,7 @@ class WorldSession(
         groundInserts = groundInserts,
         heldInserts = heldInserts,
         skills = skills,
+        activeBoons = activeBoons,
     )
 
     // ---- the steps a tick is made of ----------------------------------------
@@ -610,6 +640,7 @@ class WorldSession(
         hitFlashes.clear()
         impacts.clear()
         animator.clear()
+        table.clear()
     }
 
     /**

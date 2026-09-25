@@ -8,6 +8,8 @@ import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.tabletop.CheckResult
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.WorldPoint
@@ -45,6 +47,8 @@ data class SessionSnapshot(
     val groundInserts: List<GroundInsert> = emptyList(),
     val heldInserts: List<HeldInsert> = emptyList(),
     val skills: List<SkillDefinition> = emptyList(),
+    /** Boons and banes running from tabletop checks. */
+    val activeBoons: List<ActiveBoon> = emptyList(),
 )
 
 /** What a pending build would cost and cover. */
@@ -132,4 +136,14 @@ sealed interface CombatEvent {
     data class LootTaken(val item: ItemInstance, val equipped: Boolean) : CombatEvent
     data class InsertTaken(val insert: InsertDefinition) : CombatEvent
     data object PlayerDied : CombatEvent
+}
+
+/** What trying a tabletop check did. */
+sealed interface CheckAttempt {
+    data class Rolled(val result: CheckResult) : CheckAttempt
+    data class OnCooldown(val secondsLeft: Float) : CheckAttempt
+    data object UnknownCheck : CheckAttempt
+
+    /** The fallen roll no dice. */
+    data object Refused : CheckAttempt
 }

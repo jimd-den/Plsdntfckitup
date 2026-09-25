@@ -65,7 +65,7 @@ internal class CombatTheatre(director: WorldArtDirector) {
             FeedbackKind.DODGED -> CombatMoment.DODGED
             FeedbackKind.HEAL -> CombatMoment.HEAL
             FeedbackKind.KILL -> CombatMoment.KILL
-            FeedbackKind.LEVEL_UP -> CombatMoment.LEVEL_UP
+            FeedbackKind.LEVEL_UP, FeedbackKind.CHECK -> CombatMoment.LEVEL_UP
             FeedbackKind.LOOT -> CombatMoment.LOOT_DROP
         }
         return CombatCue(moment, mark.color, emphasis, onPlayer = mark.kind == FeedbackKind.DAMAGE_TAKEN)

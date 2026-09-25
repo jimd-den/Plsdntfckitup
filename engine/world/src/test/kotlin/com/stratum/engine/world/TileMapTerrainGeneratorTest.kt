@@ -13,6 +13,7 @@ import com.stratum.core.domain.world.WorldConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class TileMapTerrainGeneratorTest {
@@ -134,5 +135,48 @@ class MapEncounterTest {
         val session = session(roomWith(MapMarker(MarkerKind.ENEMY_SPAWN, 1.5f, 1.5f), MapMarker(MarkerKind.ENEMY_SPAWN, 2.5f, 1.5f)))
 
         assertEquals(2, session.enemies.size)
+    }
+}
+
+class TableCheckTest {
+
+    private val blessing = com.stratum.core.domain.tabletop.SkillCheck(
+        id = "test:blessing", name = "Blessing", dice = "1d20+100", difficulty = 10, cooldownSeconds = 30f,
+        boon = com.stratum.core.domain.tabletop.Boon("Blessed", durationSeconds = 5f, attackPowerFraction = 1f),
+    )
+
+    private fun session() = WorldSession(
+        ContentPackAssembler().assemble(listOf(TestContent.pack.copy(checks = listOf(blessing)))),
+        WorldConfig(seed = 5L, simulationRadius = 1),
+    )
+
+    @Test
+    fun `a successful check's boon reaches the stats every swing reads, then wears off`() {
+        val session = session()
+        val before = session.playerStats.attackPower
+
+        val attempt = assertIs<CheckAttempt.Rolled>(session.attemptCheck(blessing.id))
+        assertTrue(attempt.result.outcome.succeeded)
+        assertEquals(before * 2, session.playerStats.attackPower)
+        assertEquals("Blessed", session.snapshot().activeBoons.single().boon.name)
+
+        repeat(60) { session.tick(0.1f) }
+        assertEquals(before, session.playerStats.attackPower)
+    }
+
+    @Test
+    fun `a check cannot be tried again until it cools down`() {
+        val session = session()
+        session.attemptCheck(blessing.id)
+
+        assertIs<CheckAttempt.OnCooldown>(session.attemptCheck(blessing.id))
+        assertIs<CheckAttempt.UnknownCheck>(session.attemptCheck("test:nothing"))
+    }
+
+    @Test
+    fun `a pack whose check dice do not parse is rejected at load`() {
+        assertFailsWith<ContentPackException> {
+            ContentPackAssembler().assemble(listOf(TestContent.pack.copy(checks = listOf(blessing.copy(dice = "lots")))))
+        }
     }
 }

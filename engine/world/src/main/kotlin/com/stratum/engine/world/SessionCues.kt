@@ -1,5 +1,7 @@
 package com.stratum.engine.world
 
+import com.stratum.core.domain.tabletop.CheckOutcome
+import com.stratum.core.domain.tabletop.CheckResult
 import com.stratum.core.domain.world.WorldPoint
 
 /**
@@ -49,6 +51,18 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
 
     fun insertSlotted(name: String, at: WorldPoint, color: Long?) =
         log.add(FeedbackKind.LOOT, name, at, color ?: BUILT, emphasis = 1.2f, lifetime = 1.2f)
+
+    /** The roll, read out the way a table would, coloured by how it went. */
+    fun checkRolled(result: CheckResult, at: WorldPoint) {
+        val (color, emphasis) = when (result.outcome) {
+            CheckOutcome.CRITICAL_SUCCESS -> LEVEL to 1.8f
+            CheckOutcome.SUCCESS -> HEAL to 1.3f
+            CheckOutcome.FAILURE -> BLOCKED to 1f
+            CheckOutcome.CRITICAL_FAILURE -> HURT to 1.5f
+        }
+        val verdict = result.outcome.name.lowercase().replace('_', ' ').replaceFirstChar(Char::uppercaseChar)
+        log.add(FeedbackKind.CHECK, "${result.check.name}: $verdict (${result.summary})", at, color, emphasis, lifetime = 2.2f)
+    }
 
     fun built(count: Int, at: WorldPoint) = log.add(FeedbackKind.LOOT, "Built $count", at, BUILT)
 

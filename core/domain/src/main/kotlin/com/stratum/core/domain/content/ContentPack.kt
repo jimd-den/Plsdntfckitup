@@ -11,6 +11,7 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.world.BlockType
 
@@ -57,6 +58,11 @@ data class ContentPack(
      * [TerrainRecipe.TILE_MAP] plays on one of these instead of generated ground.
      */
     val maps: List<TileMap> = emptyList(),
+    /**
+     * Tabletop checks: dice against a difficulty, paid out as boons in the
+     * fight. How a plugin brings a pen-and-paper system into the game.
+     */
+    val checks: List<SkillCheck> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 
