@@ -54,11 +54,21 @@ class SceneFrame(
     val lights: List<PointLight>,
     /** Sun's view-projection, for the shadow map. */
     val shadowViewProjection: FloatArray,
-    val opaque: List<MeshBatch>,
+    /**
+     * Terrain, one batch per chunk. Each batch is the same object from frame
+     * to frame until its chunk changes, so a backend can keep it on the GPU
+     * and upload only what is new.
+     */
+    val terrain: List<MeshBatch>,
+    /** Stand-in bodies for actors with no art of their own; rebuilt every frame. */
+    val actors: MeshBatch?,
     val cutout: MeshBatch,
     val decals: MeshBatch,
     val glows: MeshBatch,
 ) {
+    /** Everything opaque: the terrain, then the actors. */
+    val opaque: List<MeshBatch> get() = terrain + listOfNotNull(actors)
+
     companion object {
         const val MAX_LIGHTS = 8
     }
@@ -79,10 +89,18 @@ class SceneBuilder(
     private val scene: SceneArtDirector = director as? SceneArtDirector
         ?: error("${director::class.simpleName} cannot describe a 3D scene"),
 ) {
-    private val mesher = TerrainMesher(scene, textures, biomeAt)
+    private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
 
-    private var cachedKey: Long = Long.MIN_VALUE
-    private var cachedTerrain: TerrainMesher.Result? = null
+    /** The chunks' meshes, props, lights and litter gathered into lists, redone only when a chunk changes. */
+    private class Terrain(
+        val meshes: List<MeshBatch>,
+        val props: List<PropInstance>,
+        val lights: List<PointLight>,
+        val details: List<GroundDetail>,
+    )
+
+    private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
+    private var terrainGeneration = Long.MIN_VALUE
 
     private val cutout = MeshBuilder(MaterialKind.CUTOUT)
     private val decals = MeshBuilder(MaterialKind.DECAL)
@@ -98,8 +116,11 @@ class SceneBuilder(
 
     /** Forgets the cached terrain, e.g. after the textures or the director change. */
     fun invalidate() {
-        cachedKey = Long.MIN_VALUE
+        chunks.invalidate()
     }
+
+    /** Chunks meshed while building the last frame, for profiling. */
+    val chunksMeshedLastFrame: Int get() = chunks.meshedLastCall
 
     fun build(
         world: World,
@@ -119,19 +140,12 @@ class SceneBuilder(
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
-        // Terrain is cached per region-quantised position and revision: moving
-        // a few blocks does not remesh, walking into new ground does.
-        val regionX = Math.floorDiv(cx, REGION_STEP)
-        val regionY = Math.floorDiv(cy, REGION_STEP)
-        val key = (regionX.toLong() shl 40) xor (regionY.toLong() shl 20) xor worldRevision.toLong()
-        val terrain = cachedTerrain.takeIf { key == cachedKey } ?: mesher.mesh(
-            world,
-            regionX * REGION_STEP - radius, regionX * REGION_STEP + radius,
-            regionY * REGION_STEP - radius, regionY * REGION_STEP + radius,
-        ).also {
-            cachedTerrain = it
-            cachedKey = key
-        }
+        // The view is centred on a region-quantised position, so walking a few
+        // blocks keeps the same chunks in view; within it, only chunks that
+        // changed are meshed again.
+        val terrain = terrainAround(
+            world, Math.floorDiv(cx, REGION_STEP) * REGION_STEP, Math.floorDiv(cy, REGION_STEP) * REGION_STEP, radius, worldRevision,
+        )
 
         val biome = biomeAt(cx, cy)
         val styled = scene.lightingFor(biome?.id, time)
@@ -205,11 +219,26 @@ class SceneBuilder(
             lighting = lighting,
             lights = nearest,
             shadowViewProjection = shadowMatrix(camera.target, lighting),
-            opaque = listOfNotNull(terrain.mesh, actorMesh.takeUnless { it.isEmpty }?.build()),
+            terrain = terrain.meshes,
+            actors = actorMesh.takeUnless { it.isEmpty }?.build(),
             cutout = cutout.build(),
             decals = decals.build(),
             glows = glows.build(),
         )
+    }
+
+    private fun terrainAround(world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int): Terrain {
+        val results = chunks.around(world, centreX, centreY, radius, worldRevision)
+        if (chunks.generation != terrainGeneration) {
+            terrain = Terrain(
+                meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() },
+                props = results.flatMap { it.props },
+                lights = results.flatMap { it.lights },
+                details = results.flatMap { it.details },
+            )
+            terrainGeneration = chunks.generation
+        }
+        return terrain
     }
 
     /**

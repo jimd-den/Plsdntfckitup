@@ -29,8 +29,9 @@ import javax.microedition.khronos.opengles.GL10
  * a lit wall from clipping to a flat white disc.
  *
  * Frames arrive from the UI thread through [submit]; this class never touches
- * the world. Terrain buffers are cached by the identity of their [MeshBatch],
- * which the scene builder reuses until the world changes.
+ * the world. Terrain buffers are cached per chunk by the identity of their
+ * [MeshBatch], which the scene builder reuses until that chunk changes, so an
+ * edit uploads one chunk rather than the whole view.
  */
 class SceneGlRenderer : GLSurfaceView.Renderer {
 
@@ -116,7 +117,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         matrix(shadowProgram, "uShadowViewProj", frame.shadowViewProjection)
         bindTextures(shadowProgram)
         GLES30.glUniform1i(loc(shadowProgram, "uCutout"), 0)
-        frame.opaque.forEach { draw(it, static = it === frame.opaque.first()) }
+        drawOpaque(frame)
         // Sprites do not cast into the shadow map: a camera-facing card seen
         // from the sun casts a sliver or a slab. They lay their own silhouette
         // on the ground as a decal instead (Vertex.SPRITE_SHADOW).
@@ -180,7 +181,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         GLES30.glUniform1i(loc(lit, "uShadowMap"), 1)
 
         GLES30.glUniform1i(loc(lit, "uCutout"), 0)
-        frame.opaque.forEach { draw(it, static = it === frame.opaque.first()) }
+        drawOpaque(frame)
         GLES30.glUniform1i(loc(lit, "uCutout"), 1)
         draw(frame.cutout, static = false)
 
@@ -223,6 +224,12 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         var count = 0
     }
 
+    /** Terrain from the chunk buffers already on the GPU; actor bodies streamed fresh. */
+    private fun drawOpaque(frame: SceneFrame) {
+        frame.terrain.forEach { draw(it, static = true) }
+        frame.actors?.let { draw(it, static = false) }
+    }
+
     private fun draw(batch: MeshBatch, static: Boolean) {
         if (batch.indices.isEmpty()) return
         val mesh = if (static) staticMeshes.getOrPut(batch) { GpuMesh().also { upload(it, batch, GLES30.GL_STATIC_DRAW) } }
@@ -262,10 +269,11 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         GLES30.glVertexAttribPointer(index, size, GLES30.GL_FLOAT, false, stride, offsetFloats * 4)
     }
 
-    /** Terrain batches from earlier world revisions are freed once they stop being drawn. */
+    /** Chunk batches that were remeshed or left the view are freed once they stop being drawn. */
     private fun releaseStale(frame: SceneFrame) {
-        val live = frame.opaque.firstOrNull()
-        val stale = staticMeshes.keys.filter { it !== live }
+        if (staticMeshes.size == frame.terrain.size && frame.terrain.all(staticMeshes::containsKey)) return
+        val live = java.util.Collections.newSetFromMap(IdentityHashMap<MeshBatch, Boolean>()).apply { addAll(frame.terrain) }
+        val stale = staticMeshes.keys.filterNot(live::contains)
         stale.forEach { key ->
             staticMeshes.remove(key)?.let { mesh ->
                 GLES30.glDeleteVertexArrays(1, intArrayOf(mesh.vao), 0)

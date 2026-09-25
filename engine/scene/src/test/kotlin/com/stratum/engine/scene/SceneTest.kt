@@ -17,6 +17,7 @@ import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -171,7 +172,7 @@ class SceneTest {
                 SceneActor(7f, 5f, 4f, ActorPresentation("e", ActorRole.ENEMY, com.stratum.core.domain.actor.EnemyRank.ELITE)),
             ),
         )
-        assertEquals(2, frame.opaque.size, "terrain plus actor bodies")
+        assertNotNull(frame.actors, "actor bodies")
         // Two shadows and one ring.
         assertEquals(3, frame.decals.triangleCount / 2)
     }
@@ -196,7 +197,7 @@ class SceneTest {
             SceneCamera(Vec3(5f, 5f, 4f)),
             actors = listOf(SceneActor(5f, 5f, 4f, ActorPresentation("p", ActorRole.PLAYER), drawnElsewhere = true)),
         )
-        assertEquals(1, frame.opaque.size, "only terrain: no body under the sprite")
+        assertNull(frame.actors, "only terrain: no body under the sprite")
         assertEquals(1, frame.decals.triangleCount / 2, "the contact shadow stays")
     }
 
@@ -209,7 +210,7 @@ class SceneTest {
                 FlatWorld(), camera,
                 actors = listOf(SceneActor(5f, 5f, 4f, ActorPresentation("p", ActorRole.PLAYER), facingX, facingY, spriteKey = "actor:hero")),
             )
-            assertEquals(1, frame.opaque.size, "a sprite replaces the stand-in body")
+            assertNull(frame.actors, "a sprite replaces the stand-in body")
             return (0 until 4).map { frame.cutout.vertices[it * Vertex.STRIDE + Vertex.U] }
         }
         // Screen-right and screen-left on this camera are the two diagonals.
