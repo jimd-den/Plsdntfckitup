@@ -4,6 +4,7 @@ import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.Progression
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.item.InsertDefinition
+import com.stratum.core.domain.stats.LootFind
 import com.stratum.core.domain.world.WorldPoint
 import kotlin.random.Random
 
@@ -57,11 +58,11 @@ internal class LootDrops(
     private val roller: LootRoller,
     private val seaLevel: Int,
 ) {
-    fun gearFor(enemy: EnemyInstance, playerLevel: Int, random: Random): GroundLoot? {
+    fun gearFor(enemy: EnemyInstance, playerLevel: Int, random: Random, find: LootFind = LootFind.NONE): GroundLoot? {
         val definition = content.enemies.firstOrNull { it.id == enemy.definitionId }
-        val chance = BASE_DROP_CHANCE + (definition?.bonusDropChance ?: 0f) + enemy.rank.extraAffixChance
+        val chance = find.dropChance(BASE_DROP_CHANCE + (definition?.bonusDropChance ?: 0f) + enemy.rank.extraAffixChance)
         if (random.nextFloat() > chance) return null
-        val item = roller.roll(itemLevelFor(enemy, playerLevel), random, rarityBonus = enemy.rank.extraAffixChance) ?: return null
+        val item = roller.roll(itemLevelFor(enemy, playerLevel), random, rarityBonus = find.rarityBonus(enemy.rank.extraAffixChance)) ?: return null
         return GroundLoot(item, enemy.position)
     }
 

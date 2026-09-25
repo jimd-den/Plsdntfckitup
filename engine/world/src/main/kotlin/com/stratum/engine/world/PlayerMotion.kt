@@ -100,7 +100,7 @@ class PlayerMotion(private val world: World) {
      * movement bug in an isometric game, because the player cannot see the wall
      * they are caught on.
      */
-    fun advance(player: PlayerState, deltaSeconds: Float): PlayerState {
+    fun advance(player: PlayerState, deltaSeconds: Float, walkSpeed: Float = WALK_SPEED): PlayerState {
         rollCooldown = (rollCooldown - deltaSeconds).coerceAtLeast(0f)
         invulnerableFor = (invulnerableFor - deltaSeconds).coerceAtLeast(0f)
 
@@ -109,7 +109,7 @@ class PlayerMotion(private val world: World) {
             rollRemaining = (rollRemaining - deltaSeconds).coerceAtLeast(0f)
             velocity = WorldPoint(rollDirection.x * ROLL_SPEED, rollDirection.y * ROLL_SPEED, 0f)
         } else if (input != WorldPoint.ZERO) {
-            velocity = WorldPoint(input.x * WALK_SPEED, input.y * WALK_SPEED, 0f)
+            velocity = WorldPoint(input.x * walkSpeed, input.y * walkSpeed, 0f)
         } else {
             return settled(player)
         }

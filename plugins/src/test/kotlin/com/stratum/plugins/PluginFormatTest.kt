@@ -8,6 +8,8 @@ import com.stratum.core.domain.map.MapMarker
 import com.stratum.core.domain.map.MarkerKind
 import com.stratum.core.domain.map.TileLayer
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.passive.PassiveKind
+import com.stratum.core.domain.passive.PassiveTreeGenerator
 import com.stratum.core.domain.plugin.PluginDependency
 import com.stratum.core.domain.plugin.PluginManifest
 import com.stratum.core.domain.plugin.Version
@@ -55,6 +57,38 @@ class PluginFormatTest {
         assertEquals(null, layer.blockIdAt(1, 0))
         assertEquals(2, layer.thickness)
         assertEquals("demo:rat", decoded.maps.single().markers.single().refId)
+    }
+
+    @Test
+    fun `a whole passive tree survives the trip, and a hand-drawn one reads plainly`() {
+        val tree = PassiveTreeGenerator.generate(IgboContentPack.pack.heroClasses)
+        val pack = IgboContentPack.pack.copy(passiveTrees = listOf(tree))
+
+        assertEquals(tree, PackJson.decode(PackJson.encode(pack)).passiveTrees.single())
+
+        val drawn = PackJson.decode(
+            """
+            {
+              "id": "nri", "name": "Nri",
+              "passiveTrees": [{
+                "id": "nri:paths", "name": "Paths of Nri",
+                "nodes": [
+                  { "id": "nri:gate", "name": "Gate", "kind": "start" },
+                  { "id": "nri:ofo", "name": "Ofo", "kind": "keystone",
+                    "modifiers": [{ "stat": "damage", "kind": "more", "value": 0.3 }, { "stat": "resistance", "kind": "flat", "value": -0.2, "damageType": "nri:spirit" }] }
+                ],
+                "links": [["nri:gate", "nri:ofo"]]
+              }]
+            }
+            """.trimIndent(),
+        ).passiveTrees.single()
+
+        assertEquals(PassiveKind.KEYSTONE, drawn.node("nri:ofo")!!.kind)
+        assertEquals(listOf("30% more damage", "-20% resistance to spirit"), drawn.node("nri:ofo")!!.modifiers.map { it.describe() })
+        assertEquals(setOf("nri:ofo"), drawn.neighboursOf("nri:gate"))
+        assertFailsWith<ImportException> {
+            PackJson.decode("""{ "id": "x", "name": "x", "passiveTrees": [{ "id": "t", "name": "t", "nodes": [{ "id": "a", "name": "a", "modifiers": [{ "stat": "luck", "value": 1 }] }] }] }""")
+        }
     }
 
     /** What a person writes by hand: only what differs from the defaults. */

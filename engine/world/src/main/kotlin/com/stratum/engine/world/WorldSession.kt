@@ -11,8 +11,13 @@ import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.passive.PassiveBuild
+import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.stats.Stat
+import com.stratum.core.domain.stats.lootFind
+import com.stratum.core.domain.stats.tune
 import com.stratum.core.domain.tabletop.ActiveBoon
 import com.stratum.core.domain.tabletop.Tabletop
 import com.stratum.core.domain.world.BiomeSource
@@ -84,6 +89,8 @@ class WorldSession(
     private val building = BuildSession(streamingWorld, interaction, content.registry)
     private val roomScanner = RoomScanner(streamingWorld)
     private val table = TableState()
+    private val passiveProgress = PassiveProgress(content.passiveTree)
+    private val damageTypeIds = content.damageTypes.map { it.id }
 
     /** Stick intent, the dodge roll, collision and gravity. See [PlayerMotion]. */
     private val motion = PlayerMotion(streamingWorld)
@@ -126,7 +133,7 @@ class WorldSession(
         streamingWorld.focusOn(SPAWN_CHUNK)
         val spawn = findSpawn()
         player = hero?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
-        player = armed(player).let { it.copy(health = it.maxHealthWithGear) }
+        player = passiveProgress.settle(armed(player)).let { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
         placeMarkedEncounters()
     }
 
@@ -153,8 +160,11 @@ class WorldSession(
     val currentBiome: BiomeDefinition
         get() = biomeSource?.biomeAt(player.blockPos.x, player.blockPos.y) ?: content.biomes.firstOrNull() ?: UNCHARTED
 
-    /** Skills the class has, resolved against the loaded packs. */
-    val skills: List<SkillDefinition> get() = player.skillIds.mapNotNull(content::skill)
+    /** Skills the class has, resolved against the loaded packs and tuned by the build. */
+    val skills: List<SkillDefinition> get() = player.skillIds.mapNotNull(::skillOrNull)
+
+    /** A skill as this character casts it, with the build's damage, cost, cooldown and area applied. */
+    fun skillOrNull(skillId: String): SkillDefinition? = content.skill(skillId)?.let(player.build::tune)
 
     // ---- movement --------------------------------------------------------
 
@@ -280,7 +290,7 @@ class WorldSession(
         advanceImpacts(deltaSeconds)
         // Movement first: a roll should be able to carry the player out of
         // reach before the monsters around them take their swing.
-        player = motion.advance(player, deltaSeconds)
+        player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * player.build.multiplier(Stat.MOVE_SPEED))
         streamingWorld.focusOn(player.blockPos)
 
         val produced = monstersAct(deltaSeconds) + collectLoot() + collectInserts()
@@ -306,7 +316,7 @@ class WorldSession(
 
     /** Casts one of the class's skills, spending resource and starting its cooldown. */
     fun castSkill(skillId: String): AttackReport {
-        val skill = content.skill(skillId) ?: return AttackReport.UnknownSkill
+        val skill = skillOrNull(skillId) ?: return AttackReport.UnknownSkill
         if (!player.cooldowns.isReady(skillId)) return AttackReport.OnCooldown
         if (player.resource < skill.resourceCost) return AttackReport.NotEnoughResource
 
@@ -357,7 +367,7 @@ class WorldSession(
             attackCooldown = 0f,
             cooldowns = SkillCooldowns(),
         )
-        player = player.copy(health = player.maxHealthWith(::insertOrNull), resource = player.maxResource)
+        player = player.copy(health = player.maxHealthWith(::insertOrNull), resource = player.resourceCeiling)
         forgetTheLastRun()
         // Monsters that had cornered the player do not get to greet them at the
         // spawn point; the director refills the world soon enough.
@@ -395,7 +405,30 @@ class WorldSession(
      * counted in. Every combat path reads this, so a rune or a blessing is
      * never in the tooltip but missing from the swing.
      */
-    val playerStats: CombatStats get() = table.applyTo(player.combatStatsWith(::insertOrNull))
+    val playerStats: CombatStats get() = table.applyTo(player.combatStatsWith(::insertOrNull, damageTypeIds))
+
+    // ---- the passive tree --------------------------------------------------
+
+    /** The tree characters grow on in this world, or null when it has no combat. */
+    val passiveTree: PassiveTree? get() = content.passiveTree
+
+    /** The player's allocation on [passiveTree]. */
+    val passiveBuild: PassiveBuild? get() = passiveProgress.buildFor(player)
+
+    /** Takes a node, and the path to it when it is not adjacent, if the points are there. */
+    fun allocatePassive(nodeId: String): PassiveResult {
+        val (updated, result) = passiveProgress.allocate(player, nodeId)
+        player = updated
+        if (result is PassiveResult.Allocated) cues.passiveTaken(result.nodes.last().name, player.position)
+        return result
+    }
+
+    /** Gives a node back for free, when nothing else taken depends on it. */
+    fun refundPassive(nodeId: String): PassiveResult {
+        val (updated, result) = passiveProgress.refund(player, nodeId)
+        player = updated
+        return result
+    }
 
     // ---- the table ---------------------------------------------------------
 
@@ -551,7 +584,7 @@ class WorldSession(
         slain.forEach { enemy ->
             hitFlashes.forget(enemy.instanceId)
             impacts.forget(enemy.instanceId)
-            drops.gearFor(enemy, player.level, random)?.let(ground::drop)
+            drops.gearFor(enemy, player.level, random, player.build.lootFind)?.let(ground::drop)
             drops.insertFor(enemy, player.level, random)?.let(ground::drop)
         }
         awardExperience(slain.sumOf { it.experience })
@@ -559,12 +592,12 @@ class WorldSession(
 
     private fun awardExperience(amount: Int) {
         if (amount <= 0) return
-        val result = Progression.apply(player.level, player.experience, amount)
+        val result = Progression.apply(player.level, player.experience, (amount * player.build.multiplier(Stat.EXPERIENCE_GAIN)).roundToInt())
         player = player.copy(level = result.level, experience = result.experience)
         if (!result.leveledUp) return
         // A level restores the character, which is what makes pushing one more
         // fight at low health a real decision rather than a mistake.
-        player = player.copy(health = player.maxHealthWithGear, resource = player.maxResource)
+        player = player.copy(health = player.maxHealthWithGear, resource = player.resourceCeiling)
         cues.levelUp(result.level, player.position)
     }
 

@@ -39,6 +39,7 @@ internal data class PackSchema(
     val sheets: List<SheetSchema> = emptyList(),
     val maps: List<MapSchema> = emptyList(),
     val checks: List<CheckSchema> = emptyList(),
+    val passiveTrees: List<PassiveTreeSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -47,7 +48,7 @@ internal data class PackSchema(
         affixes = affixes.map { it.toDomain() }, inserts = inserts.map { it.toDomain() }, terrain = terrain?.toDomain(),
         weapons = weapons.map { it.toDomain() }, enemies = enemies.map { it.toDomain() }, skills = skills.map { it.toDomain() },
         rarityStyles = rarities.map { it.toDomain() }, spriteSheets = sheets.map { it.toDomain() }, maps = maps.map { it.toDomain() },
-        checks = checks.map { it.toDomain() },
+        checks = checks.map { it.toDomain() }, passiveTrees = passiveTrees.map { it.toDomain() },
     )
 
     companion object {
@@ -57,7 +58,7 @@ internal data class PackSchema(
             p.damageTypes.map(DamageTypeSchema::of), p.affixes.map(AffixSchema::of), p.inserts.map(InsertSchema::of),
             p.terrain?.let(TerrainSchema::of), p.weapons.map(WeaponSchema::of), p.enemies.map(EnemySchema::of),
             p.skills.map(SkillSchema::of), p.rarityStyles.map(RaritySchema::of), p.spriteSheets.map(SheetSchema::of),
-            p.maps.map(MapSchema::of), p.checks.map(CheckSchema::of),
+            p.maps.map(MapSchema::of), p.checks.map(CheckSchema::of), p.passiveTrees.map(PassiveTreeSchema::of),
         )
     }
 }

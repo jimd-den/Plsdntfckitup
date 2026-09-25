@@ -6,9 +6,12 @@ import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.HeroClassDefinition
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
+import com.stratum.core.domain.stats.Stat
+import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.Direction
 import com.stratum.core.domain.world.WorldPoint
+import kotlin.math.roundToInt
 
 /**
  * Everything about the player the simulation needs. Immutable: the session
@@ -46,6 +49,15 @@ data class PlayerState(
     val cooldowns: SkillCooldowns = SkillCooldowns(),
     /** Counts down between basic attacks, from the weapon's speed. */
     val attackCooldown: Float = 0f,
+    /** Passive nodes bought with points, not counting the free start. */
+    val passives: Set<String> = emptySet(),
+    /**
+     * Every lasting modifier the character has, resolved: passives today,
+     * anything else that grants modifiers as it arrives. Stored rather than
+     * derived because deriving it needs the tree, and this is read every
+     * frame by everything that asks for a stat.
+     */
+    val build: StatSheet = StatSheet.EMPTY,
 ) {
     val blockPos: BlockPos get() = position.toBlockPos()
 
@@ -61,7 +73,7 @@ data class PlayerState(
      * swapping a weapon cannot leave a stale number behind.
      */
     val combatStats: CombatStats
-        get() = combatStatsWith { null }
+        get() = combatStatsWith({ null })
 
     /**
      * The same numbers, with whatever is slotted into the weapon counted in.
@@ -70,7 +82,10 @@ data class PlayerState(
      * pack stays the single source of truth for what a rune is worth: rebalance
      * a rune and every weapon carrying one rebalances with it.
      */
-    fun combatStatsWith(inserts: (String) -> InsertDefinition?): CombatStats {
+    fun combatStatsWith(inserts: (String) -> InsertDefinition?, damageTypeIds: Collection<String> = emptyList()): CombatStats =
+        build.applyTo(gearedStats(inserts), damageTypeIds)
+
+    private fun gearedStats(inserts: (String) -> InsertDefinition?): CombatStats {
         val levelled = baseStats.copy(
             maxHealth = baseStats.maxHealth + Progression.healthBonusFor(level),
             attackPower = baseStats.attackPower + Progression.attackBonusFor(level),
@@ -92,6 +107,12 @@ data class PlayerState(
     /** Health ceiling including inserts, for the session that can resolve them. */
     fun maxHealthWith(inserts: (String) -> InsertDefinition?): Int =
         combatStatsWith(inserts).maxHealth
+
+    /** The resource pool with the build's modifiers counted in. */
+    val resourceCeiling: Int get() = build.apply(Stat.MAX_RESOURCE, maxResource.toFloat()).roundToInt()
+
+    /** Points earned by levelling and not yet spent on the tree. */
+    val unspentPassivePoints: Int get() = (Progression.passivePointsFor(level) - passives.size).coerceAtLeast(0)
 
     val toolTierWithGear: Int get() = maxOf(toolTier, equippedWeapon?.toolTier ?: 0)
 

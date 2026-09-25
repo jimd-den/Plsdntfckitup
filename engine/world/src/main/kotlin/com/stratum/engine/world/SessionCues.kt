@@ -42,6 +42,9 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
     fun levelUp(level: Int, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, "LEVEL $level", at, LEVEL, emphasis = 1.9f, lifetime = 1.8f)
 
+    fun passiveTaken(name: String, at: WorldPoint) =
+        log.add(FeedbackKind.LEVEL_UP, name, at, LEVEL, emphasis = 1.2f, lifetime = 1.2f)
+
     /** An upgrade that equipped itself is announced louder than one put in the bag. */
     fun itemTaken(name: String, at: WorldPoint, color: Long, equipped: Boolean) =
         log.add(FeedbackKind.LOOT, name, at, color, emphasis = if (equipped) 1.3f else 1f, lifetime = 1.4f)

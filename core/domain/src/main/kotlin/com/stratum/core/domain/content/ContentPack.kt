@@ -11,6 +11,7 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.world.BlockType
@@ -63,6 +64,11 @@ data class ContentPack(
      * fight. How a plugin brings a pen-and-paper system into the game.
      */
     val checks: List<SkillCheck> = emptyList(),
+    /**
+     * Passive skill trees. The last one loaded is the one characters grow
+     * on; a pack with combat but no tree gets a generated one.
+     */
+    val passiveTrees: List<PassiveTree> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

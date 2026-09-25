@@ -75,7 +75,7 @@ data class StatModifier(
  * The one formula for everything, so passives, gear, supports and difficulty
  * all stack the same way and a player can reason about all of them at once.
  */
-class StatSheet(val modifiers: List<StatModifier>) {
+data class StatSheet(val modifiers: List<StatModifier>) {
 
     private val byStat = modifiers.groupBy { it.stat }
 

@@ -10,6 +10,8 @@ import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.passive.PassiveTree
+import com.stratum.core.domain.passive.PassiveTreeGenerator
 import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.BlockType
@@ -53,10 +55,19 @@ class ContentPackAssembler {
             maps = merger.merge(ContentPack::maps, TileMap::id, OverrideKind.MAP),
             checks = merger.merge(ContentPack::checks, SkillCheck::id),
             overrides = merger.overrides,
-        )
+        ).let { it.copy(passiveTree = passiveTreeFor(packs, it)) }
         ContentValidation.requireValid(content)
         return content
     }
+
+    /**
+     * The tree the last pack drew, or a generated one when there is combat
+     * and nobody drew one. Trees are whole designs, so they replace rather
+     * than merge: half of two trees is not a tree.
+     */
+    private fun passiveTreeFor(packs: List<ContentPack>, content: AssembledContent): PassiveTree? =
+        packs.lastOrNull { it.passiveTrees.isNotEmpty() }?.passiveTrees?.last()
+            ?: if (content.hasCombat) PassiveTreeGenerator.generate(content.heroClasses) else null
 }
 
 /**
@@ -86,7 +97,8 @@ private class PackMerger(private val packs: List<ContentPack>) {
 internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
-        val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content)
+        val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content) +
+            content.passiveTree?.problems().orEmpty()
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -157,6 +169,8 @@ data class AssembledContent(
     val checks: List<SkillCheck> = emptyList(),
     /** Reported to the player so a pack silently reskinning another is visible. */
     val overrides: List<PackOverride> = emptyList(),
+    /** What characters spend passive points on; null for a world without combat. */
+    val passiveTree: PassiveTree? = null,
 ) {
     fun biome(id: String): BiomeDefinition =
         biomes.firstOrNull { it.id == id } ?: throw ContentPackException("Unknown biome '$id'")
