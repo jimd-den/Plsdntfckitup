@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.stratum.core.data.save.FileHeroSaveStore
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -152,6 +153,8 @@ fun StratumApp(
     // not regenerate the world under the player.
     var seed by remember { mutableStateOf(System.currentTimeMillis()) }
     val graphics = remember(context) { GraphicsWiring(context) }
+    // Each class keeps its own hero, carried from world to world.
+    val heroes = remember(context) { FileHeroSaveStore(java.io.File(context.filesDir, "heroes")) }
     val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius) }
 
     // The service is started by the run beginning, not by the forge opening:
@@ -341,6 +344,8 @@ fun StratumApp(
                         kitOverlays = plugins.textureDirectories(),
                         quality = graphics.chosen,
                         saveQuality = graphics::choose,
+                        loadHero = { (heroClassId ?: contentWithSprites.heroClasses.firstOrNull()?.id)?.let(heroes::load) },
+                        saveHero = heroes::save,
                     ),
                 )
                 PlayScreenRoute(

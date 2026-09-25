@@ -275,6 +275,46 @@ happened). The player is passed through them and handed back, because it is
 the one thing they all touch. Adding a system means adding a part and one
 line to the tick, not another two hundred lines to the session.
 
+## Progression: one modifier formula for everything
+
+Every lasting change to a character is a `StatModifier` of one of three
+kinds, combined the way Path of Exile teaches players to read them:
+`(base + flat) × (1 + Σ increased) × Π (1 + more)`. `StatSheet` applies them
+to combat stats and answers for everything else a build can change: skill
+damage, cost, cooldown recovery, area, movement, experience, and the
+quantity and rarity of loot. Passives, supports, world tiers and waystone
+mods are all just lists of modifiers, so they stack predictably and a
+tooltip can never disagree with the fight.
+
+- **The passive tree** (`core.domain.passive`) is a graph pack data can
+  describe: small nodes, notables, keystones, and a start per class. A node
+  can be taken only next to one already taken; `PassiveBuild.pathTo` finds
+  the cheapest route, so a phone player taps the notable they want and the
+  path is bought in one go. Refunds are free when nothing depends on the
+  node. A pack with combat and no tree gets `PassiveTreeGenerator`'s: about
+  nine hundred nodes in six themed directions, gated rings, one keystone per
+  theme. Two points a level.
+- **Crafting** (`core.domain.crafting`): currency applies one of the
+  engine's verbs (`imbue`, `reforge`, `ascend`, `temper`, `annul`, `socket`,
+  `scour`) using the same affix pool as drops. Packs name the currency; the
+  verbs stay the same everywhere, so the system is learnable once.
+- **Supports** link to a skill, three at most, and tune only that skill;
+  the session casts `Workbench.tuned(skill)`, the build and the supports
+  resolved together.
+- **World tiers and waystones** (`core.domain.difficulty`): `Difficulty` is a
+  tier plus mods, giving a monster sheet and a reward sheet. Tiers are
+  open-ended; felling a champion at the hardest tier reached opens the next.
+- **Heroes persist** (`HeroSave`): level, passives, gear, pouch, supports,
+  waystones and highest tier go into every new world; the world does not.
+  `FileHeroSaveStore` in `:core:data` writes one JSON file per hero,
+  atomically, and skips a corrupt file rather than failing on it. A saved
+  allocation is pruned against whatever tree is loaded now, so a character
+  survives a plugin update.
+
+Currency, supports and waystones go straight into the pouch when a monster
+dies. Gear still lands on the ground, because choosing gear is a decision
+and picking up a pebble in a crowd, with a thumb, is not.
+
 ## Why the look is data
 
 The renderer used to decide what the world looked like. Ground eight levels

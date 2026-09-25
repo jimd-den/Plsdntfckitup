@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,6 +59,20 @@ fun PlayScreen(
     onOpenMenu: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val heroActions = remember(viewModel) {
+        HeroActions(
+            onClose = viewModel::toggleHero,
+            onSelectTab = viewModel::selectHeroTab,
+            onSelectNode = viewModel::selectPassive,
+            onAllocate = viewModel::allocatePassive,
+            onRefund = viewModel::refundPassive,
+            onSelectSkill = viewModel::selectSkill,
+            onLinkSupport = viewModel::linkSupport,
+            onUnlinkSupport = viewModel::unlinkSupport,
+            onEnterTier = viewModel::enterTier,
+            onOpenWaystone = viewModel::openWaystone,
+        )
+    }
     PlayScreenContent(
         state = state,
         world = viewModel.world,
@@ -93,6 +108,8 @@ fun PlayScreen(
         onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
         onOpenMenu = onOpenMenu,
+        onCraft = viewModel::craft,
+        heroActions = heroActions,
     )
 }
 
@@ -133,6 +150,8 @@ fun PlayScreenContent(
     onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
     onOpenMenu: () -> Unit = {},
+    onCraft: (String) -> Unit = {},
+    heroActions: HeroActions = HeroActions(),
 ) {
     val colors = StratumTheme.colors
 
@@ -246,9 +265,16 @@ fun PlayScreenContent(
                         emphasis = if (state.satchelOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                     )
                     StratumAction(
-                        label = if (state.heldInserts.isEmpty()) "Anvil" else "Anvil ${state.heldInserts.sumOf { it.count }}",
+                        label = (state.heldInserts.sumOf { it.count } + state.heldCurrency.sumOf { it.count }).let { if (it == 0) "Anvil" else "Anvil $it" },
                         onClick = onToggleAnvil,
                         emphasis = if (state.anvilOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
+                    )
+                    // The build lives here: points waiting to be spent are
+                    // announced on the button, so a level-up is never missed.
+                    StratumAction(
+                        label = state.player.unspentPassivePoints.let { if (it > 0) "Hero +$it" else "Hero" },
+                        onClick = heroActions.onClose,
+                        emphasis = if (state.hero.open || state.player.unspentPassivePoints > 0) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                     )
                     // Restyling is a world-level act, not a settings-menu one:
                     // the player changes it while looking at the thing it
@@ -316,7 +342,12 @@ fun PlayScreenContent(
                     onUnslot = onUnslotInsert,
                     onClose = onToggleAnvil,
                     modifier = Modifier.fillMaxSize(),
+                    onCraft = onCraft,
                 )
+            }
+
+            if (state.hero.open && !state.isDead) {
+                HeroOverlay(state = state, actions = heroActions)
             }
 
             if (state.isDead) {

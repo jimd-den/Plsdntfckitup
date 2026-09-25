@@ -128,6 +128,69 @@ difficulty, paid out as boons in the fight. Players roll them from the
   `attackSpeed` are shares (`0.25` is +25%); `armour`, `maxHealth`,
   `critChance` and `lifeSteal` are added.
 
+## Builds and the endgame
+
+A pack with monsters gets a generated passive tree, standard currency,
+support gems and waystone mods for free. A plugin that wants its own writes
+any of them; each kind it defines replaces the standard set of that kind.
+
+**Modifiers** are the unit of all of it, read the way the tooltip says them:
+
+```json
+{ "stat": "damage", "kind": "increased", "value": 0.1 }
+```
+
+`kind` is `flat`, `increased` (the default) or `more`; a negative value is
+"reduced" or "less". `value` is a share for percent stats and for
+increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
+`crit_chance`, `crit_multiplier`, `attack_speed`, `life_steal`, `resistance`
+(add `"damageType"` to scope it), `skill_damage`, `area`,
+`cooldown_recovery`, `resource_cost`, `move_speed`, `max_resource`,
+`experience_gain`, `item_rarity`, `item_quantity`.
+
+**Passive trees** — the last pack with one wins; trees replace, never merge:
+
+```json
+"passiveTrees": [{
+  "id": "yourname:paths", "name": "Paths",
+  "nodes": [
+    { "id": "yourname:gate", "name": "Gate", "kind": "start", "classes": ["yourname:warrior"] },
+    { "id": "yourname:might", "name": "Might", "x": 100,
+      "modifiers": [{ "stat": "damage", "value": 0.08 }] },
+    { "id": "yourname:oath", "name": "Glass Oath", "kind": "keystone", "x": 200,
+      "description": "Hit harder than anything alive, and break like it.",
+      "modifiers": [{ "stat": "damage", "kind": "more", "value": 0.4 },
+                    { "stat": "max_health", "kind": "more", "value": -0.3 }] }
+  ],
+  "links": [["yourname:gate", "yourname:might"], ["yourname:might", "yourname:oath"]]
+}]
+```
+
+`kind` is `start`, `small` (the default), `notable` or `keystone`; `x` and
+`y` only place the node on screen. A start with no `classes` is open to all.
+
+**Currency** names one of the engine's verbs — `imbue`, `reforge`, `ascend`,
+`temper`, `annul`, `socket`, `scour`:
+
+```json
+"currencies": [{ "id": "yourname:cowrie", "name": "Cowrie of Change", "effect": "reforge", "color": "#E0C068", "weight": 120 }]
+```
+
+**Supports** tune the skill they are linked to, and can convert its damage:
+
+```json
+"supports": [{ "id": "yourname:ember", "name": "Ember Soul", "convertsTo": "yourname:fire",
+  "modifiers": [{ "stat": "skill_damage", "kind": "more", "value": 0.2 }] }]
+```
+
+**Waystone mods** make a world harder and pay for it:
+
+```json
+"waystoneMods": [{ "id": "yourname:eclipse", "name": "Eclipse",
+  "monster": [{ "stat": "damage", "kind": "more", "value": 0.3 }],
+  "reward": [{ "stat": "item_rarity", "value": 0.25 }] }]
+```
+
 ## Other formats
 
 Players can also install a Flame game or a folder of Tiled maps directly;

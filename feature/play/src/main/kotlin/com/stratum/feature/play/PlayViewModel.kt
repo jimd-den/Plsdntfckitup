@@ -13,9 +13,12 @@ import com.stratum.core.domain.art.WorldArtDirector
 import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.difficulty.Difficulty
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.tabletop.ActiveBoon
@@ -30,6 +33,10 @@ import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
 import com.stratum.engine.world.CheckAttempt
 import com.stratum.engine.world.CombatEvent
+import com.stratum.engine.world.CraftResult
+import com.stratum.engine.world.Held
+import com.stratum.engine.world.PassiveResult
+import com.stratum.engine.world.SupportResult
 import com.stratum.engine.world.DodgeResult
 import com.stratum.engine.world.EquipResult
 import com.stratum.engine.world.FeedbackMark
@@ -92,6 +99,10 @@ class PlayViewModel(
     quality: QualityTier? = null,
     /** Keeps a new graphics choice for next time. Supplied by the composition root. */
     private val saveQuality: (QualityTier?) -> Unit = {},
+    /** The character carried in from earlier play, or null for a new one. */
+    hero: HeroSave? = null,
+    /** Keeps the character for next time. Called off the main thread except when the screen closes. */
+    private val saveHero: (HeroSave) -> Unit = {},
 ) : ViewModel() {
 
     private val initialQuality = quality
@@ -101,7 +112,11 @@ class PlayViewModel(
      * rather than capturing it, so starting a fresh world cannot leave a lambda
      * pointing at the world the player just left.
      */
-    private var session = WorldSession(content, config, heroClassId)
+    private var session = WorldSession(content, config, heroClassId, hero = hero)
+
+    /** When the hero was last written down, in play seconds, and at what level. */
+    private var savedAtElapsed = 0f
+    private var savedLevel = session.player.level
 
     /**
      * The ingredients each region is drawn from, read out of the loaded packs.
@@ -300,6 +315,7 @@ class PlayViewModel(
                 elapsed += delta
 
                 val events = session.tick(delta)
+                autosave()
                 if (events.isEmpty()) {
                     publish()
                 } else {
@@ -342,18 +358,21 @@ class PlayViewModel(
     }
 
     /**
-     * Throws the world away and starts another, with the same class and a new
-     * seed. Everything the character had goes with it — that is the difference
-     * between this and [revive].
+     * Leaves this world for a new one with a new seed. The hero goes along --
+     * level, tree, gear, pouch -- and the world stays behind: the difference
+     * between this and [revive] is where you stand, not who you are.
      */
-    fun newRun() {
+    fun newRun() = newWorld(session.difficulty)
+
+    private fun newWorld(difficulty: Difficulty) {
         miningJob?.cancel()
         loopJob?.cancel()
-        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId)
+        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
+        persist()
         // The panels belong to the run that just ended; a fresh world opens on
         // the world, not on someone else's bag.
         _state.value = initialState(content)
-        publish(message = "A new world.")
+        publish(message = if (difficulty.isBase) "A new world." else "A new world, tier ${difficulty.tier}.")
         startLoop()
     }
 
@@ -631,8 +650,24 @@ class PlayViewModel(
             skills = snapshot.skills,
             activeBoons = snapshot.activeBoons,
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
+            heldCurrency = session.heldCurrency,
+            hero = heroPanel(),
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
+        )
+    }
+
+    private fun heroPanel(): HeroPanelState {
+        val panel = _state.value.hero
+        if (!panel.open) return panel
+        val build = session.passiveBuild
+        return panel.copy(
+            tree = session.passiveTree,
+            startId = build?.startId,
+            supportsBySkill = session.skills.associate { it.id to session.supportsOn(it.id) },
+            heldSupports = session.heldSupports,
+            tier = session.difficulty.tier,
+            worldMods = session.difficulty.mods,
         )
     }
 
@@ -657,7 +692,119 @@ class PlayViewModel(
         PlaceRejection.ACTOR_IN_THE_WAY -> "You are standing there"
     }
 
+    // ---- the hero ------------------------------------------------------------
+
+    fun toggleHero() {
+        val hero = _state.value.hero
+        _state.value = _state.value.copy(hero = hero.copy(open = !hero.open))
+        publish()
+    }
+
+    fun selectHeroTab(tab: HeroTab) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(tab = tab))
+    }
+
+    /** Selects a node and lights the path to it, so the player sees the cost before paying it. */
+    fun selectPassive(nodeId: String) {
+        val path = session.passiveBuild?.pathTo(nodeId).orEmpty()
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(selectedNode = nodeId, path = path))
+    }
+
+    fun allocatePassive() {
+        val nodeId = _state.value.hero.selectedNode ?: return
+        val message = when (val result = session.allocatePassive(nodeId)) {
+            is PassiveResult.Allocated -> "Took ${result.nodes.last().name}" + if (result.nodes.size > 1) " and ${result.nodes.size - 1} on the way" else ""
+            is PassiveResult.NotEnoughPoints -> "Needs ${result.needed} points; you have ${result.available}"
+            PassiveResult.Unreachable -> "Nothing you hold reaches it"
+            PassiveResult.AlreadyTaken -> "Already yours"
+            else -> null
+        }
+        afterPassiveChange(message)
+    }
+
+    fun refundPassive() {
+        val nodeId = _state.value.hero.selectedNode ?: return
+        val message = when (val result = session.refundPassive(nodeId)) {
+            is PassiveResult.Refunded -> "Gave back ${result.node.name}"
+            PassiveResult.HoldsOthers -> "Other nodes you hold depend on it"
+            else -> null
+        }
+        afterPassiveChange(message)
+    }
+
+    private fun afterPassiveChange(message: String?) {
+        _state.value.hero.selectedNode?.let(::selectPassive)
+        persist()
+        publish(message = message)
+    }
+
+    fun selectSkill(skillId: String) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(selectedSkill = skillId))
+        publish()
+    }
+
+    /** Links a held support to the selected skill, or the first one. */
+    fun linkSupport(supportId: String) {
+        val skillId = _state.value.hero.selectedSkill ?: session.skills.firstOrNull()?.id ?: return
+        publish(message = describe(session.linkSupport(skillId, supportId)))
+        persist()
+    }
+
+    fun unlinkSupport(skillId: String, supportId: String) {
+        publish(message = describe(session.unlinkSupport(skillId, supportId)))
+        persist()
+    }
+
+    private fun describe(result: SupportResult): String = when (result) {
+        is SupportResult.Linked -> "${result.support.name} linked to ${result.skill.name}"
+        is SupportResult.Unlinked -> "${result.support.name} back in the pouch"
+        SupportResult.SkillFull -> "That skill holds ${com.stratum.core.domain.crafting.StandardCrafting.MAX_SUPPORTS_PER_SKILL} supports"
+        SupportResult.AlreadyLinked -> "Already linked there"
+        SupportResult.NoneHeld -> "You hold none of those"
+        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked -> "That does not fit"
+    }
+
+    /** Spends currency on the item the anvil is showing. */
+    fun craft(currencyId: String) {
+        val item = _state.value.anvilItem ?: return
+        val message = when (val result = session.craft(item.instanceId, currencyId)) {
+            is CraftResult.Crafted -> "${result.currency.name}: ${result.after.name}"
+            is CraftResult.NoEffect -> result.reason
+            CraftResult.NoneHeld -> "You hold none of those"
+            CraftResult.NoSuchItem, CraftResult.NoSuchCurrency -> null
+        }
+        persist()
+        publish(message = message)
+    }
+
+    /** Opens a new world at a tier this hero has reached. */
+    fun enterTier(tier: Int) {
+        if (tier !in 0..session.player.highestTier) return publish(message = "Fell a champion at tier ${session.player.highestTier} first")
+        newWorld(Difficulty(tier))
+    }
+
+    /** Spends a waystone on a new world at its tier, with its mods. */
+    fun openWaystone(waystoneId: String) {
+        val waystone = session.takeWaystone(waystoneId) ?: return
+        newWorld(Difficulty.of(waystone))
+    }
+
+    /** Writes the hero down now and then: on a level, and every minute of play. */
+    private fun autosave() {
+        val levelled = session.player.level != savedLevel
+        if (levelled || elapsed - savedAtElapsed > AUTOSAVE_SECONDS) persist()
+    }
+
+    private fun persist() {
+        savedAtElapsed = elapsed
+        savedLevel = session.player.level
+        val save = session.heroSave(savedAt = System.currentTimeMillis())
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { saveHero(save) }
+    }
+
     override fun onCleared() {
+        // Straight away rather than launched: the scope is about to be cancelled.
+        saveHero(session.heroSave(savedAt = System.currentTimeMillis()))
         miningJob?.cancel()
         loopJob?.cancel()
         super.onCleared()
@@ -671,6 +818,7 @@ class PlayViewModel(
         private const val MAX_STEP = 1f / 15f
         private const val MIN_ZOOM = 0.6f
         private const val MAX_ZOOM = 2.2f
+        private const val AUTOSAVE_SECONDS = 60f
 
         fun factory(
             content: AssembledContent,
@@ -682,12 +830,15 @@ class PlayViewModel(
             kitOverlays: List<File> = emptyList(),
             quality: QualityTier? = null,
             saveQuality: (QualityTier?) -> Unit = {},
+            /** Read only when the view model is created, so a recomposition does not touch the disk. */
+            loadHero: () -> HeroSave? = { null },
+            saveHero: (HeroSave) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
-                quality = quality, saveQuality = saveQuality,
+                quality = quality, saveQuality = saveQuality, hero = loadHero(), saveHero = saveHero,
             ) as T
         }
     }
@@ -760,6 +911,10 @@ data class PlayUiState(
     val use3D: Boolean = true,
     /** Progress of an art forge in flight, or null when none is running. */
     val forging: String? = null,
+    /** Crafting currency held, for the anvil. */
+    val heldCurrency: List<Held<CurrencyDefinition>> = emptyList(),
+    /** The tree, skills and worlds panel. */
+    val hero: HeroPanelState = HeroPanelState(),
     val message: String? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive
@@ -768,9 +923,9 @@ data class PlayUiState(
 
     fun canAfford(skill: SkillDefinition): Boolean = player.resource >= skill.resourceCost
 
-    /** Everything the player could socket, equipped weapon first. */
+    /** Everything the player could craft on or socket, equipped weapon first. */
     val anvilItems: List<ItemInstance>
-        get() = (listOfNotNull(player.equippedWeapon) + player.bag).filter { it.socketCount > 0 }
+        get() = listOfNotNull(player.equippedWeapon) + player.bag
 
     /**
      * The item the anvil is showing. Falls back rather than showing nothing when

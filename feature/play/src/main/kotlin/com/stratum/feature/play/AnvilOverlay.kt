@@ -35,8 +35,10 @@ import com.stratum.core.designsystem.theme.Cut
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.safeContent
 import com.stratum.core.designsystem.theme.StratumTheme
+import com.stratum.core.domain.crafting.CurrencyDefinition
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
+import com.stratum.engine.world.Held
 import com.stratum.engine.world.HeldInsert
 
 /**
@@ -55,6 +57,7 @@ fun AnvilOverlay(
     onUnslot: (String, Int) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onCraft: (String) -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     val item = state.anvilItem
@@ -88,7 +91,7 @@ fun AnvilOverlay(
             if (item == null) {
                 Spacer(Modifier.height(Space.medium))
                 Text(
-                    text = "Nothing you carry has sockets yet. Better weapons come with them.",
+                    text = "Nothing to work on yet. Pick something up first.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.inkMuted,
                 )
@@ -110,21 +113,34 @@ fun AnvilOverlay(
                 color = colors.inkMuted,
             )
 
-            Spacer(Modifier.height(Space.small))
-            SocketRow(
-                item = item,
-                insertFor = state::insertOrNull,
-                onUnslot = { index -> onUnslot(item.instanceId, index) },
-            )
+            item.affixes.forEach { affix ->
+                Text(text = affix.description, style = MaterialTheme.typography.labelSmall, color = colors.ink)
+            }
 
             Spacer(Modifier.height(Space.medium))
-            SectionLabel("Pouch")
+            SectionLabel("Craft")
             Spacer(Modifier.height(Space.small))
-            PouchRow(
-                held = state.heldInserts,
-                canSlot = item.hasFreeSocket,
-                onSlot = { insertId -> onSlot(item.instanceId, insertId) },
-            )
+            CurrencyRow(held = state.heldCurrency, onCraft = onCraft)
+
+            if (item.socketCount > 0) {
+                Spacer(Modifier.height(Space.medium))
+                SectionLabel("Sockets")
+                Spacer(Modifier.height(Space.small))
+                SocketRow(
+                    item = item,
+                    insertFor = state::insertOrNull,
+                    onUnslot = { index -> onUnslot(item.instanceId, index) },
+                )
+
+                Spacer(Modifier.height(Space.medium))
+                SectionLabel("Pouch")
+                Spacer(Modifier.height(Space.small))
+                PouchRow(
+                    held = state.heldInserts,
+                    canSlot = item.hasFreeSocket,
+                    onSlot = { insertId -> onSlot(item.instanceId, insertId) },
+                )
+            }
         }
     }
 }
@@ -194,6 +210,37 @@ private fun SocketRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = if (insert == null) colors.inkMuted else colors.ink,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Crafting currency held, each saying what it does. One tap spends one on
+ * the item above; one that would do nothing to it is refused and kept.
+ */
+@Composable
+private fun CurrencyRow(held: List<Held<CurrencyDefinition>>, onCraft: (String) -> Unit) {
+    val colors = StratumTheme.colors
+    if (held.isEmpty()) {
+        Text(
+            text = "No currency yet. It drops from what you kill, straight into your pouch.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.inkMuted,
+        )
+        return
+    }
+    LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+        items(held, key = { it.definition.id }) { entry ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                StratumChip(
+                    label = "${entry.definition.glyph} ${entry.definition.name} ×${entry.count}",
+                    selected = false,
+                    onClick = { onCraft(entry.definition.id) },
+                    swatch = Color(entry.definition.color),
+                )
+                Spacer(Modifier.height(Space.hair))
+                Text(text = entry.definition.description, style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
             }
         }
     }

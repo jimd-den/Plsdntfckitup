@@ -12,6 +12,7 @@ import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.crafting.CurrencyDefinition
 import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.difficulty.Difficulty
+import com.stratum.core.domain.difficulty.Waystone
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
@@ -466,6 +467,13 @@ class WorldSession(
     }
 
     // ---- the character between worlds ---------------------------------------
+
+    /** Takes a carried waystone out of the pouch to open its world, or null when it is not held. */
+    fun takeWaystone(waystoneId: String): Waystone? {
+        val waystone = player.waystones.firstOrNull { it.id == waystoneId } ?: return null
+        player = player.copy(waystones = player.waystones - waystone)
+        return waystone
+    }
 
     /** The character as it should be kept, to carry into the next world. */
     fun heroSave(id: String = player.heroClassId, savedAt: Long = 0L): HeroSave = HeroSave.of(player, id, savedAt)

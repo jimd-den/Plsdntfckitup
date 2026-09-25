@@ -351,6 +351,49 @@ class StratumScreenshotTest {
     }
 
     @Test
+    fun hero_tree_screen() {
+        val content = GameSetup.assemble()
+        val classId = content.heroClasses.first().id
+        val session = WorldSession(
+            content, WorldConfig(seed = 99L, simulationRadius = 2),
+            hero = com.stratum.core.domain.session.HeroSave(id = classId, heroClassId = classId, level = 30),
+        )
+        val build = session.passiveBuild!!
+        val tree = build.tree
+        // Part of the way toward a notable, with another selected further out:
+        // what the panel has to read clearly is a build in progress.
+        val notables = tree.nodes.filter { it.kind == com.stratum.core.domain.passive.PassiveKind.NOTABLE }
+            .sortedBy { build.pathTo(it.id)?.size ?: Int.MAX_VALUE }
+        session.allocatePassive(notables.first().id)
+        val target = notables[2].id
+
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = PlayUiState(
+                        player = session.player,
+                        camera = session.player.position,
+                        projection = IsometricProjection(zoom = 1f),
+                        palette = content.palette,
+                        biomeName = session.currentBiome.name,
+                        skills = session.skills,
+                        hero = com.stratum.feature.play.HeroPanelState(
+                            open = true,
+                            tree = tree,
+                            startId = build.startId,
+                            selectedNode = target,
+                            path = session.passiveBuild!!.pathTo(target).orEmpty(),
+                        ),
+                    ),
+                    world = session.world,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_tree.png")
+    }
+
+    @Test
     fun anvil_screen() {
         val content = GameSetup.assemble()
         val session = WorldSession(content, WorldConfig(seed = 99L, simulationRadius = 2))
