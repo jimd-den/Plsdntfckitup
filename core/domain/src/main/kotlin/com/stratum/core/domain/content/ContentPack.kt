@@ -10,6 +10,9 @@ import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.crafting.SupportDefinition
+import com.stratum.core.domain.difficulty.WaystoneMod
 import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.tabletop.SkillCheck
@@ -69,6 +72,13 @@ data class ContentPack(
      * on; a pack with combat but no tree gets a generated one.
      */
     val passiveTrees: List<PassiveTree> = emptyList(),
+    /**
+     * Crafting currency, support gems and waystone mods. A pack with combat
+     * that defines none of a kind gets the engine's standard set of it.
+     */
+    val currencies: List<CurrencyDefinition> = emptyList(),
+    val supports: List<SupportDefinition> = emptyList(),
+    val waystoneMods: List<WaystoneMod> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

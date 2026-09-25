@@ -8,6 +8,8 @@ import com.stratum.core.domain.map.MapMarker
 import com.stratum.core.domain.map.MarkerKind
 import com.stratum.core.domain.map.TileLayer
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.crafting.StandardCrafting
+import com.stratum.core.domain.difficulty.WaystoneMods
 import com.stratum.core.domain.passive.PassiveKind
 import com.stratum.core.domain.passive.PassiveTreeGenerator
 import com.stratum.core.domain.plugin.PluginDependency
@@ -89,6 +91,21 @@ class PluginFormatTest {
         assertFailsWith<ImportException> {
             PackJson.decode("""{ "id": "x", "name": "x", "passiveTrees": [{ "id": "t", "name": "t", "nodes": [{ "id": "a", "name": "a", "modifiers": [{ "stat": "luck", "value": 1 }] }] }] }""")
         }
+    }
+
+    @Test
+    fun `the standard crafting set and waystone mods survive the trip`() {
+        val pack = IgboContentPack.pack.copy(
+            currencies = StandardCrafting.currencies,
+            supports = StandardCrafting.supports,
+            waystoneMods = WaystoneMods.standard,
+        )
+
+        val decoded = PackJson.decode(PackJson.encode(pack))
+
+        assertEquals(StandardCrafting.currencies, decoded.currencies)
+        assertEquals(StandardCrafting.supports, decoded.supports)
+        assertEquals(WaystoneMods.standard, decoded.waystoneMods)
     }
 
     /** What a person writes by hand: only what differs from the defaults. */

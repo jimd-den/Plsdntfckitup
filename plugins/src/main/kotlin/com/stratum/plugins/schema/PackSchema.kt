@@ -40,6 +40,9 @@ internal data class PackSchema(
     val maps: List<MapSchema> = emptyList(),
     val checks: List<CheckSchema> = emptyList(),
     val passiveTrees: List<PassiveTreeSchema> = emptyList(),
+    val currencies: List<CurrencySchema> = emptyList(),
+    val supports: List<SupportSchema> = emptyList(),
+    val waystoneMods: List<WaystoneModSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -49,6 +52,7 @@ internal data class PackSchema(
         weapons = weapons.map { it.toDomain() }, enemies = enemies.map { it.toDomain() }, skills = skills.map { it.toDomain() },
         rarityStyles = rarities.map { it.toDomain() }, spriteSheets = sheets.map { it.toDomain() }, maps = maps.map { it.toDomain() },
         checks = checks.map { it.toDomain() }, passiveTrees = passiveTrees.map { it.toDomain() },
+        currencies = currencies.map { it.toDomain() }, supports = supports.map { it.toDomain() }, waystoneMods = waystoneMods.map { it.toDomain() },
     )
 
     companion object {
@@ -59,6 +63,7 @@ internal data class PackSchema(
             p.terrain?.let(TerrainSchema::of), p.weapons.map(WeaponSchema::of), p.enemies.map(EnemySchema::of),
             p.skills.map(SkillSchema::of), p.rarityStyles.map(RaritySchema::of), p.spriteSheets.map(SheetSchema::of),
             p.maps.map(MapSchema::of), p.checks.map(CheckSchema::of), p.passiveTrees.map(PassiveTreeSchema::of),
+            p.currencies.map(CurrencySchema::of), p.supports.map(SupportSchema::of), p.waystoneMods.map(WaystoneModSchema::of),
         )
     }
 }

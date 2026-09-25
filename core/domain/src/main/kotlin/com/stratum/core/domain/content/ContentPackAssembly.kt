@@ -9,6 +9,11 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.sprite.SpriteSheet
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.crafting.StandardCrafting
+import com.stratum.core.domain.crafting.SupportDefinition
+import com.stratum.core.domain.difficulty.WaystoneMod
+import com.stratum.core.domain.difficulty.WaystoneMods
 import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.passive.PassiveTreeGenerator
@@ -54,10 +59,24 @@ class ContentPackAssembler {
             spriteSheets = merger.merge(ContentPack::spriteSheets, SpriteSheet::id),
             maps = merger.merge(ContentPack::maps, TileMap::id, OverrideKind.MAP),
             checks = merger.merge(ContentPack::checks, SkillCheck::id),
+            currencies = merger.merge(ContentPack::currencies, CurrencyDefinition::id),
+            supports = merger.merge(ContentPack::supports, SupportDefinition::id),
+            waystoneMods = merger.merge(ContentPack::waystoneMods, WaystoneMod::id),
             overrides = merger.overrides,
-        ).let { it.copy(passiveTree = passiveTreeFor(packs, it)) }
+        ).let(::withEndgameDefaults)
         ContentValidation.requireValid(content)
         return content
+    }
+
+    /** A world with combat always has a tree, currency, supports and waystones to chase. */
+    private fun withEndgameDefaults(content: AssembledContent): AssembledContent {
+        val withTree = content.copy(passiveTree = passiveTreeFor(content.packs, content))
+        if (!content.hasCombat) return withTree
+        return withTree.copy(
+            currencies = content.currencies.ifEmpty { StandardCrafting.currencies },
+            supports = content.supports.ifEmpty { StandardCrafting.supports },
+            waystoneMods = content.waystoneMods.ifEmpty { WaystoneMods.standard },
+        )
     }
 
     /**
@@ -141,7 +160,9 @@ internal object ContentValidation {
             content.affixes.filter { unknown(it.damageTypeId) }
                 .map { "affix '${it.id}' resists unknown damage type '${it.damageTypeId}'" } +
             content.inserts.filter { unknown(it.damageTypeId) }
-                .map { "insert '${it.id}' names unknown damage type '${it.damageTypeId}'" }
+                .map { "insert '${it.id}' names unknown damage type '${it.damageTypeId}'" } +
+            content.supports.filter { unknown(it.convertsToDamageTypeId) }
+                .map { "support '${it.id}' converts to unknown damage type '${it.convertsToDamageTypeId}'" }
     }
 }
 
@@ -171,6 +192,9 @@ data class AssembledContent(
     val overrides: List<PackOverride> = emptyList(),
     /** What characters spend passive points on; null for a world without combat. */
     val passiveTree: PassiveTree? = null,
+    val currencies: List<CurrencyDefinition> = emptyList(),
+    val supports: List<SupportDefinition> = emptyList(),
+    val waystoneMods: List<WaystoneMod> = emptyList(),
 ) {
     fun biome(id: String): BiomeDefinition =
         biomes.firstOrNull { it.id == id } ?: throw ContentPackException("Unknown biome '$id'")
@@ -181,6 +205,10 @@ data class AssembledContent(
     fun map(id: String): TileMap? = maps.firstOrNull { it.id == id }
 
     fun check(id: String): SkillCheck? = checks.firstOrNull { it.id == id }
+
+    fun currency(id: String): CurrencyDefinition? = currencies.firstOrNull { it.id == id }
+
+    fun support(id: String): SupportDefinition? = supports.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
     fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps)

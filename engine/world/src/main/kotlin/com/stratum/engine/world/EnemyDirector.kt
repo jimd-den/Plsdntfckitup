@@ -5,6 +5,7 @@ import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.actor.EnemyState
 import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.difficulty.Difficulty
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.World
@@ -25,6 +26,8 @@ class EnemyDirector(
     private val world: World,
     private val definitions: List<EnemyDefinition>,
     private val config: DirectorConfig = DirectorConfig(),
+    /** The world tier and waystone mods every monster here is made with. */
+    private val difficulty: Difficulty = Difficulty.BASE,
 ) {
 
     /**
@@ -86,14 +89,14 @@ class EnemyDirector(
         random: Random,
     ): EnemyInstance {
         val rank = rollRank(random)
-        val levelScale = 1f + (playerLevel - 1) * config.scalingPerLevel
+        val levelScale = 1f + (playerLevel + difficulty.monsterLevelBonus - 1) * config.scalingPerLevel
 
         val stats = definition.baseStats.let { base ->
             base.copy(
                 maxHealth = (base.maxHealth * rank.healthMultiplier * levelScale).roundToInt().coerceAtLeast(1),
                 attackPower = (base.attackPower * rank.damageMultiplier * levelScale).roundToInt().coerceAtLeast(1),
             )
-        }
+        }.let(difficulty.monsters::applyTo)
 
         return EnemyInstance(
             instanceId = "enemy_${random.nextLong().toULong().toString(16)}",

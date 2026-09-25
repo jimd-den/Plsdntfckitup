@@ -2,22 +2,27 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyInstance
+import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.actor.Progression
 import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.crafting.SupportDefinition
+import com.stratum.core.domain.difficulty.Difficulty
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.passive.PassiveBuild
 import com.stratum.core.domain.passive.PassiveTree
+import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.lootFind
-import com.stratum.core.domain.stats.tune
+import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.tabletop.ActiveBoon
 import com.stratum.core.domain.tabletop.Tabletop
 import com.stratum.core.domain.world.BiomeSource
@@ -58,6 +63,10 @@ class WorldSession(
      * it in a pack's recipe.
      */
     terrainGenerator: TerrainGenerator? = null,
+    /** How hard this world is: a tier, and a waystone's mods when one opened it. */
+    val difficulty: Difficulty = Difficulty.BASE,
+    /** A character carried in from an earlier world; null starts fresh at level one. */
+    hero: HeroSave? = null,
 ) {
     private val generator: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(content.terrainContext(config))
 
@@ -81,10 +90,11 @@ class WorldSession(
     /** Knockback, so a hit moves the thing it lands on. */
     private val impacts = ImpactField(streamingWorld)
     private val lootRoller = LootRoller(content.weapons, content.affixes, content.inserts)
-    private val drops = LootDrops(content, lootRoller, config.seaLevel)
+    private val drops = LootDrops(content, lootRoller, config.seaLevel, difficulty)
+    private val workbench = Workbench(content, ItemCrafter(lootRoller))
     private val ground = GroundItems()
     private val gear = PlayerGear(::insertOrNull)
-    private val director = EnemyDirector(streamingWorld, content.enemies)
+    private val director = EnemyDirector(streamingWorld, content.enemies, difficulty = difficulty)
     private val mining = MiningProgress()
     private val building = BuildSession(streamingWorld, interaction, content.registry)
     private val roomScanner = RoomScanner(streamingWorld)
@@ -95,7 +105,7 @@ class WorldSession(
     /** Stick intent, the dodge roll, collision and gravity. See [PlayerMotion]. */
     private val motion = PlayerMotion(streamingWorld)
 
-    private val hero = heroClassId
+    private val heroClass = (hero?.heroClassId ?: heroClassId)
         ?.let { id -> content.heroClasses.firstOrNull { it.id == id } }
         ?: content.heroClasses.firstOrNull()
 
@@ -132,8 +142,9 @@ class WorldSession(
     init {
         streamingWorld.focusOn(SPAWN_CHUNK)
         val spawn = findSpawn()
-        player = hero?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
-        player = passiveProgress.settle(armed(player)).let { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
+        player = heroClass?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
+        player = armed(player).let { fresh -> hero?.restoreOnto(fresh) ?: fresh }
+        player = passiveProgress.settle(player).let { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
         placeMarkedEncounters()
     }
 
@@ -164,7 +175,7 @@ class WorldSession(
     val skills: List<SkillDefinition> get() = player.skillIds.mapNotNull(::skillOrNull)
 
     /** A skill as this character casts it, with the build's damage, cost, cooldown and area applied. */
-    fun skillOrNull(skillId: String): SkillDefinition? = content.skill(skillId)?.let(player.build::tune)
+    fun skillOrNull(skillId: String): SkillDefinition? = content.skill(skillId)?.let { workbench.tuned(player, it) }
 
     // ---- movement --------------------------------------------------------
 
@@ -423,6 +434,42 @@ class WorldSession(
         return result
     }
 
+    // ---- crafting and supports ---------------------------------------------
+
+    /** Currency the player holds, in the order the packs list it. */
+    val heldCurrency: List<Held<CurrencyDefinition>> get() = workbench.heldCurrency(player)
+
+    /** Supports the player holds but has not linked. */
+    val heldSupports: List<Held<SupportDefinition>> get() = workbench.heldSupports(player)
+
+    /** Supports linked to one skill, in link order. */
+    fun supportsOn(skillId: String): List<SupportDefinition> = workbench.linkedTo(player, skillId)
+
+    /** Spends one currency on an item the player holds. */
+    fun craft(instanceId: String, currencyId: String): CraftResult {
+        val (updated, result) = workbench.craft(player, instanceId, currencyId, random)
+        player = updated
+        if (result is CraftResult.Crafted) cues.itemTaken(result.after.name, player.position, content.rarityColor(result.after.rarity), equipped = true)
+        return result
+    }
+
+    fun linkSupport(skillId: String, supportId: String): SupportResult {
+        val (updated, result) = workbench.link(player, skillId, supportId)
+        player = updated
+        return result
+    }
+
+    fun unlinkSupport(skillId: String, supportId: String): SupportResult {
+        val (updated, result) = workbench.unlink(player, skillId, supportId)
+        player = updated
+        return result
+    }
+
+    // ---- the character between worlds ---------------------------------------
+
+    /** The character as it should be kept, to carry into the next world. */
+    fun heroSave(id: String = player.heroClassId, savedAt: Long = 0L): HeroSave = HeroSave.of(player, id, savedAt)
+
     /** Gives a node back for free, when nothing else taken depends on it. */
     fun refundPassive(nodeId: String): PassiveResult {
         val (updated, result) = passiveProgress.refund(player, nodeId)
@@ -447,7 +494,7 @@ class WorldSession(
         val check = content.check(checkId) ?: return CheckAttempt.UnknownCheck
         if (table.cooldownOf(checkId) > 0f) return CheckAttempt.OnCooldown(table.cooldownOf(checkId))
         if (!player.isAlive) return CheckAttempt.Refused
-        val result = Tabletop.attempt(check, hero, player.level, random)
+        val result = Tabletop.attempt(check, heroClass, player.level, random)
         table.startCooldown(checkId, check.cooldownSeconds)
         result.effect?.let(table::grant)
         cues.checkRolled(result, player.position)
@@ -584,15 +631,40 @@ class WorldSession(
         slain.forEach { enemy ->
             hitFlashes.forget(enemy.instanceId)
             impacts.forget(enemy.instanceId)
-            drops.gearFor(enemy, player.level, random, player.build.lootFind)?.let(ground::drop)
+            drops.gearFor(enemy, player.level, random, earnings.lootFind)?.let(ground::drop)
             drops.insertFor(enemy, player.level, random)?.let(ground::drop)
+            drops.valuablesFor(enemy, player.level, random, earnings.lootFind).forEach { pocket(it, enemy.position) }
+            if (enemy.rank >= EnemyRank.CHAMPION) conquer(enemy.position)
         }
         awardExperience(slain.sumOf { it.experience })
     }
 
+    /** The build and the world's rewards together: what a kill here pays this character. */
+    private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers
+
+    /** Currency, supports and waystones go straight into the pouch. */
+    private fun pocket(valuable: Valuable, at: WorldPoint) {
+        player = when (valuable) {
+            is Valuable.Currency -> player.withCurrency(valuable.definition.id)
+            is Valuable.Support -> player.withSupport(valuable.definition.id)
+            is Valuable.Key -> player.copy(waystones = player.waystones + valuable.waystone)
+        }
+        cues.valuableTaken(valuable.name, at)
+    }
+
+    /**
+     * A champion or boss falling at the hardest tier this character has
+     * reached opens the next one. The endgame is a ladder with no top rung.
+     */
+    private fun conquer(at: WorldPoint) {
+        if (difficulty.tier < player.highestTier) return
+        player = player.copy(highestTier = difficulty.tier + 1)
+        cues.tierOpened(player.highestTier, at)
+    }
+
     private fun awardExperience(amount: Int) {
         if (amount <= 0) return
-        val result = Progression.apply(player.level, player.experience, (amount * player.build.multiplier(Stat.EXPERIENCE_GAIN)).roundToInt())
+        val result = Progression.apply(player.level, player.experience, (amount * earnings.multiplier(Stat.EXPERIENCE_GAIN)).roundToInt())
         player = player.copy(level = result.level, experience = result.experience)
         if (!result.leveledUp) return
         // A level restores the character, which is what makes pushing one more
@@ -639,7 +711,7 @@ class WorldSession(
      * Common, so the first upgrade is an upgrade.
      */
     private fun armed(player: PlayerState): PlayerState {
-        val base = hero?.startingWeaponId?.let(content::weapon)
+        val base = heroClass?.startingWeaponId?.let(content::weapon)
             ?: content.weapons.minByOrNull { it.minItemLevel }
             ?: return player
         return player.equipping(lootRoller.craft(base, itemLevel = 1, rarity = ItemRarity.COMMON, random = random))

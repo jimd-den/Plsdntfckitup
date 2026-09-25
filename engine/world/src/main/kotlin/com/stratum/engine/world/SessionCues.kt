@@ -42,6 +42,12 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
     fun levelUp(level: Int, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, "LEVEL $level", at, LEVEL, emphasis = 1.9f, lifetime = 1.8f)
 
+    fun valuableTaken(name: String, at: WorldPoint) =
+        log.add(FeedbackKind.LOOT, name, at, VALUABLE, emphasis = 1.05f, lifetime = 1.2f)
+
+    fun tierOpened(tier: Int, at: WorldPoint) =
+        log.add(FeedbackKind.LEVEL_UP, "WORLD TIER $tier OPENED", at, LEVEL, emphasis = 1.9f, lifetime = 2.4f)
+
     fun passiveTaken(name: String, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, name, at, LEVEL, emphasis = 1.2f, lifetime = 1.2f)
 
@@ -77,6 +83,7 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
         const val BLOCKED = 0xFF9A96A8L
         const val HEAL = 0xFF7BC67EL
         const val LEVEL = 0xFFFFC107L
+        const val VALUABLE = 0xFFE0C068L
         const val BUILT = 0xFF8FB8DEL
     }
 }

@@ -4,6 +4,7 @@ import com.stratum.core.domain.actor.Progression
 import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.HeroClassDefinition
+import com.stratum.core.domain.difficulty.Waystone
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.stats.Stat
@@ -58,6 +59,16 @@ data class PlayerState(
      * frame by everything that asks for a stat.
      */
     val build: StatSheet = StatSheet.EMPTY,
+    /** Crafting currency by id. Stacks, like the insert pouch. */
+    val currency: Map<String, Int> = emptyMap(),
+    /** Support gems held but not linked, by id. */
+    val supportBag: Map<String, Int> = emptyMap(),
+    /** Support gems linked to each skill, by skill id, in link order. */
+    val supports: Map<String, List<String>> = emptyMap(),
+    /** Waystones carried, each a harder world waiting to be opened. */
+    val waystones: List<Waystone> = emptyList(),
+    /** The hardest world tier this character has unlocked; 0 is the base game. */
+    val highestTier: Int = 0,
 ) {
     val blockPos: BlockPos get() = position.toBlockPos()
 
@@ -157,6 +168,14 @@ data class PlayerState(
         equippedWeapon?.takeIf { it.instanceId == instanceId }
             ?: bag.firstOrNull { it.instanceId == instanceId }
 
+    fun currencyCount(currencyId: String): Int = currency[currencyId] ?: 0
+
+    fun withCurrency(currencyId: String, amount: Int = 1): PlayerState = copy(currency = currency.adding(currencyId, amount))
+
+    fun supportCount(supportId: String): Int = supportBag[supportId] ?: 0
+
+    fun withSupport(supportId: String, amount: Int = 1): PlayerState = copy(supportBag = supportBag.adding(supportId, amount))
+
     fun insertCount(insertId: String): Int = insertBag[insertId] ?: 0
 
     fun withInsert(insertId: String, amount: Int = 1): PlayerState =
@@ -197,6 +216,12 @@ data class PlayerState(
         if (hotbar.isEmpty()) this else copy(selectedSlot = slot.coerceIn(0, hotbar.lastIndex))
 
     companion object {
+        /** A stack map with [amount] more of [id]; a stack that reaches zero is removed. */
+        fun Map<String, Int>.adding(id: String, amount: Int): Map<String, Int> {
+            val total = (this[id] ?: 0) + amount
+            return if (total <= 0) this - id else this + (id to total)
+        }
+
         fun from(hero: HeroClassDefinition, spawn: WorldPoint): PlayerState = PlayerState(
             heroClassId = hero.id,
             position = spawn,

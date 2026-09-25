@@ -1,5 +1,9 @@
 package com.stratum.plugins.schema
 
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.crafting.CurrencyEffect
+import com.stratum.core.domain.crafting.SupportDefinition
+import com.stratum.core.domain.difficulty.WaystoneMod
 import com.stratum.core.domain.importing.ImportException
 import com.stratum.core.domain.passive.PassiveKind
 import com.stratum.core.domain.passive.PassiveLink
@@ -70,5 +74,71 @@ internal data class PassiveTreeSchema(
 
     companion object {
         fun of(t: PassiveTree) = PassiveTreeSchema(t.id, t.name, t.nodes.map(PassiveNodeSchema::of), t.links.map { listOf(it.from, it.to) })
+    }
+}
+
+private val CURRENCY = CurrencyDefinition(id = "", name = "", effect = CurrencyEffect.REFORGE)
+private val SUPPORT = SupportDefinition(id = "", name = "")
+
+/** Crafting currency: a name and colour for one of the engine's verbs. */
+@Serializable
+internal data class CurrencySchema(
+    val id: String,
+    val name: String,
+    val effect: String,
+    val description: String? = null,
+    val glyph: String = CURRENCY.glyph,
+    val color: String = SchemaValues.color(CURRENCY.color),
+    val weight: Int = CURRENCY.weight,
+    val minItemLevel: Int = CURRENCY.minItemLevel,
+) {
+    fun toDomain(): CurrencyDefinition {
+        val verb = SchemaValues.enum<CurrencyEffect>(effect, "currency '$id' effect")
+        return CurrencyDefinition(id, name, verb, description ?: verb.verb, glyph, SchemaValues.color(color, "currency '$id' color"), weight, minItemLevel)
+    }
+
+    companion object {
+        fun of(c: CurrencyDefinition) = CurrencySchema(
+            c.id, c.name, SchemaValues.name(c.effect), c.description.takeIf { it != c.effect.verb }, c.glyph, SchemaValues.color(c.color), c.weight, c.minItemLevel,
+        )
+    }
+}
+
+@Serializable
+internal data class SupportSchema(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val modifiers: List<ModifierSchema> = emptyList(),
+    val convertsTo: String? = null,
+    val glyph: String = SUPPORT.glyph,
+    val color: String = SchemaValues.color(SUPPORT.color),
+    val weight: Int = SUPPORT.weight,
+    val minItemLevel: Int = SUPPORT.minItemLevel,
+) {
+    fun toDomain() = SupportDefinition(
+        id, name, description, modifiers.map { it.toDomain("support '$id'") }, convertsTo, glyph,
+        SchemaValues.color(color, "support '$id' color"), weight, minItemLevel,
+    )
+
+    companion object {
+        fun of(s: SupportDefinition) = SupportSchema(
+            s.id, s.name, s.description, s.modifiers.map(ModifierSchema::of), s.convertsToDamageTypeId, s.glyph, SchemaValues.color(s.color), s.weight, s.minItemLevel,
+        )
+    }
+}
+
+/** A waystone mod: what it does to monsters, and what it pays. */
+@Serializable
+internal data class WaystoneModSchema(
+    val id: String,
+    val name: String,
+    val monster: List<ModifierSchema> = emptyList(),
+    val reward: List<ModifierSchema> = emptyList(),
+) {
+    fun toDomain() = WaystoneMod(id, name, monster.map { it.toDomain("waystone mod '$id'") }, reward.map { it.toDomain("waystone mod '$id'") })
+
+    companion object {
+        fun of(m: WaystoneMod) = WaystoneModSchema(m.id, m.name, m.monster.map(ModifierSchema::of), m.reward.map(ModifierSchema::of))
     }
 }
