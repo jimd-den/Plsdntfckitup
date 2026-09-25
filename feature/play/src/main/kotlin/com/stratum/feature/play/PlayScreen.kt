@@ -158,6 +158,7 @@ fun PlayScreenContent(
                         buildMode = state.buildMode,
                         director = state.artDirector,
                         kit = state.kit,
+                        kitOverlays = state.kitOverlays,
                         time = state.worldTime,
                         biomeAt = state.biomeAt,
                         revision = state.worldRevision,

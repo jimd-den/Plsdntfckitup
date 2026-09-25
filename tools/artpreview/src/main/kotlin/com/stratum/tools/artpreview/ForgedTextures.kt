@@ -1,5 +1,6 @@
 package com.stratum.tools.artpreview
 
+import com.stratum.core.domain.art.TextureKeys
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureLibrary
 import java.io.File
@@ -15,9 +16,9 @@ import javax.imageio.ImageIO
  */
 object ForgedTextures {
 
-    fun keyFor(file: File): String = file.nameWithoutExtension.replace("__", "/").replace("~", ":")
+    fun keyFor(file: File): String = TextureKeys.keyFor(file.name)
 
-    fun fileNameFor(key: String): String = key.replace(":", "~").replace("/", "__") + ".png"
+    fun fileNameFor(key: String): String = TextureKeys.fileNameFor(key)
 
     fun loadInto(directory: File, library: TextureLibrary): Int {
         if (!directory.isDirectory) return 0

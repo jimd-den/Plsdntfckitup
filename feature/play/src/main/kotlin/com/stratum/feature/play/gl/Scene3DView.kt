@@ -65,6 +65,8 @@ data class Scene3DInput(
     val buildMode: Boolean,
     val director: WorldArtDirector,
     val kit: String,
+    /** Imported packs' texture folders, laid over [kit]. */
+    val kitOverlays: List<java.io.File> = emptyList(),
     val time: WorldTime,
     val biomeAt: (Int, Int) -> BiomeDefinition?,
     val revision: Int,
@@ -101,8 +103,8 @@ fun Scene3DView(
 
     // The kit is decoded off the main thread; until it arrives the world draws
     // in flat colour, which is still the whole world.
-    LaunchedEffect(input.kit) {
-        val loaded = withContext(Dispatchers.IO) { ForgedKits.load(input.kit) }
+    LaunchedEffect(input.kit, input.kitOverlays) {
+        val loaded = withContext(Dispatchers.IO) { ForgedKits.load(input.kit, input.kitOverlays) }
         library = loaded
         renderer.submitTextures(loaded.all, loaded.allMaps)
         surface?.requestRender()

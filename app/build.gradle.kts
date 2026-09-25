@@ -125,6 +125,8 @@ dependencies {
   implementation(project(":feature:play"))
   implementation(project(":feature:forge"))
   implementation(project(":feature:hero"))
+  implementation(project(":feature:library"))
+  implementation(project(":importer:flame"))
   implementation(project(":core:data"))
   implementation(project(":feature:studio"))
 

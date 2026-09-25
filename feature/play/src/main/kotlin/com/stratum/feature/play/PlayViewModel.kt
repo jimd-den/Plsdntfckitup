@@ -3,48 +3,51 @@ package com.stratum.feature.play
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.SkillDefinition
-import com.stratum.core.domain.item.InsertDefinition
-import com.stratum.core.domain.item.ItemInstance
-import com.stratum.core.domain.item.ItemRarity
-import com.stratum.core.domain.session.PlayerState
-import com.stratum.core.domain.world.BlockPos
-import com.stratum.core.domain.world.World
-import com.stratum.core.domain.world.WorldConfig
-import com.stratum.core.domain.world.WorldPoint
-import com.stratum.engine.world.IsometricProjection
-import com.stratum.engine.world.AttackReport
-import com.stratum.engine.world.CombatEvent
-import com.stratum.engine.world.BuildResult
-import com.stratum.engine.world.BuildTool
-import com.stratum.engine.world.DodgeResult
-import com.stratum.core.domain.sprite.AnimationPlayback
-import com.stratum.engine.world.FeedbackMark
-import com.stratum.engine.world.EquipResult
-import com.stratum.engine.world.GroundInsert
-import com.stratum.engine.world.GroundLoot
-import com.stratum.engine.world.HeldInsert
-import com.stratum.engine.world.SocketResult
-import com.stratum.engine.world.MineResult
-import com.stratum.engine.world.PlaceRejection
-import com.stratum.engine.world.PlaceResult
-import com.stratum.engine.world.ReviveResult
 import com.stratum.core.domain.art.ArtDirection
 import com.stratum.core.domain.art.BiomeArtKit
 import com.stratum.core.domain.art.StyleLexicon
 import com.stratum.core.domain.art.StyleSheetArtDirector
 import com.stratum.core.domain.art.WorldArtDirector
 import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.item.InsertDefinition
+import com.stratum.core.domain.item.ItemInstance
+import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.World
+import com.stratum.core.domain.world.WorldConfig
+import com.stratum.core.domain.world.WorldPoint
+import com.stratum.engine.world.AttackReport
+import com.stratum.engine.world.BuildResult
+import com.stratum.engine.world.BuildTool
+import com.stratum.engine.world.CombatEvent
+import com.stratum.engine.world.DodgeResult
+import com.stratum.engine.world.EquipResult
+import com.stratum.engine.world.FeedbackMark
+import com.stratum.engine.world.GroundInsert
+import com.stratum.engine.world.GroundLoot
+import com.stratum.engine.world.HeldInsert
+import com.stratum.engine.world.IsometricProjection
+import com.stratum.engine.world.MineResult
+import com.stratum.engine.world.PlaceRejection
+import com.stratum.engine.world.PlaceResult
+import com.stratum.engine.world.ReviveResult
+import com.stratum.engine.world.SocketResult
 import com.stratum.engine.world.WorldSession
+import com.stratum.feature.play.gl.AndroidImageCodec
+import com.stratum.feature.play.gl.ForgedKits
+import java.io.File
+import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.android.awaitFrame
 
 /**
  * Drives one play session.
@@ -78,7 +81,9 @@ class PlayViewModel(
      */
     private val imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
     /** Where kits forged on this device are kept between runs. */
-    private val kitDirectory: java.io.File? = null,
+    private val kitDirectory: File? = null,
+    /** Texture folders of imported packs, drawn over whichever kit the style picks. */
+    private val kitOverlays: List<File> = emptyList(),
 ) : ViewModel() {
 
     /**
@@ -163,7 +168,7 @@ class PlayViewModel(
             artDirector = artDirector,
             stylePrompt = prompt,
             styleSummary = artDirector.direction.summary,
-            kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
+            kit = ForgedKits.kitFor(artDirector.direction),
         )
     }
 
@@ -181,16 +186,16 @@ class PlayViewModel(
         val root = kitDirectory ?: return publish(message = "No storage for forged art")
         if (_state.value.forging != null) return
         val direction = artDirector.direction
-        val folder = java.io.File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_")).apply { mkdirs() }
+        val folder = File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_")).apply { mkdirs() }
         val biome = session.currentBiome.id
         val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
         val orders = com.stratum.core.domain.art.ForgePlanner.plan(direction, pack, setOf(biome))
-            .filterNot { java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(it.key)).exists() }
+            .filterNot { File(folder, ForgedKits.fileNameFor(it.key)).exists() }
         if (orders.isEmpty()) {
-            _state.value = _state.value.copy(kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath)
+            _state.value = _state.value.copy(kit = ForgedKits.LOCAL + folder.absolutePath)
             return publish(message = "This style is already forged")
         }
-        val forge = com.stratum.engine.scene.forge.AssetForge(model, com.stratum.feature.play.gl.AndroidImageCodec)
+        val forge = com.stratum.engine.scene.forge.AssetForge(model, AndroidImageCodec)
         _state.value = _state.value.copy(forging = "Forging 0/${orders.size}")
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             var done = 0
@@ -198,13 +203,13 @@ class PlayViewModel(
             forge.forge(orders, concurrency = 3) { asset ->
                 done++
                 asset.texture?.let { texture ->
-                    java.io.File(folder, com.stratum.feature.play.gl.ForgedKits.fileNameFor(asset.order.key))
-                        .writeBytes(com.stratum.feature.play.gl.AndroidImageCodec.encodePng(texture))
+                    File(folder, ForgedKits.fileNameFor(asset.order.key))
+                        .writeBytes(AndroidImageCodec.encodePng(texture))
                     made++
                 }
                 _state.value = _state.value.copy(
                     forging = "Forging $done/${orders.size}",
-                    kit = com.stratum.feature.play.gl.ForgedKits.LOCAL + folder.absolutePath,
+                    kit = ForgedKits.LOCAL + folder.absolutePath,
                 )
             }
             // Back on the main thread: publishing reads the session, which the
@@ -378,7 +383,8 @@ class PlayViewModel(
         artDirector = artDirector,
         stylePrompt = stylePrompt,
         styleSummary = artDirector.direction.summary,
-        kit = com.stratum.feature.play.gl.ForgedKits.kitFor(artDirector.direction),
+        kit = ForgedKits.kitFor(artDirector.direction),
+        kitOverlays = kitOverlays,
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
@@ -625,11 +631,14 @@ class PlayViewModel(
             heroClassId: String? = null,
             spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
             imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
-            kitDirectory: java.io.File? = null,
+            kitDirectory: File? = null,
+            kitOverlays: List<File> = emptyList(),
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PlayViewModel(content, config, heroClassId, spriteResolver, imageModel = imageModel, kitDirectory = kitDirectory) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
+                content, config, heroClassId, spriteResolver,
+                imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
+            ) as T
         }
     }
 }
@@ -686,6 +695,8 @@ data class PlayUiState(
     val styleOpen: Boolean = false,
     /** Which forged asset kit the 3D view draws with. */
     val kit: String = "house",
+    /** Imported packs' textures, laid over [kit]. */
+    val kitOverlays: List<File> = emptyList(),
     /** The lit 3D view, or the flat 2D canvas it replaced. */
     val use3D: Boolean = true,
     /** Progress of an art forge in flight, or null when none is running. */

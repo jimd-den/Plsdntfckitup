@@ -46,6 +46,7 @@ include(":engine:scene")
 include(":feature:play")
 include(":feature:forge")
 include(":feature:hero")
+include(":feature:library")
 include(":content:igbo")
 
 // Importers turn other engines' projects -- Flame games, Tiled maps -- into

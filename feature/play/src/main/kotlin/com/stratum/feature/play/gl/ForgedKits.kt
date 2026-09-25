@@ -1,9 +1,12 @@
 package com.stratum.feature.play.gl
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.stratum.core.domain.art.ArtDirection
+import com.stratum.core.domain.art.TextureKeys
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureLibrary
+import java.io.File
 
 /**
  * The asset kits that ship inside content packs, and which one a style uses.
@@ -41,17 +44,22 @@ object ForgedKits {
     /** Prefix naming a kit the player forged on this device, stored in app files. */
     const val LOCAL = "file:"
 
-    /** Decodes a kit into a fresh library, in index order, so layers are stable. */
-    fun load(kit: String): TextureLibrary {
-        if (kit.startsWith(LOCAL)) return loadDirectory(java.io.File(kit.removePrefix(LOCAL)))
+    /**
+     * Decodes a kit into a fresh library, in index order, so layers are stable,
+     * then lays each overlay folder on top -- imported packs' textures, which
+     * name their own blocks and so never collide with the kit's.
+     */
+    fun load(kit: String, overlays: List<File> = emptyList()): TextureLibrary {
+        val library = if (kit.startsWith(LOCAL)) loadDirectory(File(kit.removePrefix(LOCAL))) else loadResources(kit)
+        overlays.forEach { directory -> putFiles(library, directory) }
+        return library
+    }
+
+    private fun loadResources(kit: String): TextureLibrary {
         val library = TextureLibrary()
         val index = loader().getResourceAsStream("forge/$kit/index.txt")?.bufferedReader()?.readLines().orEmpty()
         index.map(String::trim).filter { it.endsWith(".png") }.forEach { name ->
-            val bitmap = loader().getResourceAsStream("forge/$kit/$name")?.use(BitmapFactory::decodeStream) ?: return@forEach
-            val pixels = IntArray(bitmap.width * bitmap.height)
-            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-            library.put(keyFor(name), Texture(bitmap.width, bitmap.height, pixels))
-            bitmap.recycle()
+            loader().getResourceAsStream("forge/$kit/$name")?.use(BitmapFactory::decodeStream)?.let { put(library, name, it) }
         }
         return library
     }
@@ -60,21 +68,24 @@ object ForgedKits {
      * A kit forged on the device: the shipped house kit underneath, and every
      * file the player forged on top, so a partly forged style is still whole.
      */
-    fun loadDirectory(directory: java.io.File): TextureLibrary {
-        val library = load(HOUSE)
+    fun loadDirectory(directory: File): TextureLibrary = loadResources(HOUSE).also { putFiles(it, directory) }
+
+    private fun putFiles(library: TextureLibrary, directory: File) {
         directory.listFiles { f -> f.extension == "png" }.orEmpty().sortedBy { it.name }.forEach { file ->
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@forEach
-            val pixels = IntArray(bitmap.width * bitmap.height)
-            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-            library.put(keyFor(file.name), Texture(bitmap.width, bitmap.height, pixels))
-            bitmap.recycle()
+            BitmapFactory.decodeFile(file.absolutePath)?.let { put(library, file.name, it) }
         }
-        return library
     }
 
-    fun fileNameFor(key: String): String = key.replace(":", "~").replace("/", "__") + ".png"
+    private fun put(library: TextureLibrary, fileName: String, bitmap: Bitmap) {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        library.put(keyFor(fileName), Texture(bitmap.width, bitmap.height, pixels))
+        bitmap.recycle()
+    }
 
-    fun keyFor(fileName: String): String = fileName.removeSuffix(".png").replace("__", "/").replace("~", ":")
+    fun fileNameFor(key: String): String = TextureKeys.fileNameFor(key)
+
+    fun keyFor(fileName: String): String = TextureKeys.keyFor(fileName)
 
     private fun loader(): ClassLoader = ForgedKits::class.java.classLoader!!
 }

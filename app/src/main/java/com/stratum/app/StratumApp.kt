@@ -94,9 +94,11 @@ import com.stratum.feature.play.DrawableWeapon
 import com.stratum.feature.play.SpriteKey
 import com.stratum.feature.play.PlayScreen as PlayScreenRoute
 import com.stratum.feature.play.PlayViewModel
+import com.stratum.feature.library.LibraryScreen
+import com.stratum.feature.library.LibraryViewModel
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO }
+private enum class Destination { HOME, PLAY, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY }
 
 /**
  * The app shell.
@@ -123,14 +125,20 @@ fun StratumApp(
     val classStore = remember(context) { CustomClassStore(context) }
     var classRevision by remember { mutableStateOf(0) }
     val customClasses = remember(classRevision) { classStore.all() }
-    val content = remember(forgedPacks, customClasses) {
+    val ai = remember(context) { AiWiring(context) }
+
+    // Games and maps the player imported. Loaded after the first frame, since
+    // it re-reads every archive; the world assembles again when they arrive.
+    val imports = remember(context, ai) { ImportWiring(context, ai.sprites) }
+    val importedPacks by imports.repository.packs.collectAsStateWithLifecycle()
+    LaunchedEffect(imports) { imports.repository.refresh() }
+
+    val content = remember(forgedPacks, importedPacks, customClasses) {
         GameSetup.assemble(
-            forgedPacks + if (customClasses.isEmpty()) emptyList()
+            importedPacks + forgedPacks + if (customClasses.isEmpty()) emptyList()
             else listOf(CustomClassPack.of(customClasses)),
         )
     }
-
-    val ai = remember(context) { AiWiring(context) }
 
     // Persisted player art choices (hero class, sprite sheet, weapon)
     val initialLoadout = remember(ai) { ai.playerPreferences.load() }
@@ -333,6 +341,17 @@ fun StratumApp(
                 spriteCount = spriteSheets.size,
                 onSettings = { destination = Destination.SETTINGS },
                 onStudio = { destination = Destination.STUDIO },
+                onLibrary = { destination = Destination.LIBRARY },
+                importedCount = importedPacks.size,
+                modifier = modifier,
+            )
+        }
+
+        Destination.LIBRARY -> {
+            val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(imports.repository))
+            LibraryScreen(
+                viewModel = viewModel,
+                onBack = { destination = Destination.HOME },
                 modifier = modifier,
             )
         }
@@ -348,6 +367,7 @@ fun StratumApp(
                         spriteResolver = spriteResolver,
                         imageModel = ai.imageModel,
                         kitDirectory = java.io.File(context.filesDir, "forge"),
+                        kitOverlays = imports.textureDirectories(),
                     ),
                 )
                 PlayScreenRoute(
@@ -740,6 +760,8 @@ private fun HomeScreen(
     spriteCount: Int,
     onSettings: () -> Unit,
     onStudio: () -> Unit,
+    onLibrary: () -> Unit = {},
+    importedCount: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val colors = StratumTheme.colors
@@ -945,6 +967,13 @@ private fun HomeScreen(
             StratumAction(
                 label = if (spriteCount > 0) "Sprite forge ($spriteCount)" else "Sprite forge",
                 onClick = onSprites,
+                emphasis = ActionEmphasis.SECONDARY,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.small))
+            StratumAction(
+                label = if (importedCount > 0) "Import a game ($importedCount)" else "Import a game",
+                onClick = onLibrary,
                 emphasis = ActionEmphasis.SECONDARY,
                 modifier = Modifier.fillMaxWidth(),
             )
