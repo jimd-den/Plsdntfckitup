@@ -148,7 +148,8 @@ fun StratumApp(
     // A new seed per run, but stable across recomposition so walking around does
     // not regenerate the world under the player.
     var seed by remember { mutableStateOf(System.currentTimeMillis()) }
-    val config = remember(seed) { GameSetup.worldConfig(seed) }
+    val graphics = remember(context) { GraphicsWiring(context) }
+    val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius) }
 
     // The service is started by the run beginning, not by the forge opening:
     // it exists to protect work in flight, and one that started with the
@@ -330,6 +331,8 @@ fun StratumApp(
                         imageModel = ai.imageModel,
                         kitDirectory = java.io.File(context.filesDir, "forge"),
                         kitOverlays = imports.textureDirectories(),
+                        quality = graphics.chosen,
+                        saveQuality = graphics::choose,
                     ),
                 )
                 PlayScreenRoute(

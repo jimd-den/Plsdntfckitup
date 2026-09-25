@@ -35,13 +35,14 @@ import com.stratum.core.designsystem.component.StratumPanel
 import com.stratum.core.designsystem.component.StratumProgressSliver
 import com.stratum.core.designsystem.theme.Cut
 import com.stratum.core.designsystem.theme.Space
+import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.designsystem.theme.safeBottomPadding
 import com.stratum.core.designsystem.theme.safeContent
 import com.stratum.core.designsystem.theme.safeTop
-import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.actor.SkillDefinition
-import com.stratum.engine.world.BuildTool
 import com.stratum.core.domain.world.World
+import com.stratum.engine.scene.quality.QualityTier
+import com.stratum.engine.world.BuildTool
 
 /**
  * The play screen: world on top, controls below.
@@ -88,6 +89,7 @@ fun PlayScreen(
         onToggleStyle = viewModel::toggleStyle,
         onToggle3D = viewModel::toggle3D,
         onForgeStyle = viewModel::forgeStyle,
+        onChooseQuality = viewModel::chooseQuality,
         onOpenMenu = onOpenMenu,
     )
 }
@@ -125,6 +127,7 @@ fun PlayScreenContent(
     onToggleStyle: () -> Unit = {},
     onToggle3D: () -> Unit = {},
     onForgeStyle: () -> Unit = {},
+    onChooseQuality: (QualityTier?) -> Unit = {},
     onOpenMenu: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
@@ -159,6 +162,7 @@ fun PlayScreenContent(
                         director = state.artDirector,
                         kit = state.kit,
                         kitOverlays = state.kitOverlays,
+                        quality = state.quality,
                         time = state.worldTime,
                         biomeAt = state.biomeAt,
                         revision = state.worldRevision,
@@ -267,6 +271,7 @@ fun PlayScreenContent(
                     onReroll = onRerollStyle,
                     onClose = onToggleStyle,
                     onForge = onForgeStyle,
+                    onChooseQuality = onChooseQuality,
                 )
             }
 

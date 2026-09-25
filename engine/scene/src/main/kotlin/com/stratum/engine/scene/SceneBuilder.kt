@@ -15,6 +15,8 @@ import com.stratum.core.domain.art.WorldArtDirector
 import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.world.World
+import com.stratum.engine.scene.quality.QualityTier
+import com.stratum.engine.scene.quality.RenderSettings
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -88,6 +90,8 @@ class SceneBuilder(
     private val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
     private val scene: SceneArtDirector = director as? SceneArtDirector
         ?: error("${director::class.simpleName} cannot describe a 3D scene"),
+    /** How much this device can afford: view distance, lights, litter and motes. */
+    private val settings: RenderSettings = RenderSettings.of(QualityTier.HIGH),
 ) {
     private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
 
@@ -129,7 +133,7 @@ class SceneBuilder(
         time: WorldTime = WorldTime(),
         /** Bumped by the engine on every block change; the terrain cache keys on it. */
         worldRevision: Int = 0,
-        radius: Int = DEFAULT_RADIUS,
+        radius: Int = settings.viewRadius,
         /** Cells a pending build or erase covers, shown before it is committed. */
         ghosts: List<com.stratum.core.domain.world.BlockPos> = emptyList(),
         ghostsAffordable: Boolean = true,
@@ -181,7 +185,7 @@ class SceneBuilder(
         val eyeLevel = floor(camera.target.z).toInt()
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
-        terrain.details.forEach(::litter)
+        if (settings.groundLitter) terrain.details.forEach(::litter)
         terrain.props.forEach { prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
         terrain.lights.forEach { light ->
             // A light you can see the source of. Point lights colour the ground;
@@ -199,7 +203,7 @@ class SceneBuilder(
         highlight?.let { cell ->
             decal(cell.x + 0.5f, cell.y + 0.5f, cell.z + 1f, HIGHLIGHT_RADIUS, palette.heroRim, HIGHLIGHT_OPACITY, Vertex.RING)
         }
-        motes(camera, time, biome)
+        if (settings.atmosphereMotes) motes(camera, time, biome)
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
 
@@ -208,11 +212,17 @@ class SceneBuilder(
             ?.let { PointLight(it.x, it.y, it.z + HERO_LIGHT_HEIGHT, lighting.sunColor, lighting.heroLight, lighting.heroLightRadius) }
         // A hit lights the ground around it for a moment — the cheapest way to
         // make an impact feel like it has weight. The brightest few win.
+        // The hero's light first, so a dark style stays playable at every tier;
+        // then the impacts; then the nearest fixed lights, as many as fit.
         val bursts = flashes.sortedByDescending { it.strength }.take(MAX_EFFECT_LIGHTS)
-        val nearest = listOfNotNull(hero) + bursts + terrain.lights
-            .sortedBy { abs(it.x - camera.target.x) + abs(it.y - camera.target.y) }
-            .take(SceneFrame.MAX_LIGHTS - (if (hero != null) 1 else 0) - bursts.size)
-            .map { it.copy(strength = it.strength * lighting.pointLightGain) }
+        val budget = minOf(settings.maxPointLights, SceneFrame.MAX_LIGHTS)
+        val fixedSlots = (budget - (if (hero != null) 1 else 0) - bursts.size).coerceAtLeast(0)
+        val nearest = (
+            listOfNotNull(hero) + bursts + terrain.lights
+                .sortedBy { abs(it.x - camera.target.x) + abs(it.y - camera.target.y) }
+                .take(fixedSlots)
+                .map { it.copy(strength = it.strength * lighting.pointLightGain) }
+            ).take(budget)
 
         return SceneFrame(
             camera = camera,
@@ -742,7 +752,6 @@ class SceneBuilder(
 
     companion object {
         /** Blocks meshed around the camera target in each direction. */
-        const val DEFAULT_RADIUS = 56
         const val REGION_STEP = 6
         const val FOG_FLOOR_DEPTH = 4f
         /** Share of the meshed radius past the focus where fog becomes total. */

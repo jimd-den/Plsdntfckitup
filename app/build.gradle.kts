@@ -123,6 +123,7 @@ dependencies {
   implementation(project(":engine:world"))
   implementation(project(":content:igbo"))
   implementation(project(":feature:play"))
+  implementation(project(":engine:scene"))
   implementation(project(":feature:forge"))
   implementation(project(":feature:hero"))
   implementation(project(":feature:library"))

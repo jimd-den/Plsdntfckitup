@@ -29,6 +29,7 @@ import com.stratum.core.designsystem.component.StratumPanel
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.designsystem.theme.safeContent
+import com.stratum.engine.scene.quality.QualityTier
 
 /**
  * Where the player says what their world should look like.
@@ -48,6 +49,7 @@ fun StyleOverlay(
     onReroll: () -> Unit,
     onClose: () -> Unit,
     onForge: () -> Unit = {},
+    onChooseQuality: (QualityTier?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = StratumTheme.colors
@@ -98,6 +100,9 @@ fun StyleOverlay(
             }
 
             Spacer(Modifier.height(Space.medium))
+            GraphicsChooser(chosen = state.quality, onChoose = onChooseQuality)
+
+            Spacer(Modifier.height(Space.medium))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
                 StratumAction(
                     label = "Apply",
@@ -124,6 +129,26 @@ fun StyleOverlay(
                     emphasis = ActionEmphasis.QUIET,
                 )
             }
+        }
+    }
+}
+
+/**
+ * How hard the renderer works. Auto lets the device decide and keeps
+ * adjusting; a tier is a promise to hold that level, with only resolution
+ * still traded for frame rate.
+ */
+@Composable
+private fun GraphicsChooser(chosen: QualityTier?, onChoose: (QualityTier?) -> Unit) {
+    SectionLabel(text = "Graphics")
+    Spacer(Modifier.height(Space.small))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+        items(listOf<QualityTier?>(null) + QualityTier.entries) { tier ->
+            StratumChip(
+                label = tier?.name?.lowercase()?.replaceFirstChar(Char::uppercaseChar) ?: "Auto",
+                selected = tier == chosen,
+                onClick = { onChoose(tier) },
+            )
         }
     }
 }

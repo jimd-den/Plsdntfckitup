@@ -10,6 +10,11 @@ import com.stratum.engine.scene.ShadingModel
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureBudget
 import com.stratum.engine.scene.Vertex
+import com.stratum.engine.scene.quality.DeviceClassifier
+import com.stratum.engine.scene.quality.DeviceProfile
+import com.stratum.engine.scene.quality.FrameGovernor
+import com.stratum.engine.scene.quality.QualityTier
+import com.stratum.engine.scene.quality.RenderSettings
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -33,7 +38,25 @@ import javax.microedition.khronos.opengles.GL10
  * [MeshBatch], which the scene builder reuses until that chunk changes, so an
  * edit uploads one chunk rather than the whole view.
  */
-class SceneGlRenderer : GLSurfaceView.Renderer {
+class SceneGlRenderer(
+    /** What the OS knows about the device; the GL limits are added once a context exists. */
+    private val device: DeviceProfile,
+    /** The player's choice, or null to let the device decide. */
+    requestedTier: QualityTier? = null,
+    /** Told, on the GL thread, which settings were settled on, so the scene builder can match them. */
+    private val onSettings: (RenderSettings) -> Unit = {},
+) : GLSurfaceView.Renderer {
+
+    @Volatile private var requested: QualityTier? = requestedTier
+    @Volatile private var settingsStale = true
+
+    private var settings: RenderSettings = RenderSettings.of(QualityTier.HIGH)
+    private var governor = FrameGovernor(settings)
+    private var profile: DeviceProfile = device
+    private var lastFrameNanos = 0L
+
+    /** The textures last submitted, kept so a change of tier can size them again. */
+    private var textures: List<Texture> = emptyList()
 
     @Volatile private var pending: SceneFrame? = null
     @Volatile private var pendingTextures: List<Texture>? = null
@@ -41,6 +64,11 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     private var width = 1
     private var height = 1
+
+    /** The scene target's size: the screen's, times the governor's render scale. */
+    private var sceneWidth = 1
+    private var sceneHeight = 1
+    private var shadowSize = 0
 
     private var lit = 0
     private var soft = 0
@@ -66,6 +94,12 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         pending = frame
     }
 
+    /** Switches quality tier; null goes back to the device's own. Takes effect on the next frame. */
+    fun requestTier(tier: QualityTier?) {
+        requested = tier
+        settingsStale = true
+    }
+
     /** Replaces the texture array. Layer order must match the scene's [com.stratum.engine.scene.TextureLibrary]. */
     fun submitTextures(textures: List<Texture>, maps: List<Texture> = emptyList()) {
         pendingTextures = textures
@@ -79,7 +113,11 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         sky = program(SceneShaders.SCREEN_VERTEX, SceneShaders.SKY_FRAGMENT)
         finish = program(SceneShaders.SCREEN_VERTEX, SceneShaders.FINISH_FRAGMENT)
         emptyVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
-        createShadowMap()
+        profile = AndroidDeviceProfiles.withGl(device)
+        shadowFbo = 0
+        sceneFbo = 0
+        textureArray = 0
+        settingsStale = true
         staticMeshes.clear()
         pendingTextures = pendingTextures ?: emptyList()
         pendingMaps = pendingMaps ?: emptyList()
@@ -93,7 +131,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        pendingTextures?.let { uploadTextures(it); pendingTextures = null }
+        if (settingsStale) applySettings()
+        pace()
+        pendingTextures?.let { textures = it; uploadTextures(it); pendingTextures = null }
         pendingMaps?.let { uploadMaps(it); pendingMaps = null }
         val frame = pending ?: run {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -106,9 +146,38 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         finishPass(frame)
     }
 
+    /**
+     * Settles on settings for this device and the player's choice, and builds
+     * every target they size. Runs on the GL thread, where the device's limits
+     * can be read.
+     */
+    private fun applySettings() {
+        settingsStale = false
+        settings = DeviceClassifier.settingsFor(profile, requested)
+        governor = FrameGovernor(settings)
+        createShadowMap()
+        createSceneTarget()
+        if (textures.isNotEmpty()) uploadTextures(textures)
+        Log.i(TAG, "Rendering at ${settings.tier} on ${profile.gpu.ifEmpty { "an unnamed GPU" }}")
+        onSettings(settings)
+    }
+
+    /**
+     * Feeds the governor the time between frames, which includes the GPU's
+     * share because the swap waits on it, and resizes the scene target when it
+     * trades resolution for time.
+     */
+    private fun pace() {
+        val now = System.nanoTime()
+        val millis = if (lastFrameNanos == 0L) 0f else (now - lastFrameNanos) / NANOS_PER_MILLI
+        lastFrameNanos = now
+        if (governor.record(millis)) createSceneTarget()
+    }
+
     private fun shadowPass(frame: SceneFrame) {
+        if (!settings.shadows) return
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, shadowFbo)
-        GLES30.glViewport(0, 0, SHADOW_SIZE, SHADOW_SIZE)
+        GLES30.glViewport(0, 0, shadowSize, shadowSize)
         GLES30.glClear(GLES30.GL_DEPTH_BUFFER_BIT)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_BLEND)
@@ -126,7 +195,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     private fun scenePass(frame: SceneFrame) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, sceneFbo)
-        GLES30.glViewport(0, 0, width, height)
+        GLES30.glViewport(0, 0, sceneWidth, sceneHeight)
         GLES30.glClear(GLES30.GL_DEPTH_BUFFER_BIT or GLES30.GL_COLOR_BUFFER_BIT)
         val l = frame.lighting
 
@@ -161,8 +230,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         GLES30.glUniform1f(loc(lit, "uFogFloor"), l.fogFloor)
         GLES30.glUniform1f(loc(lit, "uShadowStrength"), l.shadowStrength)
         GLES30.glUniform1f(loc(lit, "uExposure"), l.exposure)
-        GLES30.glUniform1f(loc(lit, "uShadowSize"), SHADOW_SIZE.toFloat())
-        val lights = frame.lights.take(SceneFrame.MAX_LIGHTS)
+        GLES30.glUniform1f(loc(lit, "uShadowSize"), shadowSize.coerceAtLeast(1).toFloat())
+        GLES30.glUniform1i(loc(lit, "uShadowTaps"), if (settings.shadows) settings.shadowTaps else 0)
+        val lights = frame.lights.take(minOf(SceneFrame.MAX_LIGHTS, settings.maxPointLights))
         GLES30.glUniform1i(loc(lit, "uLightCount"), lights.size)
         if (lights.isNotEmpty()) {
             val pos = FloatArray(lights.size * 3); val col = FloatArray(lights.size * 3); val rad = FloatArray(lights.size)
@@ -290,13 +360,22 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     // ---- targets and textures ---------------------------------------------
 
+    /** The sun's depth map at the tier's size, or none at all when the tier draws no shadows. */
     private fun createShadowMap() {
+        if (shadowFbo != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(shadowFbo), 0)
+            GLES30.glDeleteTextures(1, intArrayOf(shadowDepth), 0)
+            shadowFbo = 0
+            shadowDepth = 0
+        }
+        shadowSize = settings.shadowMapSize
+        if (!settings.shadows) return
         val ids = IntArray(1)
         GLES30.glGenTextures(1, ids, 0)
         shadowDepth = ids[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowDepth)
         GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_DEPTH_COMPONENT32F, SHADOW_SIZE, SHADOW_SIZE, 0,
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_DEPTH_COMPONENT32F, shadowSize, shadowSize, 0,
             GLES30.GL_DEPTH_COMPONENT, GLES30.GL_FLOAT, null,
         )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
@@ -314,32 +393,36 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
     /**
      * The high-range colour target.
      *
-     * Half-float where the device can render to it, which is nearly all of
-     * them; eight-bit otherwise, which still works and merely loses the
-     * brightest highlights to clipping before the finishing pass sees them.
+     * Half-float where the device can render to it and the tier wants it;
+     * eight-bit otherwise, which still works and merely loses the brightest
+     * highlights to clipping before the finishing pass sees them. Sized by the
+     * governor's render scale, and stretched to the screen by the finishing
+     * pass's linear filter.
      */
     private fun createSceneTarget() {
+        sceneWidth = (width * governor.renderScale).toInt().coerceAtLeast(1)
+        sceneHeight = (height * governor.renderScale).toInt().coerceAtLeast(1)
         if (sceneFbo != 0) {
             GLES30.glDeleteFramebuffers(1, intArrayOf(sceneFbo), 0)
             GLES30.glDeleteTextures(1, intArrayOf(sceneColor), 0)
             GLES30.glDeleteRenderbuffers(1, intArrayOf(sceneDepth), 0)
         }
-        val halfFloat = GLES30.glGetString(GLES30.GL_EXTENSIONS)?.contains("GL_EXT_color_buffer_half_float") == true
+        val halfFloat = settings.highRange
         val ids = IntArray(1)
         GLES30.glGenTextures(1, ids, 0)
         sceneColor = ids[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sceneColor)
         if (halfFloat) {
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null)
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, sceneWidth, sceneHeight, 0, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null)
         } else {
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, sceneWidth, sceneHeight, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
         }
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glGenRenderbuffers(1, ids, 0)
         sceneDepth = ids[0]
         GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, sceneDepth)
-        GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, width, height)
+        GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, sceneWidth, sceneHeight)
         GLES30.glGenFramebuffers(1, ids, 0)
         sceneFbo = ids[0]
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, sceneFbo)
@@ -360,7 +443,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
         if (textureArray != 0) GLES30.glDeleteTextures(1, intArrayOf(textureArray), 0)
         val fitting = textures.take(maxArrayLayers())
         if (fitting.size < textures.size) Log.w(TAG, "Drawing ${fitting.size} of ${textures.size} textures; the rest are untextured")
-        val size = TextureBudget.layerSize(fitting.size)
+        val size = TextureBudget.layerSize(fitting.size, settings.textureBudgetBytes, settings.maxTextureSize)
         textureArray = uploadArray(fitting, size, TextureBudget.mipLevels(size))
         hasTextures = fitting.isNotEmpty()
     }
@@ -465,7 +548,7 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
 
     private companion object {
         const val TAG = "SceneGl"
-        const val SHADOW_SIZE = 2048
+        const val NANOS_PER_MILLI = 1_000_000f
         const val MIN_ARRAY_LAYERS = 256
         /** Sixteen blocks of ground at 64 texels a block. */
         const val MAP_SIZE = 1024

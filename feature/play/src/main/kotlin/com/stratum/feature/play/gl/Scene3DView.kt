@@ -3,6 +3,8 @@ package com.stratum.feature.play.gl
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.opengl.GLSurfaceView
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import com.stratum.core.domain.art.ActorPresentation
@@ -34,6 +37,8 @@ import com.stratum.engine.scene.SceneCamera
 import com.stratum.engine.scene.ScenePicker
 import com.stratum.engine.scene.TextureLibrary
 import com.stratum.engine.scene.Vec3
+import com.stratum.engine.scene.quality.DeviceClassifier
+import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.FeedbackMark
 import com.stratum.engine.world.GroundInsert
 import com.stratum.engine.world.GroundLoot
@@ -75,6 +80,8 @@ data class Scene3DInput(
     val spriteFor: (com.stratum.feature.play.SpriteKey) -> com.stratum.feature.play.DrawableSprite? = { null },
     val playerAnimation: com.stratum.core.domain.sprite.AnimationPlayback = com.stratum.core.domain.sprite.AnimationPlayback(),
     val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
+    /** The player's graphics choice, or null to let the device decide. */
+    val quality: QualityTier? = null,
 )
 
 /**
@@ -96,7 +103,15 @@ fun Scene3DView(
     onBuildDrag: (BlockPos, BlockPos) -> Unit = { _, _ -> },
     onBuildCommit: () -> Unit = {},
 ) {
-    val renderer = remember { SceneGlRenderer() }
+    val context = LocalContext.current
+    // Starts from what the OS knows; the renderer refines it with the GPU's
+    // own limits once it has a context, and reports back what it settled on.
+    var settings by remember { mutableStateOf(DeviceClassifier.settingsFor(AndroidDeviceProfiles.fromContext(context), input.quality)) }
+    val renderer = remember {
+        val main = Handler(Looper.getMainLooper())
+        SceneGlRenderer(AndroidDeviceProfiles.fromContext(context), input.quality) { chosen -> main.post { settings = chosen } }
+    }
+    LaunchedEffect(input.quality) { renderer.requestTier(input.quality) }
     var size by remember { mutableStateOf(IntSize(1, 1)) }
     var library by remember { mutableStateOf(TextureLibrary()) }
     var surface by remember { mutableStateOf<GLSurfaceView?>(null) }
@@ -110,8 +125,8 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
-    val builder = remember(input.director, library) {
-        SceneBuilder(input.director, library, input.biomeAt)
+    val builder = remember(input.director, library, settings) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)

@@ -22,6 +22,7 @@ import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
+import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.AttackReport
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
@@ -84,7 +85,13 @@ class PlayViewModel(
     private val kitDirectory: File? = null,
     /** Texture folders of imported packs, drawn over whichever kit the style picks. */
     private val kitOverlays: List<File> = emptyList(),
+    /** The player's graphics choice when the run began; null lets the device decide. */
+    quality: QualityTier? = null,
+    /** Keeps a new graphics choice for next time. Supplied by the composition root. */
+    private val saveQuality: (QualityTier?) -> Unit = {},
 ) : ViewModel() {
+
+    private val initialQuality = quality
 
     /**
      * Replaced wholesale by [newRun]. Every reader goes through this field
@@ -181,6 +188,16 @@ class PlayViewModel(
      * saved and swapped in as it arrives, so the world repaints itself while
      * the player watches, and anything that fails simply stays as it was.
      */
+    /**
+     * Changes how hard the renderer works, and remembers it. Null hands the
+     * choice back to the device. Takes effect on the next frame; nothing about
+     * the world changes.
+     */
+    fun chooseQuality(tier: QualityTier?) {
+        _state.value = _state.value.copy(quality = tier)
+        saveQuality(tier)
+    }
+
     fun forgeStyle() {
         val model = imageModel ?: return publish(message = "Add an OpenRouter key in settings to forge art")
         val root = kitDirectory ?: return publish(message = "No storage for forged art")
@@ -385,6 +402,7 @@ class PlayViewModel(
         styleSummary = artDirector.direction.summary,
         kit = ForgedKits.kitFor(artDirector.direction),
         kitOverlays = kitOverlays,
+        quality = initialQuality,
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
@@ -633,11 +651,14 @@ class PlayViewModel(
             imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
             kitDirectory: File? = null,
             kitOverlays: List<File> = emptyList(),
+            quality: QualityTier? = null,
+            saveQuality: (QualityTier?) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
+                quality = quality, saveQuality = saveQuality,
             ) as T
         }
     }
@@ -697,6 +718,8 @@ data class PlayUiState(
     val kit: String = "house",
     /** Imported packs' textures, laid over [kit]. */
     val kitOverlays: List<File> = emptyList(),
+    /** The graphics tier the player chose; null is the device's own. */
+    val quality: QualityTier? = null,
     /** The lit 3D view, or the flat 2D canvas it replaced. */
     val use3D: Boolean = true,
     /** Progress of an art forge in flight, or null when none is running. */

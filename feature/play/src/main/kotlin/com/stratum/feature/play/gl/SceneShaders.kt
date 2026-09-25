@@ -6,7 +6,9 @@ package com.stratum.feature.play.gl
  * Every constant and every formula here has a twin in
  * `engine/scene/.../ShadingModel.kt`; the preview images are rendered from the
  * Kotlin side, the game from this side. When one changes, the other must, or
- * the screenshots stop being evidence.
+ * the screenshots stop being evidence. The one deliberate difference is
+ * `uShadowTaps`: lower quality tiers take shadow samples away here, and the
+ * previews always show the full 3x3 filter the HIGH tier draws.
  */
 internal object SceneShaders {
 
@@ -64,6 +66,8 @@ internal object SceneShaders {
         uniform sampler2DArray uMaps;
         uniform sampler2D uShadowMap;
         uniform float uShadowSize;
+        // 0: no shadow map this tier; 1: one hard sample; 9: the 3x3 filter ShadingModel uses.
+        uniform int uShadowTaps;
         uniform bool uCutout;
         uniform vec3 uEye;
         uniform vec3 uSun;
@@ -101,9 +105,11 @@ internal object SceneShaders {
         }
 
         float sunlit(float ndl) {
+            if (uShadowTaps == 0) return 1.0;
             vec3 p = vShadow.xyz / vShadow.w * 0.5 + 0.5;
             if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) return 1.0;
             float bias = 0.0015 + 0.004 * (1.0 - ndl);
+            if (uShadowTaps == 1) return (p.z - bias <= texture(uShadowMap, p.xy).r) ? 1.0 : 0.0;
             float lit = 0.0;
             for (int oy = -1; oy <= 1; oy++) {
                 for (int ox = -1; ox <= 1; ox++) {

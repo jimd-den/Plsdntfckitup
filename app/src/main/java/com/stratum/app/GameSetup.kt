@@ -21,11 +21,14 @@ object GameSetup {
     fun assemble(additionalPacks: List<ContentPack> = emptyList()): AssembledContent =
         assembler.assemble(listOf(IgboContentPack.pack) + additionalPacks)
 
-    fun worldConfig(seed: Long = System.currentTimeMillis()): WorldConfig = WorldConfig(
+    /**
+     * @param streamingRadius chunks kept loaded each way from the player. Four
+     *   (nine by nine chunks, 144 blocks across) keeps the loaded edge well past
+     *   the fog; cheaper phones keep fewer and draw a shorter view to match.
+     */
+    fun worldConfig(seed: Long = System.currentTimeMillis(), streamingRadius: Int = 4): WorldConfig = WorldConfig(
         seed = seed,
-        // Nine by nine chunks: 144 blocks across, so the loaded edge stays
-        // well past the fog and the world reads as a land, not a tile.
-        simulationRadius = 4,
+        simulationRadius = streamingRadius,
         seaLevel = 12,
         surfaceVariation = 4,
         caveDensity = 0.44f,

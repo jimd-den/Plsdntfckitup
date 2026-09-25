@@ -19,8 +19,11 @@ object TextureBudget {
     /** RGBA, plus a third for the mip chain. */
     fun bytesPerLayer(size: Int): Long = size.toLong() * size * 4 * 4 / 3
 
-    fun layerSize(layers: Int, budget: Long = BYTES): Int =
-        SIZES.firstOrNull { layers * bytesPerLayer(it) <= budget } ?: SIZES.last()
+    /** The largest layer size, no larger than [maxSize], at which [layers] layers fit in [budget]. */
+    fun layerSize(layers: Int, budget: Long = BYTES, maxSize: Int = SIZES.first()): Int {
+        val allowed = SIZES.filter { it <= maxSize }.ifEmpty { listOf(SIZES.last()) }
+        return allowed.firstOrNull { layers * bytesPerLayer(it) <= budget } ?: allowed.last()
+    }
 
     /** Mip levels down to one texel. */
     fun mipLevels(size: Int): Int = Integer.numberOfTrailingZeros(Integer.highestOneBit(size)) + 1

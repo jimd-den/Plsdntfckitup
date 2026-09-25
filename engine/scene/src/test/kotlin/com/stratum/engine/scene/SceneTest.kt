@@ -14,6 +14,8 @@ import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.World
 import kotlin.math.abs
+import com.stratum.engine.scene.quality.QualityTier
+import com.stratum.engine.scene.quality.RenderSettings
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -146,6 +148,23 @@ class SceneTest {
         val t = (Vec3(3f, -2f, 1f) - origin).dot(dir)
         val closest = origin + dir * t
         assertTrue((closest - Vec3(3f, -2f, 1f)).length() < 0.05f)
+    }
+
+    @Test
+    fun `a low tier shades fewer point lights, and the hero's light is never the one dropped`() {
+        val torch = BlockType("t:torch", "Torch", lightEmission = 14, glyph = "i", isOpaque = false, isSolid = false)
+        val torches = (0 until 6).associate { BlockPos(4 + it, 5, 4) to torch }
+        val world = FlatWorld(torches)
+        val hero = listOf(SceneActor(5f, 5f, 4f, ActorPresentation("p", ActorRole.PLAYER)))
+        val camera = SceneCamera(Vec3(5f, 5f, 4f))
+        val dark = StyleSheetArtDirector(StyleLexicon.interpret("dark").direction)
+
+        val low = SceneBuilder(dark, TextureLibrary(), settings = RenderSettings.of(QualityTier.LOW)).build(world, camera, hero)
+        val high = SceneBuilder(dark, TextureLibrary(), settings = RenderSettings.of(QualityTier.HIGH)).build(world, camera, hero)
+
+        assertEquals(2, low.lights.size)
+        assertTrue(high.lights.size > low.lights.size)
+        assertEquals(4f + 1.8f, low.lights.first().z, 1e-3f, "the hero's light leads")
     }
 
     @Test
