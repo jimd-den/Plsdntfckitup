@@ -25,7 +25,7 @@ import kotlin.math.floor
 class TileMapTerrainGenerator(
     private val map: TileMap,
     private val biome: BiomeDefinition? = null,
-) : TerrainGenerator, BiomeSource {
+) : TerrainGenerator, BiomeSource, MarkedLevel {
 
     private val placement = MapPlacement.centredOnSpawn(map)
 
@@ -52,10 +52,8 @@ class TileMapTerrainGenerator(
     override fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition =
         biome ?: throw IllegalStateException("Map '${map.id}' has no biome to report")
 
-    /** World position of a map cell, for placing the map's markers in the world. */
-    fun worldX(mapX: Float): Float = mapX - placement.offsetX
-
-    fun worldY(mapY: Float): Float = mapY - placement.offsetY
+    override val markers: List<PlacedMarker>
+        get() = map.markers.map { PlacedMarker(it, x = it.x - placement.offsetX, y = it.y - placement.offsetY) }
 
     companion object {
         /** How far above the ground the wall around the map rises. */
@@ -77,7 +75,8 @@ class TileMapTerrainGenerator(
 }
 
 /** Hides [BiomeSource] when there is no biome to report, so the session never asks. */
-private class BiomelessGenerator(private val inner: TerrainGenerator) : TerrainGenerator by inner
+private class BiomelessGenerator(private val inner: TileMapTerrainGenerator) :
+    TerrainGenerator by inner, MarkedLevel by inner
 
 /** Where the map sits in the world: map cell = world block + offset. */
 internal data class MapPlacement(val offsetX: Int, val offsetY: Int) {

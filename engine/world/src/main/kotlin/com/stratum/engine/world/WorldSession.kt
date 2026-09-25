@@ -23,6 +23,7 @@ import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -123,6 +124,7 @@ class WorldSession(
         val spawn = findSpawn()
         player = hero?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
         player = armed(player).let { it.copy(health = it.maxHealthWithGear) }
+        placeMarkedEncounters()
     }
 
     // ---- what the renderer asks -------------------------------------------
@@ -578,6 +580,19 @@ class WorldSession(
             ?: content.weapons.minByOrNull { it.minItemLevel }
             ?: return player
         return player.equipping(lootRoller.craft(base, itemLevel = 1, rarity = ItemRarity.COMMON, random = random))
+    }
+
+    /**
+     * A hand-authored level's enemies wait where its author put them, standing
+     * on the ground there. Only markers in the loaded world around the spawn
+     * are placed; the director lets anything farther away go anyway.
+     */
+    private fun placeMarkedEncounters() {
+        val level = generator as? MarkedLevel ?: return
+        MapEncounters.plan(level.markers, content.enemies, content.enemiesFor(currentBiome.id), random).forEach { encounter ->
+            val ground = streamingWorld.surfaceAt(floor(encounter.at.x).toInt(), floor(encounter.at.y).toInt())
+            if (ground >= 0) spawn(encounter.definition, WorldPoint(encounter.at.x, encounter.at.y, ground + 1f))
+        }
     }
 
     /** A mined block goes in the bag, and onto the hotbar if it is something that can be placed. */

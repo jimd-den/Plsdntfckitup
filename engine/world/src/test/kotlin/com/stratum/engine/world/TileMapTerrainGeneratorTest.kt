@@ -103,3 +103,36 @@ class TileMapTerrainGeneratorTest {
         assertTrue(room.id in failure.message.orEmpty())
     }
 }
+
+class MapEncounterTest {
+
+    private fun roomWith(vararg markers: MapMarker) = TileMap(
+        id = "test:arena", name = "Arena", width = 9, height = 9,
+        groundBlockId = TestContent.soil.id, groundLevel = 6,
+        layers = listOf(TileLayer.of("floor", 9, 9, List(81) { TestContent.stone.id })),
+        markers = listOf(MapMarker(MarkerKind.PLAYER_SPAWN, 4.5f, 4.5f)) + markers,
+    )
+
+    private fun session(map: TileMap) = WorldSession(
+        ContentPackAssembler().assemble(listOf(TestContent.pack.copy(maps = listOf(map), terrain = TerrainRecipe.tileMap(map.id)))),
+        WorldConfig(seed = 3L, simulationRadius = 1),
+    )
+
+    @Test
+    fun `an enemy marker naming a monster places that monster where it was marked`() {
+        val wanted = TestContent.pack.enemies.first()
+        val session = session(roomWith(MapMarker(MarkerKind.ENEMY_SPAWN, 7.5f, 4.5f, refId = wanted.name.uppercase())))
+        val enemy = session.enemies.single()
+
+        assertEquals(wanted.id, enemy.definitionId)
+        assertEquals(session.player.position.x + 3f, enemy.position.x, "three blocks east of the spawn, as marked")
+        assertEquals(7f, enemy.position.z, "standing on the floor")
+    }
+
+    @Test
+    fun `an enemy marker naming nothing still becomes a fight`() {
+        val session = session(roomWith(MapMarker(MarkerKind.ENEMY_SPAWN, 1.5f, 1.5f), MapMarker(MarkerKind.ENEMY_SPAWN, 2.5f, 1.5f)))
+
+        assertEquals(2, session.enemies.size)
+    }
+}
