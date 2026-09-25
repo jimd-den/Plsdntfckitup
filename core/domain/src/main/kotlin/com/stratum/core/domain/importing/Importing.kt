@@ -88,7 +88,9 @@ data class ImportedTexture(val key: String, val region: ImageRegion)
  *
  * [frames] is in the sheet's grid order. Source art is often packed tightly
  * or spread across files, and the engine's sheets are a regular grid, so the
- * platform lays each region into its grid cell when it writes the sheet.
+ * platform lays each region into its grid cell when it writes the sheet. A
+ * region smaller than its cell is anchored at the cell's bottom centre, which
+ * is where a character's feet are.
  */
 data class ImportedSpriteSheet(val sheet: SpriteSheet, val frames: List<ImageRegion>) {
     init {
