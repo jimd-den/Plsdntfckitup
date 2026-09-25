@@ -9,7 +9,11 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.sprite.SpriteSheet
+import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.world.BlockRegistry
+import com.stratum.core.domain.world.BlockType
+import com.stratum.core.domain.world.TerrainContext
+import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.TerrainRecipe
 import kotlinx.coroutines.flow.Flow
 
@@ -25,132 +29,101 @@ class ContentPackAssembler {
 
     fun assemble(packs: List<ContentPack>): AssembledContent {
         require(packs.isNotEmpty()) { "Cannot assemble an empty pack list" }
+        val merger = PackMerger(packs)
 
-        val blocks = LinkedHashMap<String, com.stratum.core.domain.world.BlockType>()
-        val biomes = LinkedHashMap<String, BiomeDefinition>()
-        val classes = LinkedHashMap<String, HeroClassDefinition>()
-        val lore = LinkedHashMap<String, LoreEntry>()
-        val damageTypes = LinkedHashMap<String, DamageTypeDefinition>()
-        val affixes = LinkedHashMap<String, AffixDefinition>()
-        val inserts = LinkedHashMap<String, InsertDefinition>()
-        val weapons = LinkedHashMap<String, WeaponBase>()
-        val enemies = LinkedHashMap<String, EnemyDefinition>()
-        val skills = LinkedHashMap<String, SkillDefinition>()
-        val rarityStyles = LinkedHashMap<ItemRarity, RarityStyle>()
-        val spriteSheets = LinkedHashMap<String, SpriteSheet>()
-        val overrides = mutableListOf<PackOverride>()
-
-        packs.forEach { pack ->
-            pack.blocks.forEach { block ->
-                blocks.put(block.id, block)?.let {
-                    overrides += PackOverride(pack.id, block.id, OverrideKind.BLOCK)
-                }
-            }
-            pack.biomes.forEach { biome ->
-                biomes.put(biome.id, biome)?.let {
-                    overrides += PackOverride(pack.id, biome.id, OverrideKind.BIOME)
-                }
-            }
-            pack.heroClasses.forEach { hero ->
-                classes.put(hero.id, hero)?.let {
-                    overrides += PackOverride(pack.id, hero.id, OverrideKind.HERO_CLASS)
-                }
-            }
-            pack.loreEntries.forEach { entry -> lore[entry.id] = entry }
-            pack.damageTypes.forEach { type -> damageTypes[type.id] = type }
-            pack.affixes.forEach { affix -> affixes[affix.id] = affix }
-            pack.inserts.forEach { insert -> inserts[insert.id] = insert }
-            pack.weapons.forEach { weapon -> weapons[weapon.id] = weapon }
-            pack.skills.forEach { skill -> skills[skill.id] = skill }
-            pack.rarityStyles.forEach { style -> rarityStyles[style.rarity] = style }
-            pack.spriteSheets.forEach { sheet -> spriteSheets[sheet.id] = sheet }
-            pack.enemies.forEach { enemy ->
-                enemies.put(enemy.id, enemy)?.let {
-                    overrides += PackOverride(pack.id, enemy.id, OverrideKind.ENEMY)
-                }
-            }
-        }
-
-        val registry = BlockRegistry.build(blocks.values.toList())
-        val resolvedBiomes = biomes.values.toList()
-        validate(registry, resolvedBiomes)
-        validateCombat(
-            damageTypes.keys, weapons.values, enemies.values,
-            skills.values, affixes.values, inserts.values,
-        )
-
-        return AssembledContent(
+        val content = AssembledContent(
             packs = packs,
-            registry = registry,
-            biomes = resolvedBiomes,
-            heroClasses = classes.values.toList(),
-            lore = lore.values.toList(),
+            registry = BlockRegistry.build(merger.merge(ContentPack::blocks, BlockType::id, OverrideKind.BLOCK)),
+            biomes = merger.merge(ContentPack::biomes, BiomeDefinition::id, OverrideKind.BIOME),
+            heroClasses = merger.merge(ContentPack::heroClasses, HeroClassDefinition::id, OverrideKind.HERO_CLASS),
+            lore = merger.merge(ContentPack::loreEntries, LoreEntry::id),
             palette = packs.last().palette,
-            damageTypes = damageTypes.values.toList(),
-            affixes = affixes.values.toList(),
-            inserts = inserts.values.toList(),
+            damageTypes = merger.merge(ContentPack::damageTypes, DamageTypeDefinition::id),
+            affixes = merger.merge(ContentPack::affixes, AffixDefinition::id),
+            inserts = merger.merge(ContentPack::inserts, InsertDefinition::id),
             // Last pack with an opinion wins, like every other override. A pack
             // that says nothing about terrain leaves the previous shape alone.
             terrain = packs.lastOrNull { it.terrain != null }?.terrain ?: TerrainRecipe(),
-            weapons = weapons.values.toList(),
-            enemies = enemies.values.toList(),
-            skills = skills.values.toList(),
-            rarityStyles = rarityStyles,
-            spriteSheets = spriteSheets.values.toList(),
-            overrides = overrides,
+            weapons = merger.merge(ContentPack::weapons, WeaponBase::id),
+            enemies = merger.merge(ContentPack::enemies, EnemyDefinition::id, OverrideKind.ENEMY),
+            skills = merger.merge(ContentPack::skills, SkillDefinition::id),
+            rarityStyles = merger.merge(ContentPack::rarityStyles, { it.rarity.name }).associateBy(RarityStyle::rarity),
+            spriteSheets = merger.merge(ContentPack::spriteSheets, SpriteSheet::id),
+            maps = merger.merge(ContentPack::maps, TileMap::id, OverrideKind.MAP),
+            overrides = merger.overrides,
         )
+        ContentValidation.requireValid(content)
+        return content
+    }
+}
+
+/**
+ * Layers the same kind of definition from every pack by id, later packs
+ * winning, and remembers the collisions worth telling the player about.
+ */
+private class PackMerger(private val packs: List<ContentPack>) {
+
+    val overrides = mutableListOf<PackOverride>()
+
+    fun <T> merge(select: (ContentPack) -> List<T>, idOf: (T) -> String, reportAs: OverrideKind? = null): List<T> {
+        val merged = LinkedHashMap<String, T>()
+        packs.forEach { pack ->
+            select(pack).forEach { item ->
+                val replaced = merged.put(idOf(item), item) != null
+                if (replaced && reportAs != null) overrides += PackOverride(pack.id, idOf(item), reportAs)
+            }
+        }
+        return merged.values.toList()
+    }
+}
+
+/**
+ * The checks that turn a bad reference into an error at load time rather
+ * than a crash, or worse a silent imbalance, somewhere far from its cause.
+ */
+internal object ContentValidation {
+
+    fun requireValid(content: AssembledContent) {
+        val problems = worldProblems(content) + combatProblems(content)
+        if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
-    /**
-     * A biome that names a block nobody defined would crash mid-generation, far
-     * from the pack that caused it. Catch it at load time instead.
-     */
-    private fun validate(registry: BlockRegistry, biomes: List<BiomeDefinition>) {
-        val missing = mutableListOf<String>()
-        biomes.forEach { biome ->
-            listOf(biome.surfaceBlockId, biome.subsurfaceBlockId, biome.bedrockFillerBlockId)
-                .filterNot(registry::contains)
-                .forEach { missing += "biome '${biome.id}' references unknown block '$it'" }
-            biome.scatter.filterNot { registry.contains(it.blockId) }
-                .forEach { missing += "biome '${biome.id}' scatters unknown block '${it.blockId}'" }
-            biome.deposits.filterNot { registry.contains(it.blockId) }
-                .forEach { missing += "biome '${biome.id}' deposits unknown block '${it.blockId}'" }
-        }
-        if (missing.isNotEmpty()) {
-            throw ContentPackException(missing.joinToString("; "))
-        }
+    /** A biome or map that names a block nobody defined would crash mid-generation. */
+    private fun worldProblems(content: AssembledContent): List<String> {
+        val known = content.registry::contains
+        return content.biomes.flatMap { biomeProblems(it, known) } + content.maps.flatMap { mapProblems(it, known, content.biomes) }
     }
+
+    private fun biomeProblems(biome: BiomeDefinition, known: (String) -> Boolean): List<String> =
+        listOf(biome.surfaceBlockId, biome.subsurfaceBlockId, biome.bedrockFillerBlockId)
+            .filterNot(known).map { "biome '${biome.id}' references unknown block '$it'" } +
+            biome.scatter.map { it.blockId }.filterNot(known).map { "biome '${biome.id}' scatters unknown block '$it'" } +
+            biome.deposits.map { it.blockId }.filterNot(known).map { "biome '${biome.id}' deposits unknown block '$it'" }
+
+    private fun mapProblems(map: TileMap, known: (String) -> Boolean, biomes: List<BiomeDefinition>): List<String> =
+        map.referencedBlockIds().filterNot(known).map { "map '${map.id}' places unknown block '$it'" } +
+            listOfNotNull(map.biomeId).filter { id -> biomes.none { it.id == id } }
+                .map { "map '${map.id}' belongs to unknown biome '$it'" }
 
     /**
      * A weapon or monster naming a damage type nobody defined would resolve
      * every hit as unresisted and silently skew the whole game's balance, which
      * is far harder to notice than a crash.
      */
-    private fun validateCombat(
-        damageTypeIds: Set<String>,
-        weapons: Collection<WeaponBase>,
-        enemies: Collection<EnemyDefinition>,
-        skills: Collection<SkillDefinition>,
-        affixes: Collection<AffixDefinition>,
-        insertList: Collection<InsertDefinition>,
-    ) {
-        if (damageTypeIds.isEmpty() && weapons.isEmpty() && enemies.isEmpty()) return
-
-        val missing = mutableListOf<String>()
-        weapons.filterNot { it.damageTypeId in damageTypeIds }
-            .forEach { missing += "weapon '${it.id}' uses unknown damage type '${it.damageTypeId}'" }
-        enemies.filterNot { it.damageTypeId in damageTypeIds }
-            .forEach { missing += "enemy '${it.id}' uses unknown damage type '${it.damageTypeId}'" }
-        skills.filterNot { it.damageTypeId in damageTypeIds }
-            .forEach { missing += "skill '${it.id}' uses unknown damage type '${it.damageTypeId}'" }
-        affixes.filter { it.damageTypeId != null && it.damageTypeId !in damageTypeIds }
-            .forEach { missing += "affix '${it.id}' resists unknown damage type '${it.damageTypeId}'" }
-        insertList.filter { it.damageTypeId != null && it.damageTypeId !in damageTypeIds }
-            .forEach { missing += "insert '${it.id}' names unknown damage type '${it.damageTypeId}'" }
-
-        if (missing.isNotEmpty()) {
-            throw ContentPackException(missing.joinToString("; "))
-        }
+    private fun combatProblems(content: AssembledContent): List<String> {
+        val types = content.damageTypes.mapTo(HashSet()) { it.id }
+        if (types.isEmpty() && content.weapons.isEmpty() && content.enemies.isEmpty()) return emptyList()
+        fun unknown(typeId: String?) = typeId != null && typeId !in types
+        return content.weapons.filter { unknown(it.damageTypeId) }
+            .map { "weapon '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
+            content.enemies.filter { unknown(it.damageTypeId) }
+                .map { "enemy '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
+            content.skills.filter { unknown(it.damageTypeId) }
+                .map { "skill '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
+            content.affixes.filter { unknown(it.damageTypeId) }
+                .map { "affix '${it.id}' resists unknown damage type '${it.damageTypeId}'" } +
+            content.inserts.filter { unknown(it.damageTypeId) }
+                .map { "insert '${it.id}' names unknown damage type '${it.damageTypeId}'" }
     }
 }
 
@@ -172,6 +145,8 @@ data class AssembledContent(
     val skills: List<SkillDefinition> = emptyList(),
     val rarityStyles: Map<ItemRarity, RarityStyle> = emptyMap(),
     val spriteSheets: List<SpriteSheet> = emptyList(),
+    /** Hand-authored levels, such as imported Tiled maps. */
+    val maps: List<TileMap> = emptyList(),
     /** Reported to the player so a pack silently reskinning another is visible. */
     val overrides: List<PackOverride> = emptyList(),
 ) {
@@ -180,6 +155,11 @@ data class AssembledContent(
 
     fun heroClass(id: String): HeroClassDefinition =
         heroClasses.firstOrNull { it.id == id } ?: throw ContentPackException("Unknown class '$id'")
+
+    fun map(id: String): TileMap? = maps.firstOrNull { it.id == id }
+
+    /** What a terrain generator is built from, for this content and [config]. */
+    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps)
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 
@@ -236,7 +216,7 @@ data class AssembledContent(
 
 data class PackOverride(val packId: String, val targetId: String, val kind: OverrideKind)
 
-enum class OverrideKind { BLOCK, BIOME, HERO_CLASS, ENEMY }
+enum class OverrideKind { BLOCK, BIOME, HERO_CLASS, ENEMY, MAP }
 
 class ContentPackException(message: String) : IllegalStateException(message)
 

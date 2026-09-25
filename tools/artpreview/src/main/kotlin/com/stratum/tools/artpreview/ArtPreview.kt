@@ -12,7 +12,6 @@ import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.world.BlockPos
-import com.stratum.core.domain.world.TerrainContext
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
 import com.stratum.engine.render.WorldFrameRenderer
@@ -98,7 +97,7 @@ object ArtPreview {
         // The game's own defaults, not flattering ones. A style sheet shot at
         // settings nobody plays at is a style sheet for a different game.
         val config = WorldConfig(seed = SEED, simulationRadius = 3)
-        val generator = StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain))
+        val generator = StratumTerrain.create(content.terrainContext(config))
         val world = StreamingWorld(content.registry, generator, config)
 
         // A terraced corner of the sacred grove rather than wherever the

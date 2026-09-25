@@ -471,7 +471,7 @@ object StratumTerrain {
         TerrainGeneratorFactory { context ->
             LayeredTerrainGenerator(context.config, context.biomes, context.recipe)
         },
-    )
+    ).register(TerrainRecipe.TILE_MAP, TileMapTerrainGenerator.factory)
 
     fun create(context: TerrainContext): TerrainGenerator = registry.create(context)
 }

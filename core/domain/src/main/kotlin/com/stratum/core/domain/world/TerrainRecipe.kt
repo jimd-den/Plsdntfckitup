@@ -1,6 +1,7 @@
 package com.stratum.core.domain.world
 
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.map.TileMap
 
 /**
  * One octave of elevation noise.
@@ -118,6 +119,16 @@ data class TerrainRecipe(
     companion object {
         const val LAYERED = "stratum:layered"
 
+        /** Builds the world from a pack's [TileMap], named by [MAP_OPTION]. */
+        const val TILE_MAP = "stratum:tilemap"
+
+        /** The [options] key naming which map a [TILE_MAP] recipe plays on. */
+        const val MAP_OPTION = "map"
+
+        /** A recipe that plays on the map with [mapId]. */
+        fun tileMap(mapId: String): TerrainRecipe =
+            TerrainRecipe(generatorId = TILE_MAP, elevation = emptyList(), terraceStep = 1, options = mapOf(MAP_OPTION to mapId))
+
         /**
          * How far the clumping sample is pushed towards its extremes.
          *
@@ -158,6 +169,8 @@ data class TerrainContext(
     val config: WorldConfig,
     val biomes: List<BiomeDefinition>,
     val recipe: TerrainRecipe,
+    /** Hand-authored levels a generator such as [TerrainRecipe.TILE_MAP] can build from. */
+    val maps: List<TileMap> = emptyList(),
 )
 
 /** Builds a generator from a recipe. This is the seam a new algorithm plugs into. */

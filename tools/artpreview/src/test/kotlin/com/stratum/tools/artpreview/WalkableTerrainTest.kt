@@ -4,7 +4,6 @@ import com.stratum.content.igbo.IgboContentPack
 import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.ChunkPos
-import com.stratum.core.domain.world.TerrainContext
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.world.PlayerMotion
 import com.stratum.engine.world.StratumTerrain
@@ -29,7 +28,7 @@ class WalkableTerrainTest {
             val config = WorldConfig(seed = seed, simulationRadius = 4)
             val world = StreamingWorld(
                 content.registry,
-                StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain)),
+                StratumTerrain.create(content.terrainContext(config)),
                 config,
             )
             world.focusOn(ChunkPos(0, 0))

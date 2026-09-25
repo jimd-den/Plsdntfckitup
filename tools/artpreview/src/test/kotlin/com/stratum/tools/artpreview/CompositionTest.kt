@@ -5,7 +5,6 @@ import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.world.BiomeSource
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.ChunkPos
-import com.stratum.core.domain.world.TerrainContext
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.world.StratumTerrain
 import com.stratum.engine.world.StreamingWorld
@@ -24,7 +23,7 @@ class CompositionTest {
     /** A world loaded around the middle of a large stretch of grove, and that middle. */
     private fun world(seed: Long): Triple<StreamingWorld, BiomeSource, Pair<Int, Int>> {
         val config = WorldConfig(seed = seed, simulationRadius = 6)
-        val generator = StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain))
+        val generator = StratumTerrain.create(content.terrainContext(config))
         val biomes = generator as BiomeSource
         fun groveShare(cx: Int, cy: Int) = (-4..4).sumOf { j -> (-4..4).count { i -> biomes.biomeAt(cx + i * 20, cy + j * 20).id == GROVE } }
         val centre = (-40..40).flatMap { j -> (-40..40).map { i -> i * 50 to j * 50 } }.maxBy { (x, y) -> groveShare(x, y) }

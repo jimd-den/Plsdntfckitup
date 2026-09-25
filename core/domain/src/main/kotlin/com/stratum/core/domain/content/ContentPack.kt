@@ -10,6 +10,7 @@ import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
+import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.world.BlockType
 
@@ -51,6 +52,11 @@ data class ContentPack(
     val rarityStyles: List<RarityStyle> = emptyList(),
     /** Sheets shipped by the pack. Generated sheets join these at runtime. */
     val spriteSheets: List<SpriteSheet> = emptyList(),
+    /**
+     * Hand-authored levels. A pack whose terrain recipe names
+     * [TerrainRecipe.TILE_MAP] plays on one of these instead of generated ground.
+     */
+    val maps: List<TileMap> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

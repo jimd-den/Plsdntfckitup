@@ -15,7 +15,6 @@ import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.world.BiomeSource
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.BlockRegistry
-import com.stratum.core.domain.world.TerrainContext
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.scene.SceneActor
 import com.stratum.engine.scene.SceneBuilder
@@ -87,7 +86,7 @@ object ScenePreview {
     fun render(prompt: String, forged: File?, fight: Boolean = false): java.awt.image.BufferedImage {
         val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack))
         val config = WorldConfig(seed = SEED, simulationRadius = 5)
-        val generator = StratumTerrain.create(TerrainContext(config, content.biomes, content.terrain))
+        val generator = StratumTerrain.create(content.terrainContext(config))
         val world = StreamingWorld(content.registry, generator, config)
         world.focusOn(BlockPos(VANTAGE_X, VANTAGE_Y, 0))
         val biomes = generator as? BiomeSource

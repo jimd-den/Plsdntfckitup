@@ -24,6 +24,9 @@ val pureModules = listOf(
   ":engine:render",
   ":engine:scene",
   ":content:igbo",
+  ":importer:common",
+  ":importer:tiled",
+  ":importer:flame",
   ":tools:artpreview",
   ":legacy:domain",
 )

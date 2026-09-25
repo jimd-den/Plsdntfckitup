@@ -20,7 +20,6 @@ import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.Direction
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.BiomeSource
-import com.stratum.core.domain.world.TerrainContext
 import com.stratum.core.domain.world.TerrainGenerator
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
@@ -50,7 +49,7 @@ class WorldSession(
     terrainGenerator: TerrainGenerator? = null,
 ) {
     private val generator: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(
-        TerrainContext(config, content.biomes, content.terrain),
+        content.terrainContext(config),
     )
 
     /**
