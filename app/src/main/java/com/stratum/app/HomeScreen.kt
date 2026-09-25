@@ -282,7 +282,7 @@ internal fun HomeScreen(
             )
             Spacer(Modifier.height(Space.small))
             StratumAction(
-                label = if (importedCount > 0) "Import a game ($importedCount)" else "Import a game",
+                label = if (importedCount > 0) "Plugins and games ($importedCount loaded)" else "Plugins and games",
                 onClick = onLibrary,
                 emphasis = ActionEmphasis.SECONDARY,
                 modifier = Modifier.fillMaxWidth(),

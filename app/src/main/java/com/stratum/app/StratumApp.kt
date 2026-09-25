@@ -1,6 +1,7 @@
 package com.stratum.app
 
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -91,9 +92,11 @@ fun StratumApp(
 
     // Games and maps the player imported. Loaded after the first frame, since
     // it re-reads every archive; the world assembles again when they arrive.
-    val imports = remember(context, ai) { ImportWiring(context, ai.sprites) }
-    val importedPacks by imports.repository.packs.collectAsStateWithLifecycle()
-    LaunchedEffect(imports) { imports.repository.refresh() }
+    val plugins = remember(context, ai) { PluginWiring(context, ai.sprites) }
+    val pluginLibrary by plugins.repository.library.collectAsStateWithLifecycle()
+    LaunchedEffect(plugins) { plugins.repository.refresh() }
+    // Only what resolved, in load order: a plugin missing a dependency never half-loads.
+    val importedPacks = pluginLibrary.activePacks
 
     val content = remember(forgedPacks, importedPacks, customClasses) {
         GameSetup.assemble(
@@ -311,10 +314,15 @@ fun StratumApp(
         }
 
         Destination.LIBRARY -> {
-            val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(imports.repository))
+            val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(plugins.repository))
             LibraryScreen(
                 viewModel = viewModel,
                 onBack = { destination = Destination.HOME },
+                onShareCreations = {
+                    if (!plugins.shareCreations(customClasses)) {
+                        Toast.makeText(context, "Build a class first", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 modifier = modifier,
             )
         }
@@ -330,7 +338,7 @@ fun StratumApp(
                         spriteResolver = spriteResolver,
                         imageModel = ai.imageModel,
                         kitDirectory = java.io.File(context.filesDir, "forge"),
-                        kitOverlays = imports.textureDirectories(),
+                        kitOverlays = plugins.textureDirectories(),
                         quality = graphics.chosen,
                         saveQuality = graphics::choose,
                     ),

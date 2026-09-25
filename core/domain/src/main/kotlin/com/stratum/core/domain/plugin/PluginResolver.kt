@@ -40,21 +40,31 @@ data class PluginResolution(val loadOrder: List<String>, val problems: List<Plug
  */
 object PluginResolver {
 
-    fun resolve(installed: List<PluginManifest>, enabledInOrder: List<String>): PluginResolution {
+    /**
+     * @param builtIn what this build ships and always loads first, such as its
+     *   own content pack; a plugin may depend on it like any other.
+     */
+    fun resolve(installed: List<PluginManifest>, enabledInOrder: List<String>, builtIn: List<PluginManifest> = emptyList()): PluginResolution {
         val byId = installed.associateBy { it.id }
         val enabled = enabledInOrder.filter { it in byId }.distinct()
+        val shipped = builtIn.associateBy { it.id }
         val problems = mutableListOf<PluginProblem>()
-        enabled.forEach { id -> problems += problemsOf(byId.getValue(id), byId, enabled.toSet()) }
+        enabled.forEach { id -> problems += problemsOf(byId.getValue(id), byId, enabled.toSet(), shipped) }
         val placement = Placement(byId, enabled.toSet(), problems)
         enabled.forEach { placement.place(it) }
         return PluginResolution(placement.order, problems)
     }
 
     /** What stops a plugin loading on its own account: its API level and its dependencies. */
-    private fun problemsOf(manifest: PluginManifest, byId: Map<String, PluginManifest>, enabled: Set<String>): List<PluginProblem> {
+    private fun problemsOf(
+        manifest: PluginManifest,
+        byId: Map<String, PluginManifest>,
+        enabled: Set<String>,
+        shipped: Map<String, PluginManifest>,
+    ): List<PluginProblem> {
         if (manifest.apiLevel > StratumApi.LEVEL) return listOf(PluginProblem.NewerApi(manifest.id, manifest.apiLevel))
         return manifest.dependencies.filterNot { it.optional }.mapNotNull { dependency ->
-            val found = byId[dependency.id]?.takeIf { dependency.id in enabled }
+            val found = byId[dependency.id]?.takeIf { dependency.id in enabled } ?: shipped[dependency.id]
             when {
                 found == null -> PluginProblem.MissingDependency(manifest.id, dependency)
                 found.version !in dependency.versions -> PluginProblem.WrongVersion(manifest.id, dependency, found.version)

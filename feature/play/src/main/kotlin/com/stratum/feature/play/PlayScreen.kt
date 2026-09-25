@@ -87,6 +87,8 @@ fun PlayScreen(
         onRestyle = viewModel::restyle,
         onRerollStyle = viewModel::rerollStyle,
         onToggleStyle = viewModel::toggleStyle,
+        onToggleTable = viewModel::toggleTable,
+        onRollCheck = viewModel::rollCheck,
         onToggle3D = viewModel::toggle3D,
         onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
@@ -125,6 +127,8 @@ fun PlayScreenContent(
     onRestyle: (String) -> Unit = {},
     onRerollStyle: () -> Unit = {},
     onToggleStyle: () -> Unit = {},
+    onToggleTable: () -> Unit = {},
+    onRollCheck: (String) -> Unit = {},
     onToggle3D: () -> Unit = {},
     onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
@@ -254,6 +258,14 @@ fun PlayScreenContent(
                         onClick = onToggleStyle,
                         emphasis = if (state.styleOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
                     )
+                    // Only when a plugin brought tabletop rules to roll.
+                    if (state.checks.isNotEmpty()) {
+                        StratumAction(
+                            label = if (state.activeBoons.isEmpty()) "Table" else "Table ${state.activeBoons.size}",
+                            onClick = onToggleTable,
+                            emphasis = if (state.tableOpen) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
+                        )
+                    }
                     StratumAction(
                         label = if (state.use3D) "3D" else "2D",
                         onClick = onToggle3D,
@@ -262,6 +274,10 @@ fun PlayScreenContent(
                 }
                 Spacer(Modifier.height(Space.small))
                 ZoomControls(onZoom = onZoom)
+            }
+
+            if (state.tableOpen && !state.isDead) {
+                TableOverlay(state = state, onRoll = onRollCheck, onClose = onToggleTable)
             }
 
             if (state.styleOpen && !state.isDead) {

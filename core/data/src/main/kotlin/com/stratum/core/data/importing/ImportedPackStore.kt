@@ -3,11 +3,14 @@ package com.stratum.core.data.importing
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.importing.ImportSource
 import com.stratum.core.domain.importing.ImporterRegistry
+import com.stratum.core.domain.plugin.PluginManifest
+import com.stratum.core.domain.plugin.PluginOrder
 import com.stratum.importer.common.ZipImportSource
 import java.io.File
 
 /**
- * Keeps imported projects between runs.
+ * Keeps installed plugins -- and every other imported project -- between runs,
+ * with the player's load order.
  *
  * What is kept is the archive the player picked, not a serialised pack: the
  * importers are deterministic and quick, so re-reading the archive on launch
@@ -20,6 +23,7 @@ class ImportedPackStore(
     private val importers: ImporterRegistry,
 ) {
     private val archives: File get() = File(root, ARCHIVES).apply { mkdirs() }
+    private val orderFile: File get() = File(root, ORDER)
 
     /**
      * Reads an archive the player picked. Named exactly as [loadAll] will
@@ -34,12 +38,19 @@ class ImportedPackStore(
         File(archives, "${fileSafe(packId)}$SEPARATOR${archiveName(name)}").writeBytes(bytes)
     }
 
-    /** Every imported pack, re-read from its archive. One that no longer imports is skipped, not fatal. */
-    fun loadAll(): List<ContentPack> = archiveFiles().mapNotNull { file ->
+    /** Every installed plugin, re-read from its archive. One that no longer imports is skipped, not fatal. */
+    fun loadAll(): List<Pair<PluginManifest, ContentPack>> = archiveFiles().mapNotNull { file ->
         runCatching {
             val source = ZipImportSource.read(file.name.substringAfter(SEPARATOR), file.readBytes())
-            importers.importerFor(source).import(source).pack
+            importers.importerFor(source).import(source).let { it.manifestOrDerived to it.pack }
         }.getOrNull()
+    }
+
+    fun loadOrder(): PluginOrder = orderFile.takeIf(File::isFile)?.readText()?.let(PluginOrder::decode) ?: PluginOrder()
+
+    fun saveOrder(order: PluginOrder) {
+        root.mkdirs()
+        orderFile.writeText(order.encode())
     }
 
     fun delete(packId: String) {
@@ -65,6 +76,7 @@ class ImportedPackStore(
 
     private companion object {
         const val ARCHIVES = "archives"
+        const val ORDER = "order.txt"
         const val PACKS = "packs"
         const val TEXTURES = "textures"
         const val SEPARATOR = "--"

@@ -102,4 +102,13 @@ class PluginResolverTest {
         assertTrue(resolution.problems.any { it is PluginProblem.Cycle })
         assertEquals(setOf("a", "b"), resolution.problems.map { it.pluginId }.toSet())
     }
+
+    @Test
+    fun `a plugin may depend on content the build ships`() {
+        val addon = plugin("addon", needs = arrayOf(needs("igbo", "^2.0")))
+        val resolution = PluginResolver.resolve(listOf(addon), listOf("addon"), builtIn = listOf(plugin("igbo", version = "2.0.0")))
+
+        assertEquals(listOf("addon"), resolution.loadOrder)
+        assertTrue(resolution.problems.isEmpty())
+    }
 }

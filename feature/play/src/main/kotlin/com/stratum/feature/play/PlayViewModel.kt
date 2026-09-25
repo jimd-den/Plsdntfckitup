@@ -18,6 +18,8 @@ import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
@@ -26,6 +28,7 @@ import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.AttackReport
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
+import com.stratum.engine.world.CheckAttempt
 import com.stratum.engine.world.CombatEvent
 import com.stratum.engine.world.DodgeResult
 import com.stratum.engine.world.EquipResult
@@ -251,6 +254,29 @@ class PlayViewModel(
         _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
     }
 
+    fun toggleTable() {
+        _state.value = _state.value.copy(tableOpen = !_state.value.tableOpen)
+    }
+
+    /** Rolls a tabletop check and reads the result out the way a table would. */
+    fun rollCheck(checkId: String) {
+        when (val attempt = session.attemptCheck(checkId)) {
+            is CheckAttempt.Rolled -> {
+                val result = attempt.result
+                val effect = result.effect
+                val verdict = when {
+                    effect != null -> "${effect.boon.name} for ${effect.remainingSeconds.toInt()}s"
+                    result.outcome.succeeded -> "Success"
+                    else -> "Failure"
+                }
+                publish(message = "${result.check.name}: ${result.summary}. $verdict")
+            }
+            is CheckAttempt.OnCooldown -> publish(message = "Ready again in ${attempt.secondsLeft.toInt() + 1}s")
+            CheckAttempt.UnknownCheck -> publish(message = "That check is not available")
+            CheckAttempt.Refused -> Unit
+        }
+    }
+
     private fun directorFor(
         prompt: String,
         seed: Long = prompt.lowercase().hashCode().toLong(),
@@ -403,6 +429,7 @@ class PlayViewModel(
         kit = ForgedKits.kitFor(artDirector.direction),
         kitOverlays = kitOverlays,
         quality = initialQuality,
+        checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
@@ -602,6 +629,8 @@ class PlayViewModel(
             buildPreview = snapshot.buildPreview,
             buildTool = snapshot.buildTool,
             skills = snapshot.skills,
+            activeBoons = snapshot.activeBoons,
+            checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
         )
@@ -720,6 +749,13 @@ data class PlayUiState(
     val kitOverlays: List<File> = emptyList(),
     /** The graphics tier the player chose; null is the device's own. */
     val quality: QualityTier? = null,
+    /** Tabletop checks the loaded plugins offer. */
+    val checks: List<SkillCheck> = emptyList(),
+    /** Seconds until each check can be rolled again; 0 when ready. */
+    val checkCooldowns: Map<String, Float> = emptyMap(),
+    /** Boons and banes running from checks. */
+    val activeBoons: List<ActiveBoon> = emptyList(),
+    val tableOpen: Boolean = false,
     /** The lit 3D view, or the flat 2D canvas it replaced. */
     val use3D: Boolean = true,
     /** Progress of an art forge in flight, or null when none is running. */
