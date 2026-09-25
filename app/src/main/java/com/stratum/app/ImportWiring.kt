@@ -7,7 +7,7 @@ import com.stratum.core.data.importing.ImportedPackStore
 import com.stratum.core.data.sprite.SpriteLibrary
 import com.stratum.core.domain.importing.ImportProjectUseCase
 import com.stratum.core.domain.importing.ImportedPackRepository
-import com.stratum.importer.flame.Importers
+import com.stratum.plugins.Importers
 import java.io.File
 
 /**

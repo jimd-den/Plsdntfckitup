@@ -6,7 +6,7 @@ dependencies {
   implementation(project(":engine:render"))
   implementation(project(":engine:scene"))
   implementation(project(":content:igbo"))
-  implementation(project(":importer:flame"))
+  implementation(project(":plugins"))
 }
 
 /**

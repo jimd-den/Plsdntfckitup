@@ -25,7 +25,7 @@ import com.stratum.engine.world.StratumTerrain
 import com.stratum.engine.world.StreamingWorld
 import com.stratum.importer.common.DirectoryImportSource
 import com.stratum.importer.common.ZipImportSource
-import com.stratum.importer.flame.Importers
+import com.stratum.plugins.Importers
 import java.io.File
 import javax.imageio.ImageIO
 

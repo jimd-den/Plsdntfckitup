@@ -98,9 +98,4 @@ class FlameProjectImporterTest {
         assertTrue(charactersOnly.pack.maps.isEmpty())
         assertEquals(3, charactersOnly.pack.spriteSheets.size)
     }
-
-    @Test
-    fun `the standard registry prefers the Flame importer for a Flame game`() {
-        assertEquals("flame", Importers.standard().importerFor(FlameFixtures.project()).id)
-    }
 }

@@ -35,6 +35,11 @@ class VersionRange private constructor(private val text: String, private val acc
 
     override fun toString(): String = text
 
+    /** Two ranges written the same way are the same range. */
+    override fun equals(other: Any?): Boolean = other is VersionRange && other.text == text
+
+    override fun hashCode(): Int = text.hashCode()
+
     companion object {
         val ANY = VersionRange("*") { true }
 

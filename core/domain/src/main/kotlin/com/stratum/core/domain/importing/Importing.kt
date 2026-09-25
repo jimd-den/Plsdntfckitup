@@ -1,6 +1,7 @@
 package com.stratum.core.domain.importing
 
 import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.plugin.PluginManifest
 import com.stratum.core.domain.sprite.SpriteSheet
 
 /**
@@ -64,7 +65,12 @@ data class ImportResult(
      * like an engine bug to the person who made it.
      */
     val warnings: List<String> = emptyList(),
-)
+    /** What the project says about itself, when it says anything; see [manifestOrDerived]. */
+    val manifest: PluginManifest? = null,
+) {
+    /** The project's own manifest, or one derived from its pack for content that came without one. */
+    val manifestOrDerived: PluginManifest get() = manifest ?: PluginManifest.of(pack)
+}
 
 /** A rectangle of pixels in one of the project's image files. */
 data class ImageRegion(

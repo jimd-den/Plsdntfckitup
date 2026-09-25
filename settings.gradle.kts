@@ -55,6 +55,10 @@ include(":importer:common")
 include(":importer:tiled")
 include(":importer:flame")
 
+// The mod system: the .stratum plugin format, and the registry of every
+// importer. Pure Kotlin.
+include(":plugins")
+
 // Renders the world headlessly so the art direction can be reviewed and
 // regression-tested without a device. Never shipped in the app.
 include(":tools:artpreview")

@@ -1,6 +1,7 @@
 package com.stratum.core.domain.importing
 
 import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.plugin.PluginManifest
 
 /**
  * Writes an import's art where the platform keeps it.
@@ -20,6 +21,7 @@ data class ImportOutcome(
     val pack: ContentPack,
     val importerName: String,
     val warnings: List<String>,
+    val manifest: PluginManifest = PluginManifest.of(pack),
 )
 
 /**
@@ -34,7 +36,7 @@ class ImportProjectUseCase(
         val importer = registry.importerFor(source)
         val result = importer.import(source)
         writeAssets(result, source)
-        return ImportOutcome(result.pack, importer.displayName, result.warnings)
+        return ImportOutcome(result.pack, importer.displayName, result.warnings, result.manifestOrDerived)
     }
 
     private fun writeAssets(result: ImportResult, source: ImportSource) {

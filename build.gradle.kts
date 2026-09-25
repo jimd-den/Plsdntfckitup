@@ -27,6 +27,7 @@ val pureModules = listOf(
   ":importer:common",
   ":importer:tiled",
   ":importer:flame",
+  ":plugins",
   ":tools:artpreview",
   ":legacy:domain",
 )
