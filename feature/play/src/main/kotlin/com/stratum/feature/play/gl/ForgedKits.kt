@@ -51,7 +51,7 @@ object ForgedKits {
      */
     fun load(kit: String, overlays: List<File> = emptyList()): TextureLibrary {
         val library = if (kit.startsWith(LOCAL)) loadDirectory(File(kit.removePrefix(LOCAL))) else loadResources(kit)
-        overlays.forEach { directory -> putFiles(library, directory) }
+        overlays.forEach { directory -> library.aliasMissingSides(putFiles(library, directory)) }
         return library
     }
 
@@ -70,17 +70,19 @@ object ForgedKits {
      */
     fun loadDirectory(directory: File): TextureLibrary = loadResources(HOUSE).also { putFiles(it, directory) }
 
-    private fun putFiles(library: TextureLibrary, directory: File) {
-        directory.listFiles { f -> f.extension == "png" }.orEmpty().sortedBy { it.name }.forEach { file ->
+    /** Returns the keys it loaded. */
+    private fun putFiles(library: TextureLibrary, directory: File): List<String> =
+        directory.listFiles { f -> f.extension == "png" }.orEmpty().sortedBy { it.name }.mapNotNull { file ->
             BitmapFactory.decodeFile(file.absolutePath)?.let { put(library, file.name, it) }
         }
-    }
 
-    private fun put(library: TextureLibrary, fileName: String, bitmap: Bitmap) {
+    private fun put(library: TextureLibrary, fileName: String, bitmap: Bitmap): String {
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        library.put(keyFor(fileName), Texture(bitmap.width, bitmap.height, pixels))
+        val key = keyFor(fileName)
+        library.put(key, Texture(bitmap.width, bitmap.height, pixels))
         bitmap.recycle()
+        return key
     }
 
     fun fileNameFor(key: String): String = TextureKeys.fileNameFor(key)

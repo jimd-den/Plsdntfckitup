@@ -8,6 +8,7 @@ import com.stratum.core.domain.importing.ImportResult
 import com.stratum.core.domain.importing.ImportedSpriteSheet
 import com.stratum.core.domain.world.TerrainRecipe
 import com.stratum.importer.common.ImportNaming
+import com.stratum.importer.common.ProjectPaths
 
 /** Who a pack says made it, and what to call it. */
 data class PackIdentity(
@@ -33,7 +34,8 @@ class TiledPackBuilder(private val identity: PackIdentity) {
 
     fun build(maps: List<TiledMap>, spriteSheets: List<ImportedSpriteSheet> = emptyList(), warnings: List<String> = emptyList()): ImportResult {
         if (maps.isEmpty()) throw ImportException("'${identity.name}' has no Tiled maps to play on")
-        val converted = PrimaryMap.first(maps).map { converter.convert(it, biomeId) }
+        val ids = MapIds.assign(identity.namespace, maps.map { it.path })
+        val converted = PrimaryMap.first(maps).map { converter.convert(it, ids.getValue(it.path), biomeId) }
         val primary = converted.first().map
         val pack = ContentPack(
             id = ImportNaming.slug(identity.namespace),
@@ -78,4 +80,21 @@ object PrimaryMap {
     }
 
     private fun baseName(map: TiledMap) = map.path.substringAfterLast('/').substringBeforeLast('.').lowercase()
+}
+
+/**
+ * Map ids from file names, falling back to the path where names repeat.
+ *
+ * Projects keep `map.json` in several folders; named by file alone they
+ * would collide and one level would silently replace another.
+ */
+object MapIds {
+    fun assign(namespace: String, paths: List<String>): Map<String, String> {
+        val clashing = paths.groupBy(ProjectPaths::baseNameOf).filterValues { it.size > 1 }.keys
+        return paths.associateWith { path ->
+            val base = ProjectPaths.baseNameOf(path)
+            val name = if (base in clashing) path.removePrefix("assets/").substringBeforeLast('.') else base
+            ImportNaming.id(namespace, name)
+        }
+    }
 }

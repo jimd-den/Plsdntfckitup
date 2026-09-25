@@ -28,13 +28,13 @@ data class ConvertedMap(
  */
 class TiledMapConverter(private val namespace: String) {
 
-    fun convert(tiled: TiledMap, biomeId: String? = null): ConvertedMap {
+    fun convert(tiled: TiledMap, mapId: String, biomeId: String? = null): ConvertedMap {
         val catalog = TileBlockCatalog(namespace, tiled)
         val warnings = FormatWarnings.of(tiled).toMutableList()
         val layers = tileLayers(tiled, catalog, warnings) + listOfNotNull(collisionLayer(tiled, catalog))
         val ground = groundBlock(layers, catalog)
         val map = TileMap(
-            id = ImportNaming.id(namespace, ProjectPaths.baseNameOf(tiled.path)),
+            id = mapId,
             name = tiled.properties.string("name") ?: ImportNaming.displayName(ProjectPaths.baseNameOf(tiled.path)),
             width = tiled.width,
             height = tiled.height,
@@ -81,14 +81,15 @@ class TiledMapConverter(private val namespace: String) {
         return TileLayer.of("collision", tiled.width, tiled.height, cells.map { if (it) barrier else null }, elevation = 1, thickness = 2)
     }
 
-    /** The most used floor block fills the ground, so digging down finds more of what is on top. */
+    /**
+     * A plain block fills the ground under and around the level, coloured like
+     * the floor's own colour property when it has one. Plain rather than the
+     * commonest tile: it shows wherever the author left a cell empty, and a
+     * tile repeated into every gap reads as noise, not as ground.
+     */
     private fun groundBlock(layers: List<TileLayer>, catalog: TileBlockCatalog): String {
-        val floor = layers.firstOrNull { it.elevation == 0 }
-        val common = floor?.let { layer ->
-            (0 until layer.height).flatMap { y -> (0 until layer.width).mapNotNull { x -> layer.blockIdAt(x, y) } }
-                .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-        }
-        return common ?: catalog.plainBlock("ground", GROUND_COLOR)
+        val floorColor = layers.firstOrNull { it.elevation == 0 }?.let(catalog::commonestColor)
+        return catalog.plainBlock("ground", floorColor ?: GROUND_COLOR)
     }
 
     private companion object {

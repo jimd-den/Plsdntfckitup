@@ -8,6 +8,7 @@ import com.stratum.engine.scene.MeshBatch
 import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
 import com.stratum.engine.scene.Texture
+import com.stratum.engine.scene.TextureBudget
 import com.stratum.engine.scene.Vertex
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -349,8 +350,18 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
      */
     private fun uploadTextures(textures: List<Texture>) {
         if (textureArray != 0) GLES30.glDeleteTextures(1, intArrayOf(textureArray), 0)
-        textureArray = uploadArray(textures, LAYER_SIZE, MIP_LEVELS)
-        hasTextures = textures.isNotEmpty()
+        val fitting = textures.take(maxArrayLayers())
+        if (fitting.size < textures.size) Log.w(TAG, "Drawing ${fitting.size} of ${textures.size} textures; the rest are untextured")
+        val size = TextureBudget.layerSize(fitting.size)
+        textureArray = uploadArray(fitting, size, TextureBudget.mipLevels(size))
+        hasTextures = fitting.isNotEmpty()
+    }
+
+    /** GLES 3.0 promises 256 array layers; most devices allow 2048. */
+    private fun maxArrayLayers(): Int {
+        val limit = IntArray(1)
+        GLES30.glGetIntegerv(GLES30.GL_MAX_ARRAY_TEXTURE_LAYERS, limit, 0)
+        return limit[0].takeIf { it > 0 } ?: MIN_ARRAY_LAYERS
     }
 
     /** Ground maps: a second, larger array, bound beside the first. See TextureLibrary.allMaps. */
@@ -447,10 +458,9 @@ class SceneGlRenderer : GLSurfaceView.Renderer {
     private companion object {
         const val TAG = "SceneGl"
         const val SHADOW_SIZE = 2048
-        const val LAYER_SIZE = 512
+        const val MIN_ARRAY_LAYERS = 256
         /** Sixteen blocks of ground at 64 texels a block. */
         const val MAP_SIZE = 1024
         const val MAP_MIP_LEVELS = 11
-        const val MIP_LEVELS = 10
     }
 }

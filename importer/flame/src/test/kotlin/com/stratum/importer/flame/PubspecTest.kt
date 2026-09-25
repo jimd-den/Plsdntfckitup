@@ -23,3 +23,12 @@ class PubspecTest {
         assertFalse(pubspec.usesFlame)
     }
 }
+
+class PubspecFrameworkTest {
+
+    @Test
+    fun `games built on a Flame framework or plugin count as Flame games`() {
+        assertTrue(Pubspec.parse("name: x\ndependencies:\n  bonfire: ^3.0.0\n").usesFlame)
+        assertTrue(Pubspec.parse("name: x\ndependencies:\n  flame_tiled: ^1.0.0\n").usesFlame)
+    }
+}

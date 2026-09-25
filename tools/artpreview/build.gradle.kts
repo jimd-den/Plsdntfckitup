@@ -6,6 +6,7 @@ dependencies {
   implementation(project(":engine:render"))
   implementation(project(":engine:scene"))
   implementation(project(":content:igbo"))
+  implementation(project(":importer:flame"))
 }
 
 /**
@@ -64,6 +65,20 @@ tasks.register<JavaExec>("refinishKit") {
   group = "generation"
   description = "Re-runs forge post-processing on kept originals."
   mainClass.set("com.stratum.tools.artpreview.RefinishKit")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  maxHeapSize = "2g"
+}
+
+/**
+ * Imports a Flame game or Tiled project and renders its level, so an importer
+ * change can be judged on a real project without a device:
+ *   ./gradlew :tools:artpreview:importPreview --args="path/to/game build/import-preview [map]"
+ */
+tasks.register<JavaExec>("importPreview") {
+  group = "verification"
+  description = "Imports a Flame or Tiled project, writes its art and renders its level."
+  mainClass.set("com.stratum.tools.artpreview.ImportPreview")
   classpath = sourceSets["main"].runtimeClasspath
   workingDir = rootProject.projectDir
   maxHeapSize = "2g"

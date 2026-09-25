@@ -2,6 +2,7 @@ package com.stratum.importer.tiled
 
 import com.stratum.core.domain.importing.ImageRegion
 import com.stratum.core.domain.importing.ImportedTexture
+import com.stratum.core.domain.map.TileLayer
 import com.stratum.core.domain.world.BlockMaterial
 import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockType
@@ -20,6 +21,9 @@ internal class TileBlockCatalog(private val namespace: String, private val map: 
     private val blocks = LinkedHashMap<String, BlockType>()
     private val textures = LinkedHashMap<String, ImportedTexture>()
 
+    /** Blocks whose colour the author gave, as opposed to one hashed from the id. */
+    private val authoredColors = mutableSetOf<String>()
+
     val allBlocks: List<BlockType> get() = blocks.values.toList()
     val allTextures: List<ImportedTexture> get() = textures.values.toList()
 
@@ -30,12 +34,32 @@ internal class TileBlockCatalog(private val namespace: String, private val map: 
         val tileset = map.tilesetFor(gid) ?: return null
         val localId = gid - tileset.firstGid
         val tile = tileset.tiles[localId]
-        val solid = tile?.properties?.firstBool("solid", "collides", "collision") ?: role.solid
-        val shape = shapeFor(role, solid)
-        val id = ImportNaming.id(namespace, tileset.name, localId.toString()) + suffixFor(role, shape)
-        blocks.getOrPut(id) { block(id, tileset, localId, tile, solid, shape) }
-        regionOf(tileset, localId, tile)?.let { region -> rememberTexture(id, region) }
+        val properties = tile?.properties ?: TiledProperties.EMPTY
+        val solid = properties.firstBool("solid", "collides", "collision") ?: role.solid
+        val form = formOf(role, properties)
+        val id = baseIdFor(tileset, localId, tile) + form.suffix
+        blocks.getOrPut(id) { block(id, tileset, localId, tile, solid, form) }
+        regionOf(tileset, localId, tile)?.let { region -> rememberTexture(id, form, region) }
         return id
+    }
+
+    /**
+     * How a tile stands in the world. Floors and walls are terrain; anything
+     * on a decoration layer is scenery, drawn the way the engine draws its own
+     * -- a painted sprite standing up and cut out by its transparency -- unless
+     * the author marked it `flat`, as a rug or a crack in the floor would be.
+     */
+    private enum class Form(val suffix: String, val shape: BlockShape, val prop: Boolean) {
+        TERRAIN("", BlockShape.CUBE, prop = false),
+        SOLID("_solid", BlockShape.CUBE, prop = false),
+        PROP("_prop", BlockShape.CUBE, prop = true),
+        DECAL("_decal", BlockShape.FLOOR, prop = false),
+    }
+
+    private fun formOf(role: LayerRole, properties: TiledProperties): Form = when (role.kind) {
+        LayerRole.Kind.FLOOR -> Form.TERRAIN
+        LayerRole.Kind.WALL -> Form.SOLID
+        else -> if (properties.bool("flat") == true) Form.DECAL else Form.PROP
     }
 
     /** A plain, untextured block for the ground under everything, or for collision with no tile. */
@@ -51,22 +75,34 @@ internal class TileBlockCatalog(private val namespace: String, private val map: 
         return id
     }
 
-    private fun shapeFor(role: LayerRole, solid: Boolean): BlockShape = when {
-        role.kind == LayerRole.Kind.FLOOR -> BlockShape.CUBE
-        !solid -> BlockShape.FLOOR
-        else -> BlockShape.CUBE
+    /** The colour of the block a layer uses most, when that colour was given rather than invented. */
+    fun commonestColor(layer: TileLayer): Long? {
+        val counts = (0 until layer.height).flatMap { y -> (0 until layer.width).mapNotNull { x -> layer.blockIdAt(x, y) } }
+            .groupingBy { it }.eachCount()
+        val commonest = counts.maxByOrNull { it.value }?.key ?: return null
+        return commonest.takeIf { it in authoredColors }?.let { blocks.getValue(it).topColor }
     }
 
-    /** Floor blocks keep the plain id; the same tile standing up or lying flat on top gets its own. */
-    private fun suffixFor(role: LayerRole, shape: BlockShape): String = when {
-        role.kind == LayerRole.Kind.FLOOR -> ""
-        shape == BlockShape.FLOOR -> "_decal"
-        else -> "_solid"
+    /**
+     * Tiles are named by the art they come from, not by the tileset's name:
+     * two tilesets both called "tileset" are different art, and two maps
+     * embedding the same image are the same art and should share blocks.
+     */
+    private fun baseIdFor(tileset: TiledTileset, localId: Int, tile: TiledTile?): String = when {
+        tile?.image != null -> ImportNaming.id(namespace, artKey(tile.image))
+        tileset.image != null -> ImportNaming.id(namespace, artKey(tileset.image), localId.toString())
+        else -> ImportNaming.id(namespace, tileset.name, localId.toString())
     }
 
-    private fun block(id: String, tileset: TiledTileset, localId: Int, tile: TiledTile?, solid: Boolean, shape: BlockShape): BlockType {
+    /** `assets/images/tiles/forest.png` -> `tiles/forest`, which the slug makes `tiles_forest`. */
+    private fun artKey(imagePath: String): String =
+        imagePath.removePrefix("assets/").removePrefix("images/").substringBeforeLast('.')
+
+    private fun block(id: String, tileset: TiledTileset, localId: Int, tile: TiledTile?, solid: Boolean, form: Form): BlockType {
         val properties = (tile?.properties ?: TiledProperties.EMPTY)
-        val top = SeedColors.parse(properties.firstString("color", "colour")) ?: SeedColors.topFor(id)
+        val authored = SeedColors.parse(properties.firstString("color", "colour"))
+        if (authored != null) authoredColors += id
+        val top = authored ?: SeedColors.topFor(id)
         return BlockType(
             id = id,
             displayName = properties.string("name") ?: tile?.type?.takeIf(String::isNotBlank)?.let(ImportNaming::displayName)
@@ -74,9 +110,11 @@ internal class TileBlockCatalog(private val namespace: String, private val map: 
             material = materialOf(properties.string("material")),
             hardness = properties.string("hardness")?.toFloatOrNull() ?: 1f,
             isSolid = solid,
-            isOpaque = shape == BlockShape.CUBE,
+            isOpaque = form.shape == BlockShape.CUBE && !form.prop,
             lightEmission = (properties.int("light") ?: 0).coerceIn(0, 15),
-            shape = shape,
+            shape = form.shape,
+            // The engine draws a block with a glyph as scenery; the glyph itself only labels it in the bag.
+            glyph = PROP_GLYPH.takeIf { form.prop },
             topColor = top,
             sideColor = SeedColors.shade(top),
         )
@@ -96,12 +134,18 @@ internal class TileBlockCatalog(private val namespace: String, private val map: 
         return ImageRegion(image, rect.x, rect.y, rect.width, rect.height)
     }
 
-    /** Texture keys follow the renderer's `<block id>/<face>` convention. */
-    private fun rememberTexture(blockId: String, region: ImageRegion) {
-        FACES.forEach { face -> textures.getOrPut("$blockId/$face") { ImportedTexture("$blockId/$face", region) } }
+    /**
+     * Texture keys follow the renderer's conventions: `<block id>/<face>` for
+     * terrain, `prop:<block id>` for scenery. Only a terrain block's top is
+     * written: a tile is one painting, and the renderer gives an imported
+     * block's sides its top rather than holding the same art twice.
+     */
+    private fun rememberTexture(blockId: String, form: Form, region: ImageRegion) {
+        val key = if (form.prop) "prop:$blockId" else "$blockId/top"
+        textures.getOrPut(key) { ImportedTexture(key, region) }
     }
 
     private companion object {
-        val FACES = listOf("top", "side")
+        const val PROP_GLYPH = "✦"
     }
 }

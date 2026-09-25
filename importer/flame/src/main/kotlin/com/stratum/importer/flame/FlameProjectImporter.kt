@@ -35,11 +35,12 @@ class FlameProjectImporter : ProjectImporter {
         val identity = identityOf(pubspec, source)
         val characters = FlameCharacters(source, identity.namespace).collect()
         val sheets = characters.sheets.map(AssembledSheet::sheet)
-        val maps = TiledReader.mapPathsIn(source).filter { it.startsWith("assets/") }.map(TiledReader(source)::readMap)
+        val read = TiledReader(source).readMaps(TiledReader.mapPathsIn(source).filter { it.startsWith("assets/") })
+        val warnings = read.warnings + characters.warnings
 
         val result = when {
-            maps.isNotEmpty() -> TiledPackBuilder(identity).build(maps, sheets, characters.warnings)
-            sheets.isNotEmpty() -> charactersOnly(identity, sheets, characters.warnings)
+            read.maps.isNotEmpty() -> TiledPackBuilder(identity).build(read.maps, sheets, warnings)
+            sheets.isNotEmpty() -> charactersOnly(identity, sheets, warnings)
             else -> throw ImportException("'${identity.name}' is a Flame game, but it has no Tiled maps or animations this build can read")
         }
         return result.copy(pack = result.pack.copy(heroClasses = heroesFor(identity, sheets)))

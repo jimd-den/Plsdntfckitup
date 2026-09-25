@@ -13,7 +13,9 @@ data class Pubspec(
     val version: String?,
     val dependencies: Set<String>,
 ) {
-    val usesFlame: Boolean get() = "flame" in dependencies
+    /** Flame itself, a Flame plugin, or a framework built on Flame such as Bonfire. */
+    val usesFlame: Boolean
+        get() = dependencies.any { it == "flame" || it.startsWith("flame_") || it in FLAME_FRAMEWORKS }
 
     companion object {
         fun parse(text: String): Pubspec {
@@ -43,6 +45,8 @@ data class Pubspec(
             }
             return names
         }
+
+        private val FLAME_FRAMEWORKS = setOf("bonfire")
 
         /** Exactly one level of indentation: a dependency, not one of its settings. */
         private val DEPENDENCY = Regex("^ {2}[A-Za-z0-9_]+:.*")

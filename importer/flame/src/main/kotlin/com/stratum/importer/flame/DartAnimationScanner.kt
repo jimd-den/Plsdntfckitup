@@ -18,18 +18,26 @@ internal class DartAnimationScanner(private val resolveImage: (String) -> String
 
     fun scan(code: String, path: String): Scan {
         val warnings = mutableListOf<String>()
-        val animations = sequenced(code, path, warnings) + fromSheets(code, path, warnings)
+        val images = imageVariables(code)
+        val animations = sequenced(code, path, images, warnings) + fromSheets(code, path, warnings)
         return Scan(animations, warnings)
     }
 
+    /**
+     * Variables holding a loaded image, such as `final coins = await images.load('coins.png')`,
+     * so an animation cut from `coins` knows which file that is.
+     */
+    private fun imageVariables(code: String): Map<String, String> =
+        IMAGE_VARIABLE.findAll(code).associate { it.groupValues[1] to it.groupValues[2] }
+
     // ---- SpriteAnimationData.sequenced ------------------------------------
 
-    private fun sequenced(code: String, path: String, warnings: MutableList<String>): List<SourceAnimation> =
+    private fun sequenced(code: String, path: String, variables: Map<String, String>, warnings: MutableList<String>): List<SourceAnimation> =
         SEQUENCED.findAll(code).mapNotNull { match ->
             val args = argumentsFrom(code, match.range.last + 1)
             val prefix = statementBefore(code, match.range.first)
             val images = IMAGE_LITERAL.findAll(prefix).toList()
-            val imageRef = images.lastOrNull()?.groupValues?.get(1)
+            val imageRef = images.lastOrNull()?.groupValues?.get(1) ?: lastImageVariable(prefix, variables)
             // In a map of animations the statement holds the entries before this one too; start after the last one's image.
             val ownEntry = images.getOrNull(images.size - 2)?.let { prefix.substring(it.range.last + 1) } ?: prefix
             val label = labelOf(ownEntry, imageRef)
@@ -50,6 +58,10 @@ internal class DartAnimationScanner(private val resolveImage: (String) -> String
         }
         return SourceAnimation(label, frames, (stepTime * 1000).roundToInt())
     }
+
+    /** The image variable named last before the call, when the image was loaded into one. */
+    private fun lastImageVariable(prefix: String, variables: Map<String, String>): String? =
+        IDENTIFIER.findAll(prefix).map { it.value }.lastOrNull(variables::containsKey)?.let(variables::getValue)
 
     // ---- SpriteSheet(...).createAnimation ----------------------------------
 
@@ -130,6 +142,7 @@ internal class DartAnimationScanner(private val resolveImage: (String) -> String
     private companion object {
         val SEQUENCED = Regex("SpriteAnimationData\\s*\\.\\s*sequenced\\s*\\(")
         val SHEET_DECLARATION = Regex("\\b(\\w+)\\s*=\\s*SpriteSheet\\s*\\(")
+        val IMAGE_VARIABLE = Regex("\\b(\\w+)\\s*=\\s*(?:await\\s+)?[\\w.]*\\bload\\s*\\(\\s*['\"]([^'\"]+\\.(?:png|webp|jpg|jpeg))['\"]", RegexOption.IGNORE_CASE)
         val IMAGE_LITERAL = Regex("['\"]([^'\"]+\\.(?:png|webp|jpg|jpeg))['\"]", RegexOption.IGNORE_CASE)
         val IDENTIFIER = Regex("[A-Za-z_][A-Za-z0-9_]*")
         val NOISE = setOf(

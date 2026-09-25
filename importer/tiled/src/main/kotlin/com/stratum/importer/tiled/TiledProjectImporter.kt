@@ -14,8 +14,7 @@ class TiledProjectImporter : ProjectImporter {
     override fun recognises(source: ImportSource): Boolean = TiledReader.mapPathsIn(source).isNotEmpty()
 
     override fun import(source: ImportSource): ImportResult {
-        val reader = TiledReader(source)
-        val maps = TiledReader.mapPathsIn(source).map(reader::readMap)
-        return TiledPackBuilder(PackIdentity(namespace = source.name, name = source.name)).build(maps)
+        val read = TiledReader(source).readMaps(TiledReader.mapPathsIn(source))
+        return TiledPackBuilder(PackIdentity(namespace = source.name, name = source.name)).build(read.maps, warnings = read.warnings)
     }
 }

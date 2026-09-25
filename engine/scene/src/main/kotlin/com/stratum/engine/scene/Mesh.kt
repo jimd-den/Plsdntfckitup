@@ -186,23 +186,53 @@ class TextureLibrary {
     val allMaps: List<Texture> get() = maps
     val keys: Set<String> get() = layers.keys
 
-    /** Adds or replaces a texture, keeping the layer index if the key existed. */
+    /**
+     * Adds or replaces a texture, keeping the layer index if the key existed.
+     *
+     * Returns -1, and adds nothing, once [MAX_TILES] tiles are held: a tile
+     * numbered [MAP_BASE] or above would be read as a ground map, and every
+     * tile past that point would silently draw untextured.
+     */
     fun put(key: String, texture: Texture): Int {
         val existing = layers[key]
         if (existing != null) {
             if (existing >= MAP_BASE) maps[existing - MAP_BASE] = texture else textures[existing] = texture
             return existing
         }
-        val layer = if (com.stratum.core.domain.art.GroundMap.isMap(key)) {
-            maps += texture
-            MAP_BASE + maps.lastIndex
-        } else {
-            textures += texture
-            textures.lastIndex
+        val layer = when {
+            com.stratum.core.domain.art.GroundMap.isMap(key) -> {
+                maps += texture
+                MAP_BASE + maps.lastIndex
+            }
+            textures.size >= MAX_TILES -> return -1
+            else -> {
+                textures += texture
+                textures.lastIndex
+            }
         }
         layers[key] = layer
         variantCache.clear()
         return layer
+    }
+
+    /** Draws [key] with the texture already held for [target], without a second copy. False when there is none. */
+    fun alias(key: String, target: String): Boolean {
+        val layer = layers[target] ?: return false
+        layers[key] = layer
+        variantCache.clear()
+        return true
+    }
+
+    /**
+     * Gives every block with a top painting but no side painting its top on
+     * its sides too. Imported tiles are one painting per block; drawn flat on
+     * the sides they read as a lid on a plain box.
+     */
+    fun aliasMissingSides(keys: Collection<String> = layers.keys) {
+        keys.filter { it.endsWith(TOP) }.forEach { top ->
+            val side = top.removeSuffix(TOP) + SIDE
+            if (side !in layers) alias(side, top)
+        }
     }
 
     fun layerOf(key: String?): Int = key?.let(layers::get) ?: -1
@@ -236,6 +266,12 @@ class TextureLibrary {
          * second array; see Vertex.LAYER.
          */
         const val MAP_BASE = 1024
+
+        /** The most tiles a library holds; see [put]. */
+        const val MAX_TILES = MAP_BASE
+
+        private const val TOP = "/top"
+        private const val SIDE = "/side"
     }
 
     fun textureAt(layer: Int): Texture? =

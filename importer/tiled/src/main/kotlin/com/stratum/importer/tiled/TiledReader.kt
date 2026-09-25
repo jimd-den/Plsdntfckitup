@@ -14,6 +14,24 @@ class TiledReader(private val source: ImportSource) {
 
     private val tilesets = HashMap<String, TiledTileset>()
 
+    /** Maps read, and one warning for each that could not be. */
+    data class MapsRead(val maps: List<TiledMap>, val warnings: List<String>)
+
+    /**
+     * Reads every map in [paths], skipping any that fail. A project with one
+     * infinite or broken map still has the others, and the player is told
+     * which was left out and why.
+     */
+    fun readMaps(paths: List<String>): MapsRead {
+        val results = paths.map { path -> path to runCatching { readMap(path) } }
+        return MapsRead(
+            maps = results.mapNotNull { (_, result) -> result.getOrNull() },
+            warnings = results.mapNotNull { (path, result) ->
+                result.exceptionOrNull()?.let { "Map '$path' was left out: ${it.message}" }
+            },
+        )
+    }
+
     fun readMap(path: String): TiledMap {
         val text = textOf(path)
         return when (ProjectPaths.extensionOf(path)) {

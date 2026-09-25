@@ -39,22 +39,29 @@ class TiledProjectImporterTest {
     }
 
     @Test
-    fun `wall tiles are solid and decoration lies flat and walkable`() {
+    fun `wall tiles are solid terrain and decoration is walkable scenery`() {
         val blocks = result.pack.blocks.associateBy { it.id }
         val wall = blocks.getValue(map.layers.single { it.name == "Walls" }.blockIdAt(0, 0)!!)
         val flower = blocks.getValue(map.layers.single { it.name == "Decor" }.blockIdAt(1, 1)!!)
 
         assertTrue(wall.isSolid)
         assertEquals(BlockShape.CUBE, wall.shape)
+        assertNull(wall.glyph)
         assertFalse(flower.isSolid)
-        assertEquals(BlockShape.FLOOR, flower.shape)
+        assertNotNull(flower.glyph, "scenery is drawn as a standing sprite")
+        assertTrue(result.textures.any { it.key == "prop:${flower.id}" })
         assertEquals("Flower", flower.displayName)
     }
 
     @Test
-    fun `a colour property on a tile becomes the block's colour`() {
-        val grass = result.pack.blocks.single { it.id == map.groundBlockId }
+    fun `a colour property on a tile becomes the block's colour, and the ground's`() {
+        val grassId = map.layers.single { it.name == "Ground" }.blockIdAt(0, 0)
+        val grass = result.pack.blocks.single { it.id == grassId }
+        val ground = result.pack.blocks.single { it.id == map.groundBlockId }
+
         assertEquals(0xFF3A7D44, grass.topColor)
+        assertEquals(0xFF3A7D44, ground.topColor, "the fill takes the floor's authored colour")
+        assertTrue(result.textures.none { it.key.startsWith(map.groundBlockId + "/") }, "the fill is plain, not a repeated tile")
     }
 
     @Test
@@ -77,12 +84,13 @@ class TiledProjectImporterTest {
     }
 
     @Test
-    fun `every tile gets top and side textures cut from its tileset`() {
-        val grassTop = result.textures.single { it.key == "${map.groundBlockId}/top" }
+    fun `every tile gets one texture cut from its tileset`() {
+        val grassId = map.layers.single { it.name == "Ground" }.blockIdAt(0, 0)
+        val grassTop = result.textures.single { it.key == "$grassId/top" }
 
         assertEquals("images/overworld.png", grassTop.region.imagePath)
         assertEquals(0, grassTop.region.x)
-        assertTrue(result.textures.any { it.key == "${map.groundBlockId}/side" })
+        assertTrue(result.textures.none { it.key == "$grassId/side" }, "sides reuse the top in the renderer")
     }
 
     @Test
