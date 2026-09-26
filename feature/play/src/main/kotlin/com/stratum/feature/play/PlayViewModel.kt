@@ -3,41 +3,69 @@ package com.stratum.feature.play
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.SkillDefinition
+import com.stratum.core.domain.art.ArtDirection
+import com.stratum.core.domain.art.BiomeArtKit
+import com.stratum.core.domain.art.StyleLexicon
+import com.stratum.core.domain.art.StyleSheetArtDirector
+import com.stratum.core.domain.art.WorldArtDirector
+import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.AssembledContent
+import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.difficulty.Difficulty
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.sprite.AnimationPlayback
+import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
-import com.stratum.engine.world.IsometricProjection
+import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.AttackReport
-import com.stratum.engine.world.CombatEvent
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
+import com.stratum.engine.world.CheckAttempt
+import com.stratum.engine.scene.forge.ForgeProgress
+import com.stratum.engine.world.CombatEvent
+import com.stratum.engine.world.CraftResult
+import com.stratum.engine.world.Held
+import com.stratum.engine.world.PassiveResult
+import com.stratum.engine.world.SupportResult
+import com.stratum.engine.world.SurvivalResult
+import com.stratum.engine.world.RealmEvent
+import com.stratum.engine.world.RealmResult
+import com.stratum.core.domain.strategy.Affordability
+import com.stratum.core.domain.strategy.Colony
+import com.stratum.core.domain.strategy.FollowerOrder
 import com.stratum.engine.world.DodgeResult
-import com.stratum.core.domain.sprite.AnimationPlayback
-import com.stratum.engine.world.FeedbackMark
 import com.stratum.engine.world.EquipResult
+import com.stratum.engine.world.FeedbackMark
 import com.stratum.engine.world.GroundInsert
 import com.stratum.engine.world.GroundLoot
 import com.stratum.engine.world.HeldInsert
-import com.stratum.engine.world.SocketResult
+import com.stratum.engine.world.IsometricProjection
 import com.stratum.engine.world.MineResult
 import com.stratum.engine.world.PlaceRejection
 import com.stratum.engine.world.PlaceResult
 import com.stratum.engine.world.ReviveResult
+import com.stratum.engine.world.SocketResult
 import com.stratum.engine.world.WorldSession
+import com.stratum.feature.play.gl.AndroidImageCodec
+import com.stratum.feature.play.gl.ForgedKits
+import java.io.File
+import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.android.awaitFrame
 
 /**
  * Drives one play session.
@@ -56,14 +84,66 @@ class PlayViewModel(
      * otherwise free of one.
      */
     private val spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+    /**
+     * What the player asked their world to look like, in their own words.
+     *
+     * Empty is the house style. Anything else is read by [StyleLexicon] into a
+     * set of rendering rules, so "dark", "kawaii" or "a weird old woodblock
+     * print" are all the same amount of work and none of them touch the
+     * simulation.
+     */
+    private val stylePrompt: String = "",
+    /**
+     * Draws new art for a style the player typed, or null when no image model
+     * is configured. OpenRouter with `meta/muse-image` in the shipped app.
+     */
+    private val imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+    /** Where kits forged on this device are kept between runs. */
+    private val kitDirectory: File? = null,
+    /** Texture folders of imported packs, drawn over whichever kit the style picks. */
+    private val kitOverlays: List<File> = emptyList(),
+    /** The player's graphics choice when the run began; null lets the device decide. */
+    quality: QualityTier? = null,
+    /** Keeps a new graphics choice for next time. Supplied by the composition root. */
+    private val saveQuality: (QualityTier?) -> Unit = {},
+    /** Keeps the world style for next time, so a painted style is still worn after a restart. */
+    private val saveStyle: (String) -> Unit = {},
+    /** The character carried in from earlier play, or null for a new one. */
+    hero: HeroSave? = null,
+    /** Keeps the character for next time. Called off the main thread except when the screen closes. */
+    private val saveHero: (HeroSave) -> Unit = {},
 ) : ViewModel() {
+
+    private val initialQuality = quality
 
     /**
      * Replaced wholesale by [newRun]. Every reader goes through this field
      * rather than capturing it, so starting a fresh world cannot leave a lambda
      * pointing at the world the player just left.
      */
-    private var session = WorldSession(content, config, heroClassId)
+    private var session = WorldSession(content, config, heroClassId, hero = hero)
+
+    /** When the hero was last written down, in play seconds, and at what level. */
+    private var savedAtElapsed = 0f
+    private var savedLevel = session.player.level
+
+    /**
+     * The ingredients each region is drawn from, read out of the loaded packs.
+     *
+     * Derived rather than authored, so a pack a model generated a minute ago is
+     * art directed exactly as well as the one that shipped with the game.
+     */
+    private val artKits: Map<String, BiomeArtKit> = content.packs
+        .flatMap { BiomeArtKit.deriveAll(it).entries }
+        .associate { it.key to it.value }
+
+    private var artDirector: WorldArtDirector = directorFor(stylePrompt)
+
+    /** Accumulated play time, which is what the light and the weather drift on. */
+    private var elapsed = 0f
+
+    /** The current roll of the current prompt, so a reroll is the next one. */
+    private var styleSeed: Long = stylePrompt.lowercase().hashCode().toLong()
 
     private val _state = MutableStateFlow(initialState(content))
     val state: StateFlow<PlayUiState> = _state.asStateFlow()
@@ -107,6 +187,234 @@ class PlayViewModel(
      * the world run slow for a moment rather than teleporting the player through
      * a wall — falling behind is recoverable, tunnelling is not.
      */
+    /**
+     * Changes what the world looks like, without changing the world.
+     *
+     * The seed comes from the prompt, so asking for the same thing twice gives
+     * the same world back; passing a different one is the reroll. Nothing here
+     * touches a block, a monster or the player's bag — a restyle is a change of
+     * opinion about colour, not a new game.
+     */
+    fun restyle(prompt: String, seed: Long = prompt.lowercase().hashCode().toLong()) {
+        artDirector = directorFor(prompt, seed)
+        styleSeed = seed
+        _state.value = _state.value.copy(
+            artDirector = artDirector,
+            stylePrompt = prompt,
+            styleSummary = artDirector.direction.summary,
+            kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
+        )
+        saveStyle(prompt)
+    }
+
+    /**
+     * Paints the current style's asset kit with the image model.
+     *
+     * One call per style, a dozen or so images, cents rather than dollars: the
+     * forge plans only the ground, cliff faces, walls and prop kinds of the
+     * region the player is standing in, never the world. What it finishes is
+     * saved and swapped in as it arrives, so the world repaints itself while
+     * the player watches, and anything that fails simply stays as it was.
+     */
+    /**
+     * Changes how hard the renderer works, and remembers it. Null hands the
+     * choice back to the device. Takes effect on the next frame; nothing about
+     * the world changes.
+     */
+    fun chooseQuality(tier: QualityTier?) {
+        _state.value = _state.value.copy(quality = tier)
+        saveQuality(tier)
+    }
+
+    /**
+     * Paints this style's textures, the part of the world the lighting
+     * restyle cannot change. Runs in the background while the player plays;
+     * each finished texture is swapped in as it lands, and the Style panel
+     * shows how far along it is.
+     */
+    fun forgeStyle() {
+        val model = imageModel ?: return publish(message = "Add an OpenRouter key in Model provider to paint textures")
+        val root = kitDirectory ?: return publish(message = "No storage for forged art")
+        if (_state.value.forgeProgress?.isFinished == false) return
+        val direction = artDirector.direction
+        val biome = session.currentBiome.id
+        val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
+        val runner = TextureForgeRunner(model, root)
+        val plan = runner.plan(direction, pack, setOf(biome), includeActors = true)
+        if (plan.isEmpty) {
+            _state.value = _state.value.copy(kit = plan.kit)
+            return publish(message = "This style is already painted")
+        }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val finished = runner.run(plan) { progress ->
+                _state.value = _state.value.copy(forgeProgress = progress, kit = plan.kit)
+            }
+            // Back on the main thread: publishing reads the session, which the
+            // game loop mutates there.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                publish(message = "Painted ${finished.made.size} of ${plan.orders.size}")
+            }
+        }
+    }
+
+    /** The same request again, somewhere else. Asking twice should not be futile. */
+    fun rerollStyle() {
+        restyle(_state.value.stylePrompt, styleSeed + 1)
+    }
+
+    fun toggle3D() {
+        _state.value = _state.value.copy(use3D = !_state.value.use3D)
+    }
+
+    fun toggleStyle() {
+        _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
+    }
+
+    // ---- survival ----------------------------------------------------------
+
+    fun toggleCamp() {
+        _state.value = _state.value.copy(campOpen = !_state.value.campOpen)
+        publish()
+    }
+
+    fun eat(itemId: String) = publish(message = describe(session.consume(itemId)))
+
+    fun drink() = publish(message = describe(session.drink()))
+
+    fun make(recipeId: String) = publish(message = describe(session.make(recipeId)))
+
+    private fun describe(result: SurvivalResult): String = when (result) {
+        is SurvivalResult.Consumed -> "Ate ${result.food.name}"
+        is SurvivalResult.Drank -> "You drink deep"
+        is SurvivalResult.Made -> "Made ${result.recipe.name.lowercase()}"
+        SurvivalResult.NoneHeld -> "You have none"
+        SurvivalResult.NoWaterNear -> "No water within reach"
+        SurvivalResult.NeedsStation -> "That needs a fire, or the right workbench"
+        SurvivalResult.MissingIngredients -> "Missing ingredients"
+        SurvivalResult.Unknown -> "That does not exist here"
+    }
+
+    /** What the HUD and the camp panel show of the body. Recipes are only worked out while the panel is open. */
+    private fun survivalPanel(): SurvivalPanel {
+        if (!session.survivalActive) return SurvivalPanel()
+        val environment = session.surroundings
+        return SurvivalPanel(
+            active = true,
+            needs = session.content.needs.map { NeedView(it, session.player.needs[it.id] ?: com.stratum.core.domain.survival.Survival.MAX) },
+            night = session.clock.isNight,
+            day = session.clock.day,
+            sheltered = environment.sheltered,
+            nearFire = environment.nearFire,
+            canDrink = session.canDrink,
+            food = session.heldFood,
+            recipes = if (_state.value.campOpen) session.recipeOptions else emptyList(),
+        )
+    }
+
+    // ---- realm -------------------------------------------------------------
+
+    fun toggleRealm() {
+        _state.value = _state.value.copy(realmOpen = !_state.value.realmOpen)
+        publish()
+    }
+
+    fun foundOutpost() = publish(message = describe(session.foundOutpost("Outpost ${session.outposts.size + 1}")))
+
+    fun deposit() = publish(message = describe(session.deposit()))
+
+    fun buildStructure(structureId: String) = session.currentOutpost?.let { publish(message = describe(session.build(it.id, structureId))) }
+
+    fun recruit(unitId: String) = session.currentOutpost?.let { publish(message = describe(session.recruit(it.id, unitId))) }
+
+    fun muster() = publish(message = describe(session.muster()))
+
+    fun command(order: FollowerOrder) = publish(message = describe(session.command(order)))
+
+    private fun describe(result: RealmResult): String = when (result) {
+        is RealmResult.Founded -> "${result.outpost.name} is founded"
+        is RealmResult.Built -> "Built ${session.content.strategyBook.structure(result.structureId)?.name ?: "it"}"
+        is RealmResult.Recruited -> "${session.content.strategyBook.unit(result.unitId)?.name ?: "A soldier"} joins the garrison"
+        is RealmResult.Deposited -> if (result.gained.isEmpty()) "Nothing you carry is of use here" else "Stored " + result.gained.entries.joinToString(", ") { (id, n) -> "${n.toInt()} ${resourceName(id)}" }
+        is RealmResult.Mustered -> "${result.count} follow you"
+        is RealmResult.Ordered -> result.order.label
+        is RealmResult.CannotAfford -> when (val why = result.why) {
+            is Affordability.Missing -> "Short of " + why.resources.keys.joinToString(", ", transform = ::resourceName)
+            is Affordability.Requires -> "Needs a ${session.content.strategyBook.structure(why.structureId)?.name ?: why.structureId} first"
+            Affordability.AtLimit -> "There is no room for another"
+            else -> "That cannot be done here"
+        }
+        RealmResult.NotHere -> "Stand inside an outpost for that"
+        RealmResult.TooClose -> "Too close to a town or another outpost"
+        RealmResult.NotEnoughBlocks -> "Founding takes ${com.stratum.core.domain.strategy.StandardStrategy.FOUNDING_BLOCKS} blocks from your bag"
+        RealmResult.NoStrategy -> "This world has no outposts"
+        RealmResult.NoneToMuster -> "Nobody in the garrison to muster"
+    }
+
+    private fun describe(event: RealmEvent): String = when (event) {
+        is RealmEvent.RaidArrived -> "Raiders at ${event.outpost.name}: ${event.attackers} of them"
+        is RealmEvent.RaidRepelled -> "${event.outpost.name} holds"
+        is RealmEvent.RaidResolved -> if (event.outcome.defended) {
+            "${event.outpost.name} beat off a raid"
+        } else {
+            "${event.outpost.name} was sacked" + if (event.outcome.razed.isNotEmpty()) ", and a building burned" else ""
+        }
+    }
+
+    private fun resourceName(id: String): String = session.content.strategyBook.resources.firstOrNull { it.id == id }?.name?.lowercase() ?: id
+
+    /** What the realm panel shows. Options are only worked out while it is open. */
+    private fun realmPanel(): RealmPanel {
+        if (!session.realmActive) return RealmPanel()
+        val book = session.content.strategyBook
+        val here = session.currentOutpost
+        val open = _state.value.realmOpen
+        return RealmPanel(
+            active = true,
+            here = here,
+            outposts = session.outposts,
+            resources = book.resources,
+            netPerMinute = here?.let { Colony.netPerMinute(it, book) }.orEmpty(),
+            population = here?.let { Colony.population(it, book) } ?: 0,
+            workers = here?.let { Colony.workersNeeded(it, book) } ?: 0,
+            defense = here?.let { Colony.defense(it, book) } ?: 0,
+            structures = if (open && here != null) book.structures.map { RealmOption(it, Colony.canBuild(here, book, it.id), here.count(it.id)) } else emptyList(),
+            units = if (open && here != null) book.units.map { RealmOption(it, Colony.canRecruit(here, book, it.id), here.garrison[it.id] ?: 0) } else emptyList(),
+            followers = session.followers.size,
+            order = session.followerOrder,
+        )
+    }
+
+    fun toggleTable() {
+        _state.value = _state.value.copy(tableOpen = !_state.value.tableOpen)
+    }
+
+    /** Rolls a tabletop check and reads the result out the way a table would. */
+    fun rollCheck(checkId: String) {
+        when (val attempt = session.attemptCheck(checkId)) {
+            is CheckAttempt.Rolled -> {
+                val result = attempt.result
+                val effect = result.effect
+                val verdict = when {
+                    effect != null -> "${effect.boon.name} for ${effect.remainingSeconds.toInt()}s"
+                    result.outcome.succeeded -> "Success"
+                    else -> "Failure"
+                }
+                publish(message = "${result.check.name}: ${result.summary}. $verdict")
+            }
+            is CheckAttempt.OnCooldown -> publish(message = "Ready again in ${attempt.secondsLeft.toInt() + 1}s")
+            CheckAttempt.UnknownCheck -> publish(message = "That check is not available")
+            CheckAttempt.Refused -> Unit
+        }
+    }
+
+    private fun directorFor(
+        prompt: String,
+        seed: Long = prompt.lowercase().hashCode().toLong(),
+    ): WorldArtDirector = StyleSheetArtDirector(
+        direction = StyleLexicon.interpret(prompt, ArtDirection.HOUSE, seed).direction,
+        kits = artKits,
+    )
+
     private fun startLoop() {
         loopJob?.cancel()
         loopJob = viewModelScope.launch {
@@ -119,8 +427,10 @@ class PlayViewModel(
                     ((now - previousFrame) / NANOS_PER_SECOND).coerceIn(MIN_STEP, MAX_STEP)
                 }
                 previousFrame = now
+                elapsed += delta
 
                 val events = session.tick(delta)
+                autosave()
                 if (events.isEmpty()) {
                     publish()
                 } else {
@@ -141,6 +451,8 @@ class PlayViewModel(
         // would drown out the messages that are not.
         is CombatEvent.PlayerHurt -> null
         is CombatEvent.InsertTaken -> "Picked up ${event.insert.name}"
+        is CombatEvent.TownLiberated -> "${event.town.name} is liberated, and yours to hold"
+        is CombatEvent.Realm -> describe(event.event)
     }
 
     // ---- dying -----------------------------------------------------------
@@ -163,18 +475,21 @@ class PlayViewModel(
     }
 
     /**
-     * Throws the world away and starts another, with the same class and a new
-     * seed. Everything the character had goes with it — that is the difference
-     * between this and [revive].
+     * Leaves this world for a new one with a new seed. The hero goes along --
+     * level, tree, gear, pouch -- and the world stays behind: the difference
+     * between this and [revive] is where you stand, not who you are.
      */
-    fun newRun() {
+    fun newRun() = newWorld(session.difficulty)
+
+    private fun newWorld(difficulty: Difficulty) {
         miningJob?.cancel()
         loopJob?.cancel()
-        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId)
+        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
+        persist()
         // The panels belong to the run that just ended; a fresh world opens on
         // the world, not on someone else's bag.
         _state.value = initialState(content)
-        publish(message = "A new world.")
+        publish(message = if (difficulty.isBase) "A new world." else "A new world, tier ${difficulty.tier}.")
         startLoop()
     }
 
@@ -244,6 +559,17 @@ class PlayViewModel(
         projection = IsometricProjection(),
         palette = content.palette,
         biomeName = session.currentBiome.name,
+        artDirector = artDirector,
+        stylePrompt = stylePrompt,
+        styleSummary = artDirector.direction.summary,
+        kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
+        kitOverlays = kitOverlays,
+        quality = initialQuality,
+        checks = content.checks,
+        // A lambda rather than a bound reference: starting a fresh world
+        // replaces the session, and a captured reference would keep answering
+        // for the world the player just left.
+        biomeAt = { x, y -> session.biomeAt(x, y) },
     )
 
     /**
@@ -251,7 +577,10 @@ class PlayViewModel(
      * integrates it on its own clock, so this only records intent.
      */
     fun setMoveInput(dx: Float, dy: Float) {
-        session.setMoveInput(dx, dy)
+        // The stick is screen-relative: up walks up the screen, whichever way
+        // the world's axes happen to run under it.
+        val world = com.stratum.engine.world.IsometricProjection.screenToWorldDirection(dx, dy)
+        session.setMoveInput(world.x, world.y)
     }
 
     /** Single nudge, for anything that is not the stick. */
@@ -389,6 +718,7 @@ class PlayViewModel(
             BuildResult.OutOfBlocks -> publish(message = "Out of blocks")
             BuildResult.NothingSelected -> publish(message = "Nothing selected to build with")
             BuildResult.NothingToBuild -> publish()
+            is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
         }
     }
 
@@ -412,6 +742,8 @@ class PlayViewModel(
             player = snapshot.player,
             camera = snapshot.player.position,
             biomeName = snapshot.biome.name,
+            // The session's clock, so the light and the cold agree on when night is.
+            worldTime = WorldTime(dayFraction = session.clock.dayFraction, elapsedSeconds = elapsed),
             miningTarget = snapshot.miningTarget,
             miningFraction = snapshot.miningFraction,
             worldRevision = snapshot.worldRevision,
@@ -434,8 +766,30 @@ class PlayViewModel(
             buildPreview = snapshot.buildPreview,
             buildTool = snapshot.buildTool,
             skills = snapshot.skills,
+            activeBoons = snapshot.activeBoons,
+            checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
+            heldCurrency = session.heldCurrency,
+            survival = survivalPanel(),
+            realm = realmPanel(),
+            settlementName = snapshot.settlement?.name,
+            settlementHostile = snapshot.settlementHostile,
+            hero = heroPanel(),
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
+        )
+    }
+
+    private fun heroPanel(): HeroPanelState {
+        val panel = _state.value.hero
+        if (!panel.open) return panel
+        val build = session.passiveBuild
+        return panel.copy(
+            tree = session.passiveTree,
+            startId = build?.startId,
+            supportsBySkill = session.skills.associate { it.id to session.supportsOn(it.id) },
+            heldSupports = session.heldSupports,
+            tier = session.difficulty.tier,
+            worldMods = session.difficulty.mods,
         )
     }
 
@@ -460,7 +814,119 @@ class PlayViewModel(
         PlaceRejection.ACTOR_IN_THE_WAY -> "You are standing there"
     }
 
+    // ---- the hero ------------------------------------------------------------
+
+    fun toggleHero() {
+        val hero = _state.value.hero
+        _state.value = _state.value.copy(hero = hero.copy(open = !hero.open))
+        publish()
+    }
+
+    fun selectHeroTab(tab: HeroTab) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(tab = tab))
+    }
+
+    /** Selects a node and lights the path to it, so the player sees the cost before paying it. */
+    fun selectPassive(nodeId: String) {
+        val path = session.passiveBuild?.pathTo(nodeId).orEmpty()
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(selectedNode = nodeId, path = path))
+    }
+
+    fun allocatePassive() {
+        val nodeId = _state.value.hero.selectedNode ?: return
+        val message = when (val result = session.allocatePassive(nodeId)) {
+            is PassiveResult.Allocated -> "Took ${result.nodes.last().name}" + if (result.nodes.size > 1) " and ${result.nodes.size - 1} on the way" else ""
+            is PassiveResult.NotEnoughPoints -> "Needs ${result.needed} points; you have ${result.available}"
+            PassiveResult.Unreachable -> "Nothing you hold reaches it"
+            PassiveResult.AlreadyTaken -> "Already yours"
+            else -> null
+        }
+        afterPassiveChange(message)
+    }
+
+    fun refundPassive() {
+        val nodeId = _state.value.hero.selectedNode ?: return
+        val message = when (val result = session.refundPassive(nodeId)) {
+            is PassiveResult.Refunded -> "Gave back ${result.node.name}"
+            PassiveResult.HoldsOthers -> "Other nodes you hold depend on it"
+            else -> null
+        }
+        afterPassiveChange(message)
+    }
+
+    private fun afterPassiveChange(message: String?) {
+        _state.value.hero.selectedNode?.let(::selectPassive)
+        persist()
+        publish(message = message)
+    }
+
+    fun selectSkill(skillId: String) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(selectedSkill = skillId))
+        publish()
+    }
+
+    /** Links a held support to the selected skill, or the first one. */
+    fun linkSupport(supportId: String) {
+        val skillId = _state.value.hero.selectedSkill ?: session.skills.firstOrNull()?.id ?: return
+        publish(message = describe(session.linkSupport(skillId, supportId)))
+        persist()
+    }
+
+    fun unlinkSupport(skillId: String, supportId: String) {
+        publish(message = describe(session.unlinkSupport(skillId, supportId)))
+        persist()
+    }
+
+    private fun describe(result: SupportResult): String = when (result) {
+        is SupportResult.Linked -> "${result.support.name} linked to ${result.skill.name}"
+        is SupportResult.Unlinked -> "${result.support.name} back in the pouch"
+        SupportResult.SkillFull -> "That skill holds ${com.stratum.core.domain.crafting.StandardCrafting.MAX_SUPPORTS_PER_SKILL} supports"
+        SupportResult.AlreadyLinked -> "Already linked there"
+        SupportResult.NoneHeld -> "You hold none of those"
+        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked -> "That does not fit"
+    }
+
+    /** Spends currency on the item the anvil is showing. */
+    fun craft(currencyId: String) {
+        val item = _state.value.anvilItem ?: return
+        val message = when (val result = session.craft(item.instanceId, currencyId)) {
+            is CraftResult.Crafted -> "${result.currency.name}: ${result.after.name}"
+            is CraftResult.NoEffect -> result.reason
+            CraftResult.NoneHeld -> "You hold none of those"
+            CraftResult.NoSuchItem, CraftResult.NoSuchCurrency -> null
+        }
+        persist()
+        publish(message = message)
+    }
+
+    /** Opens a new world at a tier this hero has reached. */
+    fun enterTier(tier: Int) {
+        if (tier !in 0..session.player.highestTier) return publish(message = "Fell a champion at tier ${session.player.highestTier} first")
+        newWorld(Difficulty(tier))
+    }
+
+    /** Spends a waystone on a new world at its tier, with its mods. */
+    fun openWaystone(waystoneId: String) {
+        val waystone = session.takeWaystone(waystoneId) ?: return
+        newWorld(Difficulty.of(waystone))
+    }
+
+    /** Writes the hero down now and then: on a level, and every minute of play. */
+    private fun autosave() {
+        val levelled = session.player.level != savedLevel
+        if (levelled || elapsed - savedAtElapsed > AUTOSAVE_SECONDS) persist()
+    }
+
+    private fun persist() {
+        savedAtElapsed = elapsed
+        savedLevel = session.player.level
+        val save = session.heroSave(savedAt = System.currentTimeMillis())
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { saveHero(save) }
+    }
+
     override fun onCleared() {
+        // Straight away rather than launched: the scope is about to be cancelled.
+        saveHero(session.heroSave(savedAt = System.currentTimeMillis()))
         miningJob?.cancel()
         loopJob?.cancel()
         super.onCleared()
@@ -474,16 +940,31 @@ class PlayViewModel(
         private const val MAX_STEP = 1f / 15f
         private const val MIN_ZOOM = 0.6f
         private const val MAX_ZOOM = 2.2f
+        private const val AUTOSAVE_SECONDS = 60f
 
         fun factory(
             content: AssembledContent,
             config: WorldConfig,
             heroClassId: String? = null,
             spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
+            imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
+            kitDirectory: File? = null,
+            kitOverlays: List<File> = emptyList(),
+            quality: QualityTier? = null,
+            saveQuality: (QualityTier?) -> Unit = {},
+            /** Read only when the view model is created, so a recomposition does not touch the disk. */
+            loadHero: () -> HeroSave? = { null },
+            saveHero: (HeroSave) -> Unit = {},
+            stylePrompt: String = "",
+            saveStyle: (String) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PlayViewModel(content, config, heroClassId, spriteResolver) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
+                content, config, heroClassId, spriteResolver,
+                imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
+                quality = quality, saveQuality = saveQuality, hero = loadHero(), saveHero = saveHero,
+                stylePrompt = stylePrompt, saveStyle = saveStyle,
+            ) as T
         }
     }
 }
@@ -529,6 +1010,46 @@ data class PlayUiState(
     val skills: List<SkillDefinition> = emptyList(),
     /** Advances every tick so the canvas redraws while the fight is moving. */
     val frame: Int = 0,
+    /** How the world is drawn. Swapped by [PlayViewModel.restyle], never by the canvas. */
+    val artDirector: WorldArtDirector = StyleSheetArtDirector(),
+    val worldTime: WorldTime = WorldTime(),
+    val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
+    /** What the player last asked for, so the field can show it back to them. */
+    val stylePrompt: String = "",
+    /** What the game understood by it, which is how a player learns the vocabulary. */
+    val styleSummary: String = "",
+    val styleOpen: Boolean = false,
+    /** Which forged asset kit the 3D view draws with. */
+    val kit: String = "house",
+    /** Imported packs' textures, laid over [kit]. */
+    val kitOverlays: List<File> = emptyList(),
+    /** The graphics tier the player chose; null is the device's own. */
+    val quality: QualityTier? = null,
+    /** Tabletop checks the loaded plugins offer. */
+    val checks: List<SkillCheck> = emptyList(),
+    /** Seconds until each check can be rolled again; 0 when ready. */
+    val checkCooldowns: Map<String, Float> = emptyMap(),
+    /** Boons and banes running from checks. */
+    val activeBoons: List<ActiveBoon> = emptyList(),
+    val tableOpen: Boolean = false,
+    /** The lit 3D view, or the flat 2D canvas it replaced. */
+    val use3D: Boolean = true,
+    /** The texture forge's latest progress, or null when it has not run. */
+    val forgeProgress: ForgeProgress? = null,
+    /** Needs, food and the camp's recipes. */
+    val survival: SurvivalPanel = SurvivalPanel(),
+    val campOpen: Boolean = false,
+    /** Outposts, their stock and the followers in the field. */
+    val realm: RealmPanel = RealmPanel(),
+    val realmOpen: Boolean = false,
+    /** The town the player stands in, or null in the wilds. */
+    val settlementName: String? = null,
+    /** Whether that town is a stronghold held against the player. */
+    val settlementHostile: Boolean = false,
+    /** Crafting currency held, for the anvil. */
+    val heldCurrency: List<Held<CurrencyDefinition>> = emptyList(),
+    /** The tree, skills and worlds panel. */
+    val hero: HeroPanelState = HeroPanelState(),
     val message: String? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive
@@ -537,9 +1058,9 @@ data class PlayUiState(
 
     fun canAfford(skill: SkillDefinition): Boolean = player.resource >= skill.resourceCost
 
-    /** Everything the player could socket, equipped weapon first. */
+    /** Everything the player could craft on or socket, equipped weapon first. */
     val anvilItems: List<ItemInstance>
-        get() = (listOfNotNull(player.equippedWeapon) + player.bag).filter { it.socketCount > 0 }
+        get() = listOfNotNull(player.equippedWeapon) + player.bag
 
     /**
      * The item the anvil is showing. Falls back rather than showing nothing when

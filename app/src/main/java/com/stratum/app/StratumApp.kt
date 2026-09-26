@@ -1,102 +1,75 @@
 package com.stratum.app
 
+import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import com.stratum.core.data.save.FileHeroSaveStore
+import com.stratum.core.data.settings.WorldStyleStore
+import com.stratum.core.domain.actor.Progression
+import com.stratum.feature.play.TextureForgeActions
+import com.stratum.feature.play.TextureForgeScreen
+import com.stratum.feature.play.TextureForgeViewModel
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.stratum.core.designsystem.component.ActionEmphasis
-import com.stratum.core.designsystem.component.SectionLabel
-import com.stratum.core.designsystem.component.StratumAction
-import com.stratum.core.designsystem.component.StratumDivider
-import com.stratum.core.designsystem.component.StratumPanel
-import com.stratum.core.designsystem.component.StratumSection
-import com.stratum.core.designsystem.component.StratumWell
-import com.stratum.core.designsystem.theme.Space
-import com.stratum.core.designsystem.theme.safeContent
-import com.stratum.core.designsystem.theme.StratumTheme
-import com.stratum.feature.play.PlayScreen
-import com.stratum.core.domain.content.ContentPack
-import com.stratum.feature.forge.ForgeScreen
-import com.stratum.feature.forge.ForgeViewModel
-import com.stratum.feature.forge.SpriteForgeScreen
-import com.stratum.feature.forge.SpriteForgeViewModel
-import com.stratum.feature.forge.PoseForgeScreen
-import com.stratum.feature.forge.WeaponForgeScreen
-import com.stratum.feature.forge.WeaponForgeViewModel
-import com.stratum.feature.forge.PoseForgeViewModel
-import com.stratum.feature.forge.SpriteMapperScreen
-import com.stratum.feature.forge.SpriteMapperViewModel
-import com.stratum.feature.hero.ClassForgeScreen
-import com.stratum.feature.hero.ClassForgeViewModel
 import com.stratum.core.data.hero.CustomClassStore
-import android.graphics.BitmapFactory
 import com.stratum.core.data.sprite.GeneratedSheetPreparer
 import com.stratum.core.data.sprite.PoseGuideRenderer
 import com.stratum.core.data.sprite.PoseSheetComposer
-import com.stratum.core.data.sprite.WeaponPreparer
 import com.stratum.core.data.sprite.SpriteAtlasBaker
-import com.stratum.core.domain.sprite.SheetPreparation
-import com.stratum.core.domain.ai.SavedCharacter
 import com.stratum.core.data.sprite.SpriteExporter
-import com.stratum.core.domain.sprite.SpriteFallback
-import com.stratum.feature.forge.PoseRun
-import com.stratum.core.domain.sprite.AnimationState
-import com.stratum.core.domain.sprite.SpriteMapper
-import com.stratum.core.domain.sprite.SpriteNamespace
-import com.stratum.core.domain.sprite.SpriteSheet
+import com.stratum.core.data.sprite.WeaponPreparer
 import com.stratum.core.domain.ai.ImageReference
 import com.stratum.core.domain.ai.PoseScript
 import com.stratum.core.domain.ai.PoseStep
+import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.content.CustomClassPack
 import com.stratum.core.domain.sprite.OpenPoseImageReader
 import com.stratum.core.domain.sprite.OpenPoseImport
 import com.stratum.core.domain.sprite.OpenPoseJson
-import com.stratum.core.domain.sprite.PoseGuides
-import com.stratum.core.domain.sprite.Skeleton
+import com.stratum.core.domain.sprite.SheetPreparation
+import com.stratum.core.domain.sprite.SpriteFallback
+import com.stratum.core.domain.sprite.SpriteMapper
+import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.WeaponPosing
 import com.stratum.core.domain.sprite.WeaponRig
-import com.stratum.core.domain.content.CustomClassPack
-import com.stratum.core.domain.content.HeroClassDefinition
-import com.stratum.core.designsystem.component.StratumChip
+import com.stratum.feature.forge.ForgeScreen
+import com.stratum.feature.forge.ForgeViewModel
+import com.stratum.feature.forge.PoseForgeScreen
+import com.stratum.feature.forge.PoseForgeViewModel
+import com.stratum.feature.forge.PoseRun
+import com.stratum.feature.forge.SpriteForgeScreen
+import com.stratum.feature.forge.SpriteForgeViewModel
+import com.stratum.feature.forge.SpriteMapperScreen
+import com.stratum.feature.forge.SpriteMapperViewModel
+import com.stratum.feature.forge.WeaponForgeScreen
+import com.stratum.feature.forge.WeaponForgeViewModel
+import com.stratum.feature.hero.ClassForgeScreen
+import com.stratum.feature.hero.ClassForgeViewModel
+import com.stratum.feature.library.LibraryScreen
+import com.stratum.feature.library.LibraryViewModel
 import com.stratum.feature.play.DrawableSprite
 import com.stratum.feature.play.DrawableWeapon
-import com.stratum.feature.play.SpriteKey
 import com.stratum.feature.play.PlayScreen as PlayScreenRoute
 import com.stratum.feature.play.PlayViewModel
+import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW }
 
 /**
  * The app shell.
@@ -123,14 +96,22 @@ fun StratumApp(
     val classStore = remember(context) { CustomClassStore(context) }
     var classRevision by remember { mutableStateOf(0) }
     val customClasses = remember(classRevision) { classStore.all() }
-    val content = remember(forgedPacks, customClasses) {
+    val ai = remember(context) { AiWiring(context) }
+
+    // Games and maps the player imported. Loaded after the first frame, since
+    // it re-reads every archive; the world assembles again when they arrive.
+    val plugins = remember(context, ai) { PluginWiring(context, ai.sprites) }
+    val pluginLibrary by plugins.repository.library.collectAsStateWithLifecycle()
+    LaunchedEffect(plugins) { plugins.repository.refresh() }
+    // Only what resolved, in load order: a plugin missing a dependency never half-loads.
+    val importedPacks = pluginLibrary.activePacks
+
+    val content = remember(forgedPacks, importedPacks, customClasses) {
         GameSetup.assemble(
-            forgedPacks + if (customClasses.isEmpty()) emptyList()
+            importedPacks + forgedPacks + if (customClasses.isEmpty()) emptyList()
             else listOf(CustomClassPack.of(customClasses)),
         )
     }
-
-    val ai = remember(context) { AiWiring(context) }
 
     // Persisted player art choices (hero class, sprite sheet, weapon)
     val initialLoadout = remember(ai) { ai.playerPreferences.load() }
@@ -178,7 +159,17 @@ fun StratumApp(
     // A new seed per run, but stable across recomposition so walking around does
     // not regenerate the world under the player.
     var seed by remember { mutableStateOf(System.currentTimeMillis()) }
-    val config = remember(seed) { GameSetup.worldConfig(seed) }
+    val graphics = remember(context) { GraphicsWiring(context) }
+    // Each class keeps its own hero, carried from world to world.
+    val heroes = remember(context) { FileHeroSaveStore(java.io.File(context.filesDir, "heroes")) }
+    // The look the world is worn in, and where painted textures live.
+    val styles = remember(context) { WorldStyleStore(context) }
+    var stylePrompt by remember { mutableStateOf(styles.load()) }
+    val forgeDirectory = remember(context) { java.io.File(context.filesDir, "forge") }
+    // How the next world plays. Starts from what the packs suggest, and
+    // starts over from it when the packs change.
+    var worldRules by remember(content.suggestedRules) { mutableStateOf(content.suggestedRules) }
+    val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius, worldRules) }
 
     // The service is started by the run beginning, not by the forge opening:
     // it exists to protect work in flight, and one that started with the
@@ -309,7 +300,28 @@ fun StratumApp(
             val unpackedCharacters = remember(characters) {
                 characters.filter { !it.isPacked && it.posesDrawn.isNotEmpty() }
             }
+            val selectedClass = heroClassId ?: content.heroClasses.firstOrNull()?.id
+            // Read after home is shown rather than while it is composed: leaving
+            // play saves the hero as that screen is disposed, which happens
+            // after this composition, and reading first would show the old level.
+            val heroSummary by produceState<HeroSummary?>(null, selectedClass, destination) {
+                value = selectedClass?.let(heroes::load)?.let { hero ->
+                    HeroSummary(
+                        level = hero.level,
+                        tier = hero.highestTier,
+                        unspentPoints = (Progression.passivePointsFor(hero.level) - hero.passives.size).coerceAtLeast(0),
+                        waystones = hero.waystones.size,
+                    )
+                }
+            }
             HomeScreen(
+                worldRules = worldRules,
+                suggestedRules = content.suggestedRules,
+                onRulesChange = { worldRules = it },
+                heroSummary = heroSummary,
+                onTextures = { destination = Destination.TEXTURES },
+                paintedStyle = stylePrompt.ifBlank { null },
+                modelReady = remember(destination) { ai.isConfigured() },
                 packName = content.packs.joinToString(" + ") { it.name },
                 blockCount = content.registry.size,
                 biomeCount = content.biomes.size,
@@ -329,10 +341,27 @@ fun StratumApp(
                     destination = Destination.PLAY
                 },
                 onForge = { destination = Destination.FORGE },
+                onCrew = { destination = Destination.CREW },
                 onSprites = { destination = Destination.SPRITES },
                 spriteCount = spriteSheets.size,
                 onSettings = { destination = Destination.SETTINGS },
                 onStudio = { destination = Destination.STUDIO },
+                onLibrary = { destination = Destination.LIBRARY },
+                importedCount = importedPacks.size,
+                modifier = modifier,
+            )
+        }
+
+        Destination.LIBRARY -> {
+            val viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.factory(plugins.repository))
+            LibraryScreen(
+                viewModel = viewModel,
+                onBack = { destination = Destination.HOME },
+                onShareCreations = {
+                    if (!plugins.shareCreations(customClasses)) {
+                        Toast.makeText(context, "Build a class first", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 modifier = modifier,
             )
         }
@@ -340,20 +369,59 @@ fun StratumApp(
         Destination.PLAY -> {
             // Keyed so forging a pack or starting a new run builds a fresh
             // session rather than reusing the previous world.
-            key(contentWithSprites, config, heroClassId) {
+            ScopedViewModels(listOf(contentWithSprites, config, heroClassId)) {
                 val viewModel: PlayViewModel = viewModel(
                     factory = PlayViewModel.factory(
                         contentWithSprites, config,
                         heroClassId = heroClassId,
                         spriteResolver = spriteResolver,
+                        imageModel = ai.imageModel,
+                        kitDirectory = forgeDirectory,
+                        kitOverlays = plugins.textureDirectories(),
+                        quality = graphics.chosen,
+                        saveQuality = graphics::choose,
+                        loadHero = { (heroClassId ?: contentWithSprites.heroClasses.firstOrNull()?.id)?.let(heroes::load) },
+                        saveHero = heroes::save,
+                        stylePrompt = stylePrompt,
+                        saveStyle = { prompt ->
+                            styles.save(prompt)
+                            stylePrompt = prompt
+                        },
                     ),
                 )
+                ImmersiveMode()
                 PlayScreenRoute(
                     viewModel = viewModel,
                     modifier = modifier,
                     onOpenMenu = { destination = Destination.HOME },
                 )
             }
+        }
+
+        Destination.TEXTURES -> {
+            val forge: TextureForgeViewModel = viewModel(
+                key = "textures-${content.packs.size}",
+                factory = TextureForgeViewModel.factory(
+                    contentWithSprites,
+                    model = ai.imageModel.takeIf { ai.isConfigured() },
+                    root = forgeDirectory,
+                    initialPrompt = stylePrompt,
+                ),
+            )
+            TextureForgeScreen(
+                viewModel = forge,
+                actions = TextureForgeActions(
+                    onBack = { destination = Destination.HOME },
+                    onPlay = { prompt ->
+                        styles.save(prompt)
+                        stylePrompt = prompt
+                        seed = System.currentTimeMillis()
+                        destination = Destination.PLAY
+                    },
+                    onOpenSettings = { destination = Destination.SETTINGS },
+                ),
+                modifier = modifier,
+            )
         }
 
         Destination.CLASSES -> {
@@ -382,6 +450,25 @@ fun StratumApp(
                 viewModel = classViewModel,
                 modifier = modifier,
                 onBack = { destination = Destination.HOME },
+            )
+        }
+
+        Destination.CREW -> {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            val crewViewModel: com.stratum.feature.forge.CrewViewModel = viewModel(
+                factory = com.stratum.feature.forge.CrewViewModel.factory(
+                    model = ai.languageModel,
+                    base = { content.packs },
+                    crew = content.agentRoles.ifEmpty { com.stratum.agents.StandardCrew.all },
+                    isProviderConfigured = ai::isConfigured,
+                    onInstall = { pack -> scope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } },
+                ),
+            )
+            com.stratum.feature.forge.CrewScreen(
+                viewModel = crewViewModel,
+                modifier = modifier,
+                onBack = { destination = Destination.HOME },
+                onOpenSettings = { destination = Destination.SETTINGS },
             )
         }
 
@@ -493,6 +580,7 @@ fun StratumApp(
                     savePose = ai.poses::savePose,
                     dropPose = ai.poses::deletePose,
                     posesDrawn = ai.poses::keysIn,
+                    loadPose = ai.poses::pose,
                     composeSheet = { setId, plan ->
                         // Loaded by key rather than all at once: a full
                         // character is forty 1024-pixel images, which is more
@@ -526,6 +614,27 @@ fun StratumApp(
                         }
                         file != null
                     },
+                    exportReference = { setId, name ->
+                        val file = ai.poses.reference(setId)?.let {
+                            SpriteExporter.exportReference(context, name, it)
+                        }
+                        file?.let {
+                            SpriteExporter.share(context, it, "image/png", name)
+                        }
+                        file != null
+                    },
+                    exportClip = { setId, name, key ->
+                        val file = ai.poses.clip(setId, key)?.let {
+                            SpriteExporter.exportClip(context, name, key, it)
+                        }
+                        file?.let {
+                            SpriteExporter.share(context, it, SpriteExporter.MIME_VIDEO, name)
+                        }
+                        file != null
+                    },
+                    clipsDrawn = ai.poses::clipKeysIn,
+                    drawClipRow = { request, observer -> ai.generateClipRow(request, observer) },
+                    saveClip = ai.poses::saveClip,
                     exportPoses = { setId, name ->
                         val poses = ai.poses.keysIn(setId)
                             .mapNotNull { key -> ai.poses.pose(setId, key)?.let { key to it } }
@@ -687,311 +796,3 @@ fun StratumApp(
         Destination.STUDIO -> studioContent { destination = Destination.HOME }
     }
 }
-
-/**
- * The landing screen. It reports what the loaded pack actually contains, so the
- * customization story is visible before the player ever enters a world.
- */
-@Composable
-private fun HomeScreen(
-    packName: String,
-    blockCount: Int,
-    biomeCount: Int,
-    classCount: Int,
-    heroClasses: List<HeroClassDefinition>,
-    selectedClassId: String?,
-    onSelectClass: (String) -> Unit,
-    /** Art the player can wear, whichever class they are playing. */
-    characterSheets: List<SpriteSheet> = emptyList(),
-    selectedSheetId: String? = null,
-    onSelectSheet: (String) -> Unit = {},
-    /** The chosen character's art, so the picker shows who rather than what. */
-    idleFrameFor: (String) -> DrawableSprite? = { null },
-    unpackedCharacterCount: Int = 0,
-    onPoseForge: () -> Unit = {},
-    onBuildClass: () -> Unit,
-    onDescend: () -> Unit,
-    onForge: () -> Unit,
-    onSprites: () -> Unit,
-    spriteCount: Int,
-    onSettings: () -> Unit,
-    onStudio: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = StratumTheme.colors
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.surface)
-            // Inset before the scroll, so the content scrolls under nothing and
-            // the first line is never behind the status bar on a tall phone.
-            .safeContent()
-            .verticalScroll(rememberScrollState())
-            .padding(Space.large),
-    ) {
-        Spacer(Modifier.height(Space.huge))
-
-        Text(
-            text = "STRATUM",
-            style = MaterialTheme.typography.displaySmall,
-            color = colors.ink,
-        )
-        Text(
-            text = "An isometric world you dig apart and rebuild.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.inkMuted,
-        )
-
-        Spacer(Modifier.height(Space.wide))
-
-        StratumSection(
-            title = "Loaded pack",
-            subtitle = packName,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Space.small),
-            ) {
-                Stat("Blocks", blockCount, Modifier.weight(1f))
-                Stat("Regions", biomeCount, Modifier.weight(1f))
-                Stat("Classes", classCount, Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(Space.medium))
-            StratumDivider()
-            Spacer(Modifier.height(Space.medium))
-            Text(
-                text = "Every block, region, class and line of lore above comes from a content " +
-                    "pack. The engine ships with none of its own, so a generated pack sits beside " +
-                    "the built-in one as an equal.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.inkMuted,
-            )
-        }
-
-        Spacer(Modifier.height(Space.large))
-
-        StratumPanel(modifier = Modifier.fillMaxWidth()) {
-            SectionLabel("Begin")
-            Spacer(Modifier.height(Space.medium))
-
-            // The class is chosen before the run, not after: it decides the
-            // spawn, the starting weapon and the skill bar.
-            // The character itself, first and unconditionally.
-            //
-            // This used to live inside the hero-class block, which is why it
-            // never appeared: it rendered only when a class in the list
-            // matched the selected id, so art a person had drawn was hidden
-            // behind a lookup that had nothing to do with it. What you look
-            // like is not a property of what you are playing.
-            val drawn = remember(selectedSheetId, selectedClassId, idleFrameFor) {
-                idleFrameFor(selectedClassId.orEmpty())
-            }
-            if (drawn != null) {
-                IdlePortrait(drawn, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(Space.medium))
-            } else if (characterSheets.isEmpty()) {
-                // Said rather than left blank. An empty space where a
-                // character should be reads as the feature being broken;
-                // naming the reason turns it into the next thing to do.
-                Text(
-                    text = if (unpackedCharacterCount > 0) {
-                        "Character art has been drawn but not packed into a sprite sheet yet. " +
-                            "Pack it in the pose forge to wear it here."
-                    } else {
-                        "No character art yet — you will be drawn as a shape. " +
-                            "Make one in the pose forge and it appears here."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.inkMuted,
-                )
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            if (unpackedCharacterCount > 0) {
-                StratumPanel(
-                    raised = false,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = if (unpackedCharacterCount == 1) {
-                            "1 character drawn but not packed into a sprite sheet yet."
-                        } else {
-                            "$unpackedCharacterCount characters drawn but not packed into sprite sheets yet."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.accent,
-                    )
-                    Spacer(Modifier.height(Space.small))
-                    StratumAction(
-                        label = "Open pose forge to pack",
-                        onClick = onPoseForge,
-                        emphasis = ActionEmphasis.SECONDARY,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            // The look, before the class. Two separate choices: what you are
-            // playing and what you look like. They used to be one, so the only
-            // way to wear a character you had drawn was to go and bind it to a
-            // class somewhere else first.
-            if (characterSheets.isNotEmpty()) {
-                Text(
-                    text = "Character",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.inkMuted,
-                )
-                Spacer(Modifier.height(Space.small))
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.small),
-                ) {
-                    items(characterSheets, key = SpriteSheet::id) { sheet ->
-                        StratumChip(
-                            label = sheet.name,
-                            selected = sheet.id == selectedSheetId,
-                            // Tapping the chosen one again clears it, which is
-                            // how a player goes back to the class's own art
-                            // without hunting for a "none" entry.
-                            onClick = { onSelectSheet(sheet.id) },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            if (heroClasses.isNotEmpty()) {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.small),
-                ) {
-                    items(heroClasses, key = HeroClassDefinition::id) { hero ->
-                        StratumChip(
-                            label = hero.name,
-                            selected = hero.id == selectedClassId,
-                            onClick = { onSelectClass(hero.id) },
-                        )
-                    }
-                }
-                heroClasses.firstOrNull { it.id == selectedClassId }?.let { hero ->
-                    Spacer(Modifier.height(Space.small))
-                    Text(
-                        text = "${hero.resolvedStats.maxHealth} hp · " +
-                            "${hero.resolvedStats.attackPower} attack · " +
-                            "${hero.baseResource} ${hero.resourceName.lowercase()}" +
-                            if (hero.title.isNotBlank()) " · ${hero.title}" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.inkMuted,
-                    )
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            StratumAction(
-                label = "Descend",
-                onClick = onDescend,
-                emphasis = ActionEmphasis.PRIMARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = if (unpackedCharacterCount > 0) "Pose forge ($unpackedCharacterCount unpacked)" else "Pose forge",
-                onClick = onPoseForge,
-                emphasis = if (unpackedCharacterCount > 0) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Build a class",
-                onClick = onBuildClass,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Forge a pack with AI",
-                onClick = onForge,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = if (spriteCount > 0) "Sprite forge ($spriteCount)" else "Sprite forge",
-                onClick = onSprites,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Creator studio",
-                onClick = onStudio,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Model provider",
-                onClick = onSettings,
-                emphasis = ActionEmphasis.QUIET,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        Spacer(Modifier.height(Space.huge))
-    }
-}
-
-@Composable
-private fun Stat(label: String, value: Int, modifier: Modifier = Modifier) {
-    StratumWell(modifier = modifier) {
-        Text(
-            text = value.toString(),
-            style = MaterialTheme.typography.headlineMedium,
-            color = StratumTheme.colors.accent,
-        )
-        Text(
-            text = label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = StratumTheme.colors.inkMuted,
-        )
-    }
-}
-
-/**
- * One idle frame of a character, drawn the way the world draws it.
- *
- * Deliberately the first frame rather than a running animation: this is a menu
- * and a looping character in it competes with the thing the person came here
- * to press. The point is recognition -- which of the characters you made is
- * this -- and one frame settles that.
- */
-@Composable
-private fun IdlePortrait(sprite: DrawableSprite, modifier: Modifier = Modifier) {
-    val sheet = sprite.sheet
-    val frame = sheet.clip(AnimationState.IDLE)?.firstFrame ?: 0
-    val rect = sheet.frameRect(frame)
-    if (rect.width <= 0 || rect.height <= 0) return
-
-    Canvas(
-        modifier = modifier.height(PORTRAIT_HEIGHT),
-    ) {
-        // Fitted by height and centred: the frame's proportions belong to the
-        // character, and squeezing them to a fixed box would make a lunging
-        // stance a different person from a standing one.
-        val drawHeight = size.height
-        val drawWidth = drawHeight * rect.width / rect.height.coerceAtLeast(1)
-        drawImage(
-            image = sprite.image,
-            srcOffset = IntOffset(rect.left, rect.top),
-            srcSize = IntSize(rect.width, rect.height),
-            dstOffset = IntOffset(((size.width - drawWidth) / 2f).toInt(), 0),
-            dstSize = IntSize(drawWidth.toInt().coerceAtLeast(1), drawHeight.toInt()),
-            filterQuality = FilterQuality.None,
-        )
-    }
-}
-
-private val PORTRAIT_HEIGHT = 132.dp

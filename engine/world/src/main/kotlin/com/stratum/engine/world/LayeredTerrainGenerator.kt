@@ -1,6 +1,7 @@
 package com.stratum.engine.world
 
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.content.Landmark
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.BlockType
 import com.stratum.core.domain.world.Chunk
@@ -42,6 +43,15 @@ class LayeredTerrainGenerator(
     /** Where things grow thickly and where they do not. See [TerrainRecipe.scatterClustering]. */
     private val groveNoise = ValueNoise(config.seed * 53 + 29)
 
+    /** Paths follow one contour of this field. See [pathDistance]. */
+    private val pathNoise = ValueNoise(config.seed * 71 + 3)
+
+    /** Landmark sites by grid cell; [NO_SITE] where a cell has none. Filled lazily, safe across threads. */
+    private val sites = java.util.concurrent.ConcurrentHashMap<Long, Any>()
+
+    /** A landmark placed in the world, with the height its pad is levelled to. */
+    private class Site(val x: Int, val y: Int, val z: Int, val landmark: Landmark)
+
     override fun generate(pos: ChunkPos, registry: BlockRegistry): Chunk {
         val chunk = Chunk(pos)
         val bedrockIndex = registry.indexOf(BlockType.BEDROCK.id)
@@ -51,13 +61,28 @@ class LayeredTerrainGenerator(
                 val worldX = pos.originX + localX
                 val worldY = pos.originY + localY
                 val biome = biomeAt(worldX, worldY)
-                val surfaceZ = surfaceHeight(worldX, worldY, biome)
+                val site = siteAround(worldX, worldY)
+                val fromSite = site?.let { distance(worldX - it.x, worldY - it.y) }
+                // A landmark stands on level ground: its pad and one ring past
+                // it take the centre's height.
+                val surfaceZ = if (site != null && fromSite!! <= site.landmark.floorRadius + 1f) site.z
+                else surfaceHeight(worldX, worldY, biome)
 
                 chunk.setBlock(localX, localY, 0, bedrockIndex)
                 fillColumn(chunk, registry, localX, localY, worldX, worldY, surfaceZ, biome)
                 carveCaves(chunk, registry, localX, localY, worldX, worldY, surfaceZ)
                 placeDeposits(chunk, registry, localX, localY, worldX, worldY, surfaceZ, biome, bedrockIndex)
-                scatterDecoration(chunk, registry, localX, localY, worldX, worldY, biome)
+
+                // Paths: trodden into the surface, and kept clear either side.
+                val path = biome.composition.pathBlockId?.let(registry::indexOrNull)
+                val fromPath = if (path != null) pathDistance(worldX, worldY) else Float.MAX_VALUE
+                val halfWidth = biome.composition.pathWidth / 2f
+                if (path != null && fromPath <= halfWidth && (site == null || fromSite!! > site.landmark.floorRadius)) {
+                    chunk.setBlock(localX, localY, surfaceZ, path)
+                }
+                val cleared = fromPath <= halfWidth + PATH_VERGE || (site != null && fromSite!! <= site.landmark.clearRadius)
+                if (!cleared) scatterDecoration(chunk, registry, localX, localY, worldX, worldY, biome)
+                if (site != null) placeLandmark(chunk, registry, localX, localY, worldX, worldY, surfaceZ, site, fromSite!!)
             }
         }
         return chunk
@@ -76,14 +101,63 @@ class LayeredTerrainGenerator(
 
     fun surfaceHeight(worldX: Int, worldY: Int, biome: BiomeDefinition): Int {
         val signed = elevationAt(worldX, worldY)
-        val variation = config.surfaceVariation * biome.roughness
-        val raw = config.seaLevel + biome.heightBias + (signed * variation).toInt()
+        // Bias and roughness are blended across borders rather than taken from
+        // this column's biome alone. Taken raw, a border between a high region
+        // and a low one was a sheer wall as tall as the difference in their
+        // biases -- nine blocks between the thunder peaks and the catacombs --
+        // which no player could climb and no monster could path over.
+        //
+        // The blend is smooth, not merely averaged: biases are read at the
+        // nodes of a coarse world-aligned grid, each node averaged with its
+        // neighbours, and interpolated between nodes. A plain moving average
+        // sampled on a grid jumped by most of a block whenever a row of its
+        // samples crossed a border together, and those jumps were exactly the
+        // two-block steps the blend was meant to remove.
+        //
+        // Applied as an offset to the biome the caller named, so asking for a
+        // particular biome's surface still gets that biome's height.
+        val here = biomeAt(worldX, worldY)
+        val (blendedBias, blendedRoughness) = blendedAt(worldX, worldY)
+        val bias = biome.heightBias + (blendedBias - here.heightBias)
+        val roughness = (biome.roughness + (blendedRoughness - here.roughness)).coerceAtLeast(0f)
+        val variation = config.surfaceVariation * roughness
+        val raw = config.seaLevel + kotlin.math.round(bias).toInt() + (signed * variation).toInt()
 
         // Terraced before clamping, so the plateaus stay aligned across biomes
         // with different height biases: a ledge that steps by two in one region
         // and by one in the next reads as a bug rather than as a landscape.
         val terraced = recipe.terraced(raw)
         return terraced.coerceIn(2, Chunk.HEIGHT - TOP_MARGIN)
+    }
+
+    /** Height bias and roughness, smoothly blended across biome borders. */
+    private fun blendedAt(worldX: Int, worldY: Int): Pair<Float, Float> {
+        val gx = Math.floorDiv(worldX, BLEND_GRID)
+        val gy = Math.floorDiv(worldY, BLEND_GRID)
+        val tx = (worldX - gx * BLEND_GRID).toFloat() / BLEND_GRID
+        val ty = (worldY - gy * BLEND_GRID).toFloat() / BLEND_GRID
+        val n00 = node(gx, gy); val n10 = node(gx + 1, gy)
+        val n01 = node(gx, gy + 1); val n11 = node(gx + 1, gy + 1)
+        fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+        // Smoothstepped weights, so the slope eases in and out of a border
+        // instead of kinking at every grid line.
+        val sx = tx * tx * (3f - 2f * tx)
+        val sy = ty * ty * (3f - 2f * ty)
+        val bias = lerp(lerp(n00.first, n10.first, sx), lerp(n01.first, n11.first, sx), sy)
+        val rough = lerp(lerp(n00.second, n10.second, sx), lerp(n01.second, n11.second, sx), sy)
+        return bias to rough
+    }
+
+    /** One grid node: the biome bias and roughness around it, averaged. */
+    private fun node(gx: Int, gy: Int): Pair<Float, Float> {
+        var bias = 0f
+        var rough = 0f
+        for (j in -1..1) for (i in -1..1) {
+            val b = biomeAt((gx + i) * BLEND_GRID, (gy + j) * BLEND_GRID)
+            bias += b.heightBias
+            rough += b.roughness
+        }
+        return bias / 9f to rough / 9f
     }
 
     /**
@@ -207,6 +281,93 @@ class LayeredTerrainGenerator(
         }
     }
 
+    /**
+     * Roughly how many blocks this column is from the nearest path.
+     *
+     * Paths are the 0.5 contour of a slow noise field: a contour of a smooth
+     * field is a winding line that never ends abruptly and never crosses
+     * itself, which is most of what a road needs to be. The field's value
+     * divided by its slope is the distance to the contour, so a path keeps its
+     * width through both gentle and tight bends.
+     */
+    private fun pathDistance(worldX: Int, worldY: Int): Float {
+        fun at(x: Int, y: Int) = pathNoise.fractal(x * PATH_SCALE, y * PATH_SCALE, octaves = 2)
+        val here = at(worldX, worldY) - 0.5f
+        val gx = (at(worldX + 1, worldY) - at(worldX - 1, worldY)) / 2f
+        val gy = (at(worldX, worldY + 1) - at(worldX, worldY - 1)) / 2f
+        val slope = kotlin.math.sqrt(gx * gx + gy * gy).coerceAtLeast(MIN_PATH_SLOPE)
+        return kotlin.math.abs(here) / slope
+    }
+
+    /**
+     * The landmark whose clearing holds this column, if any.
+     *
+     * Sites sit one per cell of a fixed world grid, jittered but never nearer
+     * a cell's edge than the largest clearing, so a column can only ever be in
+     * its own cell's clearing: one lookup, and chunks stay independent.
+     */
+    private fun siteAround(worldX: Int, worldY: Int): Site? {
+        val cx = Math.floorDiv(worldX, SITE_GRID)
+        val cy = Math.floorDiv(worldY, SITE_GRID)
+        val site = sites.getOrPut((cx.toLong() shl 32) xor (cy.toLong() and 0xFFFFFFFFL)) { siteIn(cx, cy) ?: NO_SITE } as? Site
+            ?: return null
+        return site.takeIf { distance(worldX - it.x, worldY - it.y) <= it.landmark.clearRadius }
+    }
+
+    private fun siteIn(cx: Int, cy: Int): Site? {
+        val margin = Landmark.MAX_CLEAR_RADIUS
+        val span = SITE_GRID - 2 * margin
+        // Several candidate spots in the cell; the one nearest a path wins, so
+        // roads run through set pieces the way they do in any designed world,
+        // instead of passing a shrine by twenty blocks.
+        val (x, y) = (0 until SITE_CANDIDATES).map { k ->
+            cx * SITE_GRID + margin + PositionalRandom.intAt(config.seed, cx, cy, SITE_SALT + 1 + k * 2, span) to
+                cy * SITE_GRID + margin + PositionalRandom.intAt(config.seed, cx, cy, SITE_SALT + 2 + k * 2, span)
+        }.minBy { (x, y) -> if (biomeAt(x, y).composition.pathBlockId != null) pathDistance(x, y) else 0f }
+        val biome = biomeAt(x, y)
+        val landmark = biome.composition.landmark ?: return null
+        if (PositionalRandom.floatAt(config.seed, cx, cy, SITE_SALT) >= landmark.chance) return null
+        // Only in the open. A shrine half-buried in a thicket is not a place,
+        // it is clutter.
+        val density = recipe.scatterDensity(
+            groveNoise.fractal(x * recipe.scatterClusterScale, y * recipe.scatterClusterScale, octaves = 2),
+        )
+        if (density > CLEARING_DENSITY) return null
+        return Site(x, y, surfaceHeight(x, y, biome), landmark)
+    }
+
+    private fun placeLandmark(
+        chunk: Chunk, registry: BlockRegistry, localX: Int, localY: Int, worldX: Int, worldY: Int,
+        surfaceZ: Int, site: Site, fromSite: Float,
+    ) {
+        val z = surfaceZ + 1
+        if (z >= Chunk.HEIGHT) return
+        val landmark = site.landmark
+        if (worldX == site.x && worldY == site.y) {
+            registry.indexOrNull(landmark.centreBlockId)?.let { chunk.setBlock(localX, localY, z, it) }
+            return
+        }
+        landmark.ringBlockId?.let(registry::indexOrNull)?.let { ring ->
+            for (i in 0 until landmark.ringCount) {
+                // Starting on a world axis. The camera looks along a world
+                // diagonal, so a ring of four set on the axes sits either side
+                // of the centre on screen instead of one standing in front of it.
+                val angle = i * 2.0 * Math.PI / landmark.ringCount
+                val rx = site.x + kotlin.math.round(kotlin.math.cos(angle) * landmark.ringRadius).toInt()
+                val ry = site.y + kotlin.math.round(kotlin.math.sin(angle) * landmark.ringRadius).toInt()
+                if (worldX == rx && worldY == ry) {
+                    chunk.setBlock(localX, localY, z, ring)
+                    return
+                }
+            }
+        }
+        if (fromSite <= landmark.floorRadius) {
+            landmark.floorBlockId?.let(registry::indexOrNull)?.let { chunk.setBlock(localX, localY, z, it) }
+        }
+    }
+
+    private fun distance(dx: Int, dy: Int): Float = kotlin.math.sqrt((dx * dx + dy * dy).toFloat())
+
     private fun scatterDecoration(
         chunk: Chunk,
         registry: BlockRegistry,
@@ -245,6 +406,31 @@ class LayeredTerrainGenerator(
     }
 
     private companion object {
+        /** Landmark site grid, in blocks: about three screens between set pieces. */
+        const val SITE_GRID = 44
+        const val SITE_SALT = 9_001
+        const val SITE_CANDIDATES = 12
+        /** Grove density above which a site is too overgrown to hold a landmark. */
+        const val CLEARING_DENSITY = 0.9f
+        val NO_SITE = Any()
+
+        const val PATH_SCALE = 0.02f
+        /**
+         * Floor on the path field's slope. Where the field is nearly flat the
+         * distance estimate collapses and a path balloons into a clearing of
+         * bare earth; at about the field's typical slope it stays a road.
+         */
+        const val MIN_PATH_SLOPE = 0.012f
+        /** Scenery kept back from a path's edge, in blocks. */
+        const val PATH_VERGE = 1.5f
+
+        /**
+         * Spacing of the biome-blend grid, in blocks. A border's height change
+         * is spread over about two of these, which keeps even the largest bias
+         * difference a pack ships under one block per step.
+         */
+        const val BLEND_GRID = 10
+
         const val TERRAIN_SCALE = 0.018f
         /**
          * Widens the noise's usable range. Kept low deliberately: this is a
@@ -285,7 +471,7 @@ object StratumTerrain {
         TerrainGeneratorFactory { context ->
             LayeredTerrainGenerator(context.config, context.biomes, context.recipe)
         },
-    )
+    ).register(TerrainRecipe.TILE_MAP, TileMapTerrainGenerator.factory)
 
     fun create(context: TerrainContext): TerrainGenerator = registry.create(context)
 }

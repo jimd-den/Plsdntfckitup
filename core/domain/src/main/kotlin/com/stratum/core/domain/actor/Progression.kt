@@ -49,11 +49,19 @@ object Progression {
     fun attackBonusFor(level: Int): Int = (level - 1) * ATTACK_PER_LEVEL
 
     /**
+     * Passive points earned by [level]. Two a level, so a character at the cap
+     * holds over a hundred: enough to cross a tree, never enough to fill one.
+     */
+    fun passivePointsFor(level: Int): Int = (level.coerceIn(1, MAX_LEVEL) - 1) * PASSIVE_POINTS_PER_LEVEL
+
+    /**
      * Difficulty of what spawns around a character of this level. Enemies scale
      * with the player so a world stays dangerous as they grow.
      */
     fun itemLevelFor(level: Int, depthBelowSurface: Int = 0): Int =
         (level + depthBelowSurface / DEPTH_PER_ITEM_LEVEL).coerceAtLeast(1)
+
+    const val PASSIVE_POINTS_PER_LEVEL = 2
 
     private const val BASE_REQUIREMENT = 60.0
     private const val CURVE_EXPONENT = 1.45

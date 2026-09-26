@@ -129,6 +129,30 @@ class SkeletonTest {
             assertTrue(it.x in 0f..1f && it.y in 0f..1f, "a joint left the frame: $it")
         }
     }
+
+    /**
+     * And so does every pose the pipeline actually draws.
+     *
+     * The check above only ever saw a figure standing at rest, which is the
+     * one pose that was never going to leave its frame. Drawn out, the
+     * attack's wind-up put a hand past the top edge and the death put one past
+     * the left, and both are the failure the ground clamp exists to prevent:
+     * a guide with a limb off the edge teaches the model to crop the
+     * character, and a cropped character is a sheet of amputees.
+     */
+    @Test
+    fun `every authored pose fits in its frame`() {
+        AnimationState.entries.forEach { state ->
+            MocapPoses.framesFor(state).forEachIndexed { index, angles ->
+                skeleton.pose(angles).joints.forEach { (joint, point) ->
+                    assertTrue(
+                        point.x in 0f..1f && point.y in 0f..1f,
+                        "$state frame $index puts $joint outside the frame at $point",
+                    )
+                }
+            }
+        }
+    }
 }
 
 class WeaponGripTest {
@@ -214,6 +238,50 @@ class WeaponGripTest {
     }
 
     @Test
+    fun `a roll turns the whole body, and the tuck survives the trip`() {
+        // What went wrong before: limb angles are measured from straight down
+        // rather than from the torso, so leaning the spine past horizontal
+        // left the arms and legs hanging as though the character were still
+        // standing inside its own somersault. Rotating the finished body
+        // cannot do that -- whatever shape was authored is the shape that
+        // turns.
+        val frames = (0 until 6).map { skeleton.pose(MocapPoses.poseFor(AnimationState.ROLL, it, 6)) }
+
+        // Somewhere in the middle the head is below the hips, which is the one
+        // thing a roll has to contain.
+        assertTrue(
+            frames.any { it.require(Joint.HEAD).y > it.require(Joint.PELVIS).y },
+            "nothing in the roll ever went over",
+        )
+        // And it ends upright, or the character finishes the move face down.
+        val last = frames.last()
+        assertTrue(
+            last.require(Joint.HEAD).y < last.require(Joint.PELVIS).y,
+            "the roll never came back up",
+        )
+
+        // The tuck holds throughout: knees stay bent, so no frame is a body
+        // lying out flat in the middle of a somersault.
+        frames.take(4).forEach { pose ->
+            val thigh = pose.require(Joint.HIP_NEAR).distanceTo(pose.require(Joint.KNEE_NEAR))
+            val shin = pose.require(Joint.KNEE_NEAR).distanceTo(pose.require(Joint.FOOT_NEAR))
+            val straight = pose.require(Joint.HIP_NEAR).distanceTo(pose.require(Joint.FOOT_NEAR))
+            assertTrue(straight < (thigh + shin) * 0.9f, "a leg came straight mid-roll")
+        }
+    }
+
+    @Test
+    fun `turning the body cannot stretch it`() {
+        val tucked = PoseAngles(shoulderNear = 30f, elbowNear = 96f, bodyPitch = 137f)
+        val pose = skeleton.pose(tucked)
+        val upper = pose.require(Joint.SHOULDER_NEAR).distanceTo(pose.require(Joint.ELBOW_NEAR))
+        assertTrue(
+            upper <= skeleton.upperArm / IsoProjection.heightScale + 0.0005f,
+            "rotating the body stretched an arm to $upper",
+        )
+    }
+
+    @Test
     fun `an arm hanging down points the weapon down`() {
         val pose = skeleton.pose(PoseAngles(shoulderNear = 0f, elbowNear = 0f))
         assertEquals(180f, pose.weaponGrip().weaponDegrees, 0.5f)
@@ -253,15 +321,21 @@ class MocapPosesTest {
     @Test
     fun `a walk lifts the body between contacts`() {
         val frames = MocapPoses.framesFor(AnimationState.WALK)
-        // Contact, pass, reach -- twice. The contacts are the low points and
-        // the passes and reaches the high ones; without that difference a walk
-        // reads as gliding.
-        assertTrue(frames[0].driftY > frames[1].driftY, "the first contact did not drop")
-        assertTrue(frames[3].driftY > frames[4].driftY, "the second contact did not drop")
-        // And the reach is the highest point of each half, which is what puts
-        // the bounce at the top of the stride rather than halfway up it.
-        assertTrue(frames[2].driftY < frames[1].driftY, "the first reach did not rise")
-        assertTrue(frames[5].driftY < frames[4].driftY, "the second reach did not rise")
+        // Contact, down, passing -- twice. The beats used to be contact, pass,
+        // reach, and the reach was dropped because it is the same beat as the
+        // contact that follows it: measured frame to frame, the walk stalled
+        // once per stride. So the low point is now the *down*, one frame after
+        // the contact, where the weight arrives on the lead leg; the high
+        // point is still the passing. Without that difference a walk reads as
+        // gliding. Positive driftY is downward.
+        assertTrue(frames[1].driftY > frames[0].driftY, "the first contact did not drop onto its lead leg")
+        assertTrue(frames[4].driftY > frames[3].driftY, "the second contact did not drop onto its lead leg")
+        // And the passing is the highest point of each half, which is what
+        // puts the bounce over the planted foot rather than halfway up it.
+        assertTrue(frames[2].driftY < frames[1].driftY, "the first passing did not rise")
+        assertTrue(frames[2].driftY < frames[0].driftY, "the first passing was not the high point")
+        assertTrue(frames[5].driftY < frames[4].driftY, "the second passing did not rise")
+        assertTrue(frames[5].driftY < frames[3].driftY, "the second passing was not the high point")
     }
 
     @Test

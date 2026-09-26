@@ -1,0 +1,101 @@
+{
+  "id": "nri.chronicles",
+  "name": "Ọfọ & Bronze: Chronicles of Nri",
+  "author": "Stratum",
+  "version": "1.0.0",
+  "description": "A pen-and-paper campaign, played in the action game.",
+
+  "classes": [
+    {
+      "id": "nri:eze_nri_diviner",
+      "name": "Eze Nri Diviner",
+      "title": "Dibia Afa",
+      "description": "Mediator of moral balance who reads the Afa seeds and calls down Amadioha's spear.",
+      "resourceName": "Mmụọ",
+      "strength": 8,
+      "agility": 10,
+      "insight": 16,
+      "abilities": ["igbo:thunder_spear"],
+      "startingWeapon": "igbo:ofo_scepter",
+      "stats": { "maxHealth": 90, "attackPower": 9, "critChance": 0.08 }
+    },
+    {
+      "id": "nri:ekpe_stalker",
+      "name": "Ekpe Leopard Stalker",
+      "title": "Onye Ekpe",
+      "description": "Initiate of the leopard society: stealth, speed and Nsibidi cyphers.",
+      "resourceName": "Breath",
+      "strength": 10,
+      "agility": 16,
+      "insight": 10,
+      "abilities": ["igbo:mma_nkwu_cleave"],
+      "startingWeapon": "igbo:mma_nkwu",
+      "stats": { "maxHealth": 100, "attackPower": 11, "attackSpeed": 1.3 }
+    }
+  ],
+
+  "enemies": [
+    {
+      "id": "nri:mmuo_masquerade",
+      "name": "Mmụọ Masquerade",
+      "description": "An ancestral spirit walking in a mask of raffia and bronze.",
+      "rank": "elite",
+      "damageType": "igbo:spirit",
+      "stats": { "maxHealth": 140, "attackPower": 14, "armour": 2, "resistances": { "igbo:spirit": 0.5 } },
+      "moveSpeed": 1.9,
+      "experience": 40,
+      "spawnBiomes": ["igbo:sacred_grove"],
+      "spawnWeight": 25,
+      "bodyColor": "#FF6B4FA8"
+    }
+  ],
+
+  "lore": [
+    {
+      "id": "nri:lore_afa",
+      "title": "Ịgba Afa",
+      "body": "The diviner casts the seeds on the Akwali board, and the pattern they fall in is the answer the ancestors chose to give.",
+      "category": "ritual",
+      "subject": "nri:afa_divination"
+    }
+  ],
+
+  "checks": [
+    {
+      "id": "nri:afa_divination",
+      "name": "Afa Divination",
+      "description": "Cast divination seeds on the sacred Akwali board to read cosmic omens.",
+      "dice": "1d20",
+      "attribute": "insight",
+      "difficulty": 13,
+      "boon": { "name": "Vision of Chukwu", "durationSeconds": 60, "critChance": 0.30 },
+      "bane": { "name": "Clouded Sight", "durationSeconds": 20, "critChance": -0.05 }
+    },
+    {
+      "id": "nri:ogu_war_cry",
+      "name": "Ogu War Cry",
+      "description": "Strike your bronze shield and chant the deeds of ancestors to shatter enemy resolve.",
+      "attribute": "strength",
+      "difficulty": 12,
+      "boon": { "name": "Ancestral Might", "durationSeconds": 60, "attackPower": 0.25 }
+    },
+    {
+      "id": "nri:ekpe_evasion",
+      "name": "Ekpe Leopard Evasion",
+      "description": "Move as the leopard society moves: unseen, then everywhere at once.",
+      "attribute": "agility",
+      "difficulty": 14,
+      "boon": { "name": "Leopard Swiftness", "durationSeconds": 60, "attackSpeed": 0.35 }
+    },
+    {
+      "id": "nri:ikenga_consecration",
+      "name": "Ikenga Consecration",
+      "description": "Anoint the horned Ikenga, shrine of the strong right hand.",
+      "dice": "2d10",
+      "attribute": "strength",
+      "difficulty": 15,
+      "cooldownSeconds": 120,
+      "boon": { "name": "Horn of Conquest", "durationSeconds": 60, "lifeSteal": 0.15, "maxHealth": 50 }
+    }
+  ]
+}

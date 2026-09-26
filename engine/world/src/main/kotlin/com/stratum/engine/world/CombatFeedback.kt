@@ -44,6 +44,9 @@ enum class FeedbackKind {
     KILL,
     LEVEL_UP,
     LOOT,
+
+    /** A tabletop check rolled, read out with its dice. */
+    CHECK,
 }
 
 /**

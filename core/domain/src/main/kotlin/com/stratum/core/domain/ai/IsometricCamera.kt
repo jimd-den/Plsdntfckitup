@@ -31,6 +31,29 @@ object IsometricCamera {
      */
     const val ELEVATION_DEGREES = 30
 
+    /**
+     * The 3D view's camera: how far above the horizon it looks down.
+     *
+     * Steeper than the 2D projection, as Diablo III and Hades are. The scene
+     * camera takes its default from here and scenery prompts state it, so a
+     * tree is painted from the angle it is actually seen at; asked for "a
+     * high three-quarter angle", models painted trees from eye level, and a
+     * side-on trunk stood up in a world seen from above.
+     */
+    const val SCENE_ELEVATION_DEGREES = 52
+
+    /**
+     * What looking down at [SCENE_ELEVATION_DEGREES] means for a thing
+     * standing on the ground, stated as consequences a model can follow.
+     */
+    val sceneClause: String =
+        "Camera: a fixed high isometric game camera like Diablo III or Hades, $SCENE_ELEVATION_DEGREES degrees above the horizon " +
+            "and turned 45 degrees to the side, looking down on the object. Consequences: the top of the object is clearly visible " +
+            "and takes up much of the image; upright parts such as trunks, posts and legs are foreshortened, shorter than in a side view; " +
+            "anything round in plan, such as a crown of leaves, a bowl or a rim, appears as a wide ellipse seen from above; " +
+            "the base meets an unseen ground plane that recedes upward. Not a front view, not a side view, not eye level, " +
+            "no worm's-eye view, no wide-angle perspective"
+
     /** Turned this far off straight-on, which is what makes it three-quarter. */
     const val ROTATION_DEGREES = 45
 

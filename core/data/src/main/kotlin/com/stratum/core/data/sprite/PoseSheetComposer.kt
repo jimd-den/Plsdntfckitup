@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import com.stratum.core.domain.sprite.PackedSheet
 import com.stratum.core.domain.sprite.PoseSheetPlan
+import com.stratum.core.domain.sprite.SpriteDrift
 import com.stratum.core.domain.sprite.SourceRect
 import com.stratum.core.domain.sprite.SpriteKeying
 import com.stratum.core.domain.sprite.SpriteSheet
@@ -74,34 +75,52 @@ object PoseSheetComposer {
         // anchor*, because that is the point every frame is hung from; a cell
         // sized by the widest content box would clip a lunge whose weight is
         // over one foot.
-        var leftReach = 0
-        var rightReach = 0
-        var tallest = 0
         for (cell in plan.cells) {
             val measured = measure(loadPose(cell.key)) ?: continue
             bounds[cell.key] = measured
             val anchor = anchorOf(loadPose(cell.key), measured)
                 ?: (measured.left + measured.width / 2)
             anchors[cell.key] = anchor
-            if (anchor - measured.left > leftReach) leftReach = anchor - measured.left
-            if (measured.right - anchor > rightReach) rightReach = measured.right - anchor
-            if (measured.height > tallest) tallest = measured.height
         }
         if (bounds.isEmpty()) return null
 
+        // How much each frame has to be rescaled to stop the row changing
+        // size. Measured on real output, twelve separately generated walk
+        // frames varied fifteen per cent in height -- the model drawing the
+        // same character a different size each time it was asked. Hanging
+        // every frame from its ground contact fixes where the figure stands
+        // and says nothing about how big it is, and one scale for the set
+        // preserves the difference rather than removing it.
+        val drift = driftCorrections(plan, bounds)
+
+        // Reach and height measured *after* correction, so a frame pulled
+        // larger still fits the cell it is about to be drawn into.
+        var leftReach = 0f
+        var rightReach = 0f
+        var tallest = 0f
+        for (cell in plan.cells) {
+            val measured = bounds[cell.key] ?: continue
+            val anchor = anchors[cell.key] ?: (measured.left + measured.width / 2)
+            val correction = drift[cell.key] ?: 1f
+            leftReach = maxOf(leftReach, (anchor - measured.left) * correction)
+            rightReach = maxOf(rightReach, (measured.right - anchor) * correction)
+            tallest = maxOf(tallest, measured.height * correction)
+        }
+
         // Symmetric about the anchor, so centring the anchor centres the cell.
-        val widest = 2 * maxOf(leftReach, rightReach)
+        val widest = (2 * maxOf(leftReach, rightReach)).toInt().coerceAtLeast(1)
+        val tallestCell = tallest.toInt().coerceAtLeast(1)
 
         // Now that the figure's proportions are known, the cells are cut to
         // fit it. A square cell would spend two thirds of its width on empty
         // background and shrink the character to pay for it.
-        val fitted = plan.fittedTo(widest, tallest)
+        val fitted = plan.fittedTo(widest, tallestCell)
 
         // One factor for the whole set. The figure that needs the most room
         // decides it, and everything else keeps its real size relative to that.
         val scale = min(
             fitted.cellWidth.toFloat() / widest.coerceAtLeast(1),
-            fitted.cellHeight.toFloat() / tallest.coerceAtLeast(1),
+            fitted.cellHeight.toFloat() / tallestCell,
         )
 
         val target = runCatching {
@@ -131,8 +150,11 @@ object PoseSheetComposer {
                 continue
             }
 
-            val width = (rect.width * scale).roundToInt().coerceAtLeast(1)
-            val height = (rect.height * scale).roundToInt().coerceAtLeast(1)
+            // The common factor, times this frame's own correction. Without
+            // the second the row plays as the character pulsing.
+            val frameScale = scale * (drift[cell.key] ?: 1f)
+            val width = (rect.width * frameScale).roundToInt().coerceAtLeast(1)
+            val height = (rect.height * frameScale).roundToInt().coerceAtLeast(1)
             val cellRect = fitted.rectFor(cell)
             // Hung from where the figure meets the ground, and standing on the
             // floor of the cell.
@@ -147,7 +169,7 @@ object PoseSheetComposer {
             // because what the eye tracks between frames is the part that is
             // supposed to be still.
             val anchor = anchors[cell.key] ?: (rect.left + rect.width / 2)
-            val anchorOffset = ((anchor - rect.left) * scale).roundToInt()
+            val anchorOffset = ((anchor - rect.left) * frameScale).roundToInt()
             val left = cellRect.left + fitted.cellWidth / 2 - anchorOffset
             val top = cellRect.top + (fitted.cellHeight - height)
 
@@ -171,6 +193,28 @@ object PoseSheetComposer {
     }
 
     /** Where the figure meets the ground, in the source image's coordinates. */
+    /**
+     * A scale for every cell, worked out one animation at a time.
+     *
+     * Per row rather than across the sheet, because what a frame *should*
+     * measure depends on its own animation: a roll curls to half height and a
+     * death lies flat, and comparing either against a walk would say the art
+     * had drifted when only the pose had changed.
+     */
+    private fun driftCorrections(
+        plan: PoseSheetPlan,
+        bounds: Map<String, SourceRect>,
+    ): Map<String, Float> = buildMap {
+        plan.cells.groupBy { it.state }.forEach { (state, cells) ->
+            val row = cells.sortedBy { it.index }.filter { bounds.containsKey(it.key) }
+            if (row.isEmpty()) return@forEach
+            val heights = row.map { bounds.getValue(it.key).height.toFloat() }
+            SpriteDrift.correctionsFor(state, heights).forEachIndexed { at, correction ->
+                put(row[at].key, correction)
+            }
+        }
+    }
+
     private fun anchorOf(bytes: ByteArray?, rect: SourceRect): Int? {
         if (bytes == null) return null
         val bitmap = SpriteAtlasBaker.decode(bytes) ?: return null
