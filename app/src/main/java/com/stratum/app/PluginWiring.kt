@@ -72,6 +72,23 @@ class PluginWiring(private val context: Context, sprites: SpriteLibrary) {
         return true
     }
 
+    /**
+     * Installs what the agent studio wrote as an ordinary plugin, depending on
+     * the built-in pack whose ids it references -- so it can be shared,
+     * disabled or removed like any other, and loads with the next world.
+     */
+    suspend fun installGenerated(pack: com.stratum.core.domain.content.ContentPack) {
+        val manifest = PluginManifest(
+            id = pack.id,
+            name = pack.name,
+            version = Version(1, 0, 0),
+            author = pack.author.ifBlank { "Agent studio" },
+            description = pack.description,
+            dependencies = listOf(PluginDependency(builtIn.id, VersionRange.parse("^${builtIn.version.major}") ?: VersionRange.ANY)),
+        )
+        repository.install("${pack.id}.${PluginArchive.EXTENSION}", PluginArchive.write(manifest, pack))
+    }
+
     private companion object {
         /** Distinct from the local custom-class pack, so an installed share never collides with the player's own. */
         const val CREATIONS_ID = "shared.classes"

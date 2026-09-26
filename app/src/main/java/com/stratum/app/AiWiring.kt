@@ -38,7 +38,7 @@ class AiWiring(context: Context) {
     /** Persists player's active character art, weapon, and class choices across app restarts. */
     val playerPreferences = PlayerPreferencesStore(context)
 
-    private val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
+    val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
 
     /** Shared with the play screen, which forges world art with it. */
     val imageModel = OpenRouterImageModel(configProvider = settings::load)

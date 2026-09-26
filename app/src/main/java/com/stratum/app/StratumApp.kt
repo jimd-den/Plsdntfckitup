@@ -20,6 +20,7 @@ import com.stratum.feature.play.TextureForgeActions
 import com.stratum.feature.play.TextureForgeScreen
 import com.stratum.feature.play.TextureForgeViewModel
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -68,7 +69,7 @@ import com.stratum.feature.play.PlayViewModel
 import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW }
 
 /**
  * The app shell.
@@ -340,6 +341,7 @@ fun StratumApp(
                     destination = Destination.PLAY
                 },
                 onForge = { destination = Destination.FORGE },
+                onCrew = { destination = Destination.CREW },
                 onSprites = { destination = Destination.SPRITES },
                 spriteCount = spriteSheets.size,
                 onSettings = { destination = Destination.SETTINGS },
@@ -448,6 +450,25 @@ fun StratumApp(
                 viewModel = classViewModel,
                 modifier = modifier,
                 onBack = { destination = Destination.HOME },
+            )
+        }
+
+        Destination.CREW -> {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            val crewViewModel: com.stratum.feature.forge.CrewViewModel = viewModel(
+                factory = com.stratum.feature.forge.CrewViewModel.factory(
+                    model = ai.languageModel,
+                    base = { content.packs },
+                    crew = content.agentRoles.ifEmpty { com.stratum.agents.StandardCrew.all },
+                    isProviderConfigured = ai::isConfigured,
+                    onInstall = { pack -> scope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } },
+                ),
+            )
+            com.stratum.feature.forge.CrewScreen(
+                viewModel = crewViewModel,
+                modifier = modifier,
+                onBack = { destination = Destination.HOME },
+                onOpenSettings = { destination = Destination.SETTINGS },
             )
         }
 

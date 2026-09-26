@@ -99,6 +99,8 @@ data class ContentPack(
     val resources: List<com.stratum.core.domain.strategy.ResourceDefinition> = emptyList(),
     val structures: List<com.stratum.core.domain.strategy.StructureDefinition> = emptyList(),
     val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
+    /** The studio crew this pack brings: agents that write content in its lore. */
+    val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

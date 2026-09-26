@@ -88,6 +88,36 @@ class StratumScreenshotTest {
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/world_setup.png")
     }
 
+    @Test
+    fun agent_studio() {
+        val crew = com.stratum.agents.StandardCrew
+        fun attempt(n: Int, reply: String, problems: List<String> = emptyList(), added: Map<String, List<String>> = emptyMap()) =
+            com.stratum.agents.AgentAttempt(n, "system", "THE WORLD: a hive city under siege by rot cults\nWRITE: blocks, biomes", reply, problems, added, durationMillis = 4200L + n * 800)
+        val steps = listOf(
+            com.stratum.agents.StudioStep(crew.cartographer, com.stratum.agents.StepStatus.DONE, listOf(
+                attempt(1, "{ \"blocks\": [ { \"id\": \"hive:ferrocrete\" } ] }", problems = listOf("biome 'hive:underhive' names unknown block 'hive:slag'")),
+                attempt(2, "{ \"blocks\": [ { \"id\": \"hive:ferrocrete\", \"name\": \"Ferrocrete\", \"material\": \"STONE\" } ] }", added = mapOf("blocks" to listOf("hive:ferrocrete", "hive:slag"), "biomes" to listOf("hive:underhive"))),
+            )),
+            com.stratum.agents.StudioStep(crew.loremaster, com.stratum.agents.StepStatus.REVIEW, listOf(attempt(1, "{}", added = mapOf("factions" to listOf("hive:enforcers", "hive:rot_cult", "hive:guilders"))))),
+        ) + listOf(crew.bestiary, crew.architect, crew.steward, crew.warlord, crew.arbiter).map { com.stratum.agents.StudioStep(it) }
+        val state = com.stratum.feature.forge.CrewUiState(
+            prompt = "A hive city under siege by rot cults; faith is currency",
+            packName = "Hive Siege",
+            crew = crew.all,
+            benched = setOf(crew.arbiter.id),
+            journal = com.stratum.agents.StudioJournal("A hive city under siege", steps),
+            review = com.stratum.feature.forge.PendingReview(steps[1], "{\n  \"factions\": [\n    { \"id\": \"hive:enforcers\", \"name\": \"Enforcers\", \"color\": \"#FF3D5AFE\" },\n    { \"id\": \"hive:rot_cult\", \"name\": \"Rot Cult\", \"defaultStance\": \"HOSTILE\" }\n  ]\n}"),
+            openStep = crew.cartographer.id,
+            providerConfigured = true,
+        )
+        composeTestRule.setContent {
+            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
+                com.stratum.feature.forge.CrewScreenContent(state, com.stratum.feature.forge.CrewActions(), Modifier.fillMaxSize().background(com.stratum.core.designsystem.theme.StratumTheme.colors.surface))
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/agent_studio.png")
+    }
+
     /** A run part way through: a progress bar, a gallery filling in, one failure. */
     private fun forgeInProgress(): com.stratum.feature.play.TextureForgeUiState {
         val content = GameSetup.assemble()

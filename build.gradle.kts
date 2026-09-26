@@ -21,6 +21,9 @@ plugins {
 val pureModules = listOf(
   ":core:domain",
   ":engine:world",
+  ":engine:settlement",
+  ":engine:crowd",
+  ":agents",
   ":engine:render",
   ":engine:scene",
   ":content:igbo",
