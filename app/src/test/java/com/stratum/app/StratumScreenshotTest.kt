@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
 import com.stratum.core.designsystem.theme.LocalSafeAreaInsets
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -67,6 +69,23 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home_landscape.png")
+    }
+
+    @Test
+    fun world_setup() {
+        composeTestRule.setContent {
+            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(com.stratum.core.designsystem.theme.StratumTheme.colors.surface).padding(16.dp)) {
+                    WorldSetupCard(
+                        rules = com.stratum.core.domain.world.RulesPresets.survivor.rules.copy(raids = false),
+                        suggested = com.stratum.core.domain.world.WorldRules(),
+                        onRulesChange = {},
+                        startExpanded = true,
+                    )
+                }
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/world_setup.png")
     }
 
     /** A run part way through: a progress bar, a gallery filling in, one failure. */

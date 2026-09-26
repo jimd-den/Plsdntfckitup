@@ -5,6 +5,7 @@ import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.world.WorldConfig
+import com.stratum.core.domain.world.WorldRules
 
 /**
  * Composition root for a run.
@@ -26,12 +27,17 @@ object GameSetup {
      *   (nine by nine chunks, 144 blocks across) keeps the loaded edge well past
      *   the fog; cheaper phones keep fewer and draw a shorter view to match.
      */
-    fun worldConfig(seed: Long = System.currentTimeMillis(), streamingRadius: Int = 4): WorldConfig = WorldConfig(
+    fun worldConfig(
+        seed: Long = System.currentTimeMillis(),
+        streamingRadius: Int = 4,
+        rules: WorldRules = WorldRules(),
+    ): WorldConfig = WorldConfig(
         seed = seed,
         simulationRadius = streamingRadius,
         seaLevel = 12,
         surfaceVariation = 4,
         caveDensity = 0.44f,
         oreRichness = 1f,
+        rules = rules,
     )
 }

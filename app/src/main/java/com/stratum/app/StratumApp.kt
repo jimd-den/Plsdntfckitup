@@ -165,7 +165,10 @@ fun StratumApp(
     val styles = remember(context) { WorldStyleStore(context) }
     var stylePrompt by remember { mutableStateOf(styles.load()) }
     val forgeDirectory = remember(context) { java.io.File(context.filesDir, "forge") }
-    val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius) }
+    // How the next world plays. Starts from what the packs suggest, and
+    // starts over from it when the packs change.
+    var worldRules by remember(content.suggestedRules) { mutableStateOf(content.suggestedRules) }
+    val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius, worldRules) }
 
     // The service is started by the run beginning, not by the forge opening:
     // it exists to protect work in flight, and one that started with the
@@ -311,6 +314,9 @@ fun StratumApp(
                 }
             }
             HomeScreen(
+                worldRules = worldRules,
+                suggestedRules = content.suggestedRules,
+                onRulesChange = { worldRules = it },
                 heroSummary = heroSummary,
                 onTextures = { destination = Destination.TEXTURES },
                 paintedStyle = stylePrompt.ifBlank { null },

@@ -1,6 +1,7 @@
 package com.stratum.app
 
 import com.stratum.core.designsystem.component.GameTile
+import com.stratum.core.domain.world.WorldRules
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.width
@@ -90,6 +91,10 @@ internal fun HomeScreen(
     paintedStyle: String? = null,
     /** Whether an image and language model is set up, which the AI tools need. */
     modelReady: Boolean = false,
+    /** How the next world plays, and what the loaded packs suggest. */
+    worldRules: WorldRules = WorldRules(),
+    suggestedRules: WorldRules = WorldRules(),
+    onRulesChange: (WorldRules) -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     val play: @Composable () -> Unit = {
@@ -97,6 +102,8 @@ internal fun HomeScreen(
             heroClasses, selectedClassId, onSelectClass, characterSheets, selectedSheetId, onSelectSheet,
             idleFrameFor, unpackedCharacterCount, onPoseForge, onDescend, heroSummary,
         )
+        Spacer(Modifier.height(Space.large))
+        WorldSetupCard(worldRules, suggestedRules, onRulesChange)
     }
     val tiles = listOf(
         TileSpec("🎨", "Texture forge", "Describe a look and AI paints the ground, walls and props.", onTextures,
@@ -275,6 +282,7 @@ private val HOW_TO_PLAY = listOf(
     "✦" to "Each level gives two points. Spend them on the Hero tree: tap a far node and the path lights up.",
     "⚒" to "Currency drops straight into your pouch. Use it at the Anvil to reroll, upgrade and socket gear.",
     "🗺" to "Fell a champion to open the next world tier. Waystones open harder worlds with bigger rewards.",
+    "🏕" to "Camp to eat, drink and cook. Found outposts in the Realm: they build, train soldiers and get raided.",
     "🎨" to "Style changes the look instantly. The texture forge paints it for real.",
 )
 
