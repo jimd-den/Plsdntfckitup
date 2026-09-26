@@ -51,6 +51,9 @@ internal data class PackSchema(
     val consumables: List<ConsumableSchema> = emptyList(),
     val forage: List<ForageSchema> = emptyList(),
     val recipes: List<RecipeSchema> = emptyList(),
+    val resources: List<ResourceSchema> = emptyList(),
+    val structures: List<StructureSchema> = emptyList(),
+    val units: List<UnitSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -64,6 +67,7 @@ internal data class PackSchema(
         factions = factions.map { it.toDomain() }, enemyPacks = enemyPacks.map { it.toDomain() }, settlements = settlements.map { it.toDomain() },
         rules = rules?.toDomain(), needs = needs.map { it.toDomain() }, consumables = consumables.map { it.toDomain() },
         forageRules = forage.map { it.toDomain() }, recipes = recipes.map { it.toDomain() },
+        resources = resources.map { it.toDomain() }, structures = structures.map { it.toDomain() }, units = units.map { it.toDomain() },
     )
 
     companion object {
@@ -78,6 +82,7 @@ internal data class PackSchema(
             p.factions.map(FactionSchema::of), p.enemyPacks.map(EnemyPackSchema::of), p.settlements.map(SettlementSchema::of),
             p.rules?.let(RulesSchema::of), p.needs.map(NeedSchema::of), p.consumables.map(ConsumableSchema::of),
             p.forageRules.map(ForageSchema::of), p.recipes.map(RecipeSchema::of),
+            p.resources.map(ResourceSchema::of), p.structures.map(StructureSchema::of), p.units.map(UnitSchema::of),
         )
     }
 }

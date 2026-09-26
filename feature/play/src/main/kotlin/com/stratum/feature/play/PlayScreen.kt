@@ -65,6 +65,17 @@ fun PlayScreen(
     val survivalActions = remember(viewModel) {
         SurvivalActions(onToggleCamp = viewModel::toggleCamp, onEat = viewModel::eat, onDrink = viewModel::drink, onMake = viewModel::make)
     }
+    val realmActions = remember(viewModel) {
+        RealmActions(
+            onToggle = viewModel::toggleRealm,
+            onFound = viewModel::foundOutpost,
+            onDeposit = viewModel::deposit,
+            onBuild = { viewModel.buildStructure(it) },
+            onRecruit = { viewModel.recruit(it) },
+            onMuster = viewModel::muster,
+            onOrder = viewModel::command,
+        )
+    }
     PlayScreenContent(
         state = state,
         world = viewModel.world,
@@ -103,6 +114,7 @@ fun PlayScreen(
         onCraft = viewModel::craft,
         heroActions = heroActions,
         survivalActions = survivalActions,
+        realmActions = realmActions,
     )
 }
 
@@ -146,6 +158,7 @@ fun PlayScreenContent(
     onCraft: (String) -> Unit = {},
     heroActions: HeroActions = HeroActions(),
     survivalActions: SurvivalActions = SurvivalActions(),
+    realmActions: RealmActions = RealmActions(),
 ) {
     val colors = StratumTheme.colors
 
@@ -248,7 +261,7 @@ fun PlayScreenContent(
                 onSelectSlot = onSelectSlot,
                 onZoom = onZoom,
                 onOpenMenu = onOpenMenu,
-                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp),
+                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle),
                 onDrink = survivalActions.onDrink,
             )
         }
@@ -305,6 +318,10 @@ fun PlayScreenContent(
                 onMake = survivalActions.onMake,
                 onClose = survivalActions.onToggleCamp,
             )
+        }
+
+        if (state.realmOpen && !state.isDead) {
+            RealmOverlay(panel = state.realm, actions = realmActions)
         }
 
         if (state.hero.open && !state.isDead) {
@@ -513,6 +530,7 @@ private fun dockEntries(
     onToggleStyle: () -> Unit,
     onToggle3D: () -> Unit,
     onToggleCamp: () -> Unit,
+    onToggleRealm: () -> Unit,
 ): List<DockEntry> {
     val points = state.player.unspentPassivePoints
     val craftables = state.heldInserts.sumOf { it.count } + state.heldCurrency.sumOf { it.count }
@@ -524,6 +542,8 @@ private fun dockEntries(
             .takeIf { state.checks.isNotEmpty() },
         DockEntry("🏕", "Camp", onToggleCamp, badge = "!".takeIf { state.survival.anyLow }, active = state.campOpen, calling = state.survival.anyLow)
             .takeIf { state.survival.active },
+        DockEntry("🏰", "Realm", onToggleRealm, badge = state.realm.followers.takeIf { it > 0 }?.toString(), active = state.realmOpen)
+            .takeIf { state.realm.active },
         DockEntry("🎨", "Style", onToggleStyle, badge = state.forgeProgress?.takeUnless { it.isFinished }?.let { "${(it.fraction * 100).toInt()}%" }, active = state.styleOpen),
         DockEntry(if (state.use3D) "3D" else "2D", "View", onToggle3D),
     )

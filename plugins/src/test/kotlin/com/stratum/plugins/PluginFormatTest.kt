@@ -129,6 +129,20 @@ class PluginFormatTest {
         assertEquals(pack.biomes.map { it.temperature }, decoded.biomes.map { it.temperature })
     }
 
+    @Test
+    fun `resources, structures and units survive the trip`() {
+        val pack = IgboContentPack.pack.copy(
+            resources = com.stratum.core.domain.strategy.StandardStrategy.resources,
+            structures = com.stratum.core.domain.strategy.StandardStrategy.structures,
+            units = com.stratum.core.domain.strategy.StandardStrategy.units,
+        )
+        val decoded = PackJson.decode(PackJson.encode(pack))
+
+        assertEquals(pack.resources, decoded.resources)
+        assertEquals(pack.structures, decoded.structures)
+        assertEquals(pack.units, decoded.units)
+    }
+
     /** What a person writes by hand: only what differs from the defaults. */
     private val handWritten = """
         {

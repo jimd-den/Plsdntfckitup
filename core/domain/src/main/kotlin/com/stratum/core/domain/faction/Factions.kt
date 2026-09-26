@@ -106,6 +106,12 @@ data class Reputation(val standing: Map<String, Int> = emptyMap()) {
     }
 }
 
+/** Faction ids the engine itself uses. */
+object Factions {
+    /** The player's own side: their followers, their garrisons. Always allied to the player. */
+    const val PLAYER = "stratum:player"
+}
+
 /**
  * Every loaded faction, and the questions the engine asks about them. Wild
  * things -- anything with no faction -- are hostile to everyone.
@@ -118,7 +124,7 @@ class FactionBook(val all: List<FactionDefinition>) {
 
     /** How [factionId]'s people treat the player. Unaligned monsters are always hostile. */
     fun stanceToPlayer(factionId: String?, reputation: Reputation): Stance =
-        faction(factionId)?.let(reputation::stanceOf) ?: Stance.HOSTILE
+        if (factionId == Factions.PLAYER) Stance.ALLIED else faction(factionId)?.let(reputation::stanceOf) ?: Stance.HOSTILE
 
     /** Whether [a]'s people and [b]'s people fight when they meet. Unaligned fights everything. */
     fun hostile(a: String?, b: String?): Boolean {

@@ -95,6 +95,10 @@ data class ContentPack(
     val consumables: List<com.stratum.core.domain.survival.ConsumableDefinition> = emptyList(),
     val forageRules: List<com.stratum.core.domain.survival.ForageRule> = emptyList(),
     val recipes: List<com.stratum.core.domain.survival.RecipeDefinition> = emptyList(),
+    /** Strategy: what outposts stockpile, build and recruit. */
+    val resources: List<com.stratum.core.domain.strategy.ResourceDefinition> = emptyList(),
+    val structures: List<com.stratum.core.domain.strategy.StructureDefinition> = emptyList(),
+    val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

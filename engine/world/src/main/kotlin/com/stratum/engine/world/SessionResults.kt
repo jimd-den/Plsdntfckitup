@@ -144,6 +144,9 @@ sealed interface CombatEvent {
 
     /** A stronghold's garrison is gone: the town is the player's side's now. */
     data class TownLiberated(val town: SettlementPlan) : CombatEvent
+
+    /** Something happened in the player's realm: a raid arrived, was settled, or was beaten off. */
+    data class Realm(val event: RealmEvent) : CombatEvent
 }
 
 /** What trying a tabletop check did. */

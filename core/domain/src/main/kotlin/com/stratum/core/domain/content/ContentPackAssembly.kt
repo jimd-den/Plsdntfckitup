@@ -18,6 +18,11 @@ import com.stratum.core.domain.actor.EnemyPackDefinition
 import com.stratum.core.domain.faction.FactionBook
 import com.stratum.core.domain.faction.FactionDefinition
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.strategy.ResourceDefinition
+import com.stratum.core.domain.strategy.StandardStrategy
+import com.stratum.core.domain.strategy.StrategyBook
+import com.stratum.core.domain.strategy.StructureDefinition
+import com.stratum.core.domain.strategy.UnitDefinition
 import com.stratum.core.domain.survival.ConsumableDefinition
 import com.stratum.core.domain.survival.ForageRule
 import com.stratum.core.domain.survival.NeedDefinition
@@ -78,6 +83,9 @@ class ContentPackAssembler {
             consumables = merger.merge(ContentPack::consumables, ConsumableDefinition::id),
             forageRules = packs.flatMap { it.forageRules },
             recipes = merger.merge(ContentPack::recipes, RecipeDefinition::id),
+            resources = merger.merge(ContentPack::resources, ResourceDefinition::id),
+            structures = merger.merge(ContentPack::structures, StructureDefinition::id),
+            units = merger.merge(ContentPack::units, UnitDefinition::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
@@ -98,6 +106,23 @@ class ContentPackAssembler {
             consumables = content.consumables.ifEmpty { StandardSurvival.consumables },
             forageRules = if (content.consumables.isEmpty()) content.forageRules + StandardSurvival.forage else content.forageRules,
             recipes = if (content.consumables.isEmpty()) content.recipes + StandardSurvival.recipes else content.recipes,
+        ).let(::withStandardStrategy)
+    }
+
+    /**
+     * The standard economy for a pack with none: resources, structures,
+     * units, and the soldiers' bodies, hitting with the pack's own first
+     * damage type so they fit its balance.
+     */
+    private fun withStandardStrategy(content: AssembledContent): AssembledContent {
+        if (content.resources.isNotEmpty() || content.structures.isNotEmpty()) return content
+        val damageType = content.damageTypes.firstOrNull()?.id ?: content.weapons.first().damageTypeId
+        val actors = StandardStrategy.actors(damageType).filter { actor -> content.enemies.none { it.id == actor.id } }
+        return content.copy(
+            resources = StandardStrategy.resources,
+            structures = StandardStrategy.structures,
+            units = content.units.ifEmpty { StandardStrategy.units },
+            enemies = content.enemies + actors,
         )
     }
 
@@ -199,12 +224,28 @@ internal object WorldPoliticsValidation {
     fun problems(content: AssembledContent): List<String> {
         val factionIds = content.factions.mapTo(HashSet()) { it.id }
         val enemyIds = content.enemies.mapTo(HashSet()) { it.id }
-        fun unknownFaction(id: String?) = id != null && id !in factionIds
+        fun unknownFaction(id: String?) = id != null && id != com.stratum.core.domain.faction.Factions.PLAYER && id !in factionIds
         return content.factionBook.problems() +
             content.enemies.filter { unknownFaction(it.factionId) }.map { "enemy '${it.id}' belongs to unknown faction '${it.factionId}'" } +
             content.enemyPacks.flatMap { pack -> packProblems(pack, enemyIds) } +
             content.settlements.flatMap { recipe -> settlementProblems(recipe, content, enemyIds, factionIds) } +
-            survivalProblems(content)
+            survivalProblems(content) + strategyProblems(content)
+    }
+
+    /** Costs in resources nobody defined, requirements on structures that do not exist, soldiers with no body. */
+    private fun strategyProblems(content: AssembledContent): List<String> {
+        val resources = content.resources.mapTo(HashSet()) { it.id }
+        val structures = content.structures.mapTo(HashSet()) { it.id }
+        val actors = content.enemies.mapTo(HashSet()) { it.id }
+        fun costs(owner: String, map: Map<String, *>) = map.keys.filter { it !in resources }.map { "$owner uses unknown resource '$it'" }
+        return content.structures.flatMap { s ->
+            costs("structure '${s.id}'", s.cost) + costs("structure '${s.id}'", s.produces) + costs("structure '${s.id}'", s.upkeep) +
+                s.requires.filter { it !in structures }.map { "structure '${s.id}' requires unknown structure '$it'" }
+        } + content.units.flatMap { u ->
+            costs("unit '${u.id}'", u.cost) + costs("unit '${u.id}'", u.upkeep) +
+                listOfNotNull(u.requires).filter { it !in structures }.map { "unit '${u.id}' requires unknown structure '$it'" } +
+                listOf(u.actorId).filter { it !in actors }.map { "unit '${u.id}' has unknown body '$it'" }
+        }
     }
 
     /** Food that restores a need nobody defined, or a recipe using an item that is neither a block nor food. */
@@ -263,9 +304,15 @@ data class AssembledContent(
     val consumables: List<ConsumableDefinition> = emptyList(),
     val forageRules: List<ForageRule> = emptyList(),
     val recipes: List<RecipeDefinition> = emptyList(),
+    val resources: List<ResourceDefinition> = emptyList(),
+    val structures: List<StructureDefinition> = emptyList(),
+    val units: List<UnitDefinition> = emptyList(),
     /** The rules the loaded packs suggest, before the player changes them. */
     val suggestedRules: com.stratum.core.domain.world.WorldRules = com.stratum.core.domain.world.WorldRules(),
 ) {
+    /** Outposts' resources, structures and units, for the questions the engine asks of them. */
+    val strategyBook: StrategyBook by lazy { StrategyBook(resources, structures, units) }
+
     /** The loaded factions, for the questions the engine asks of them. */
     val factionBook: FactionBook by lazy { FactionBook(factions) }
 

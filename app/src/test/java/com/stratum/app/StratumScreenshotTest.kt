@@ -27,6 +27,8 @@ import com.stratum.core.domain.content.ClassOptions
 import com.stratum.feature.hero.ClassForgeScreenContent
 import com.stratum.feature.hero.ClassForgeUiState
 import com.stratum.feature.play.PlayScreenContent
+import com.stratum.feature.play.RealmOption
+import com.stratum.feature.play.RealmPanel
 import com.stratum.feature.play.PlayUiState
 import org.junit.Rule
 import org.junit.Test
@@ -484,6 +486,35 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/camp.png")
+    }
+
+    @Test
+    fun realm_screen() {
+        val (content, session) = fight()
+        val strategy = com.stratum.core.domain.strategy.StandardStrategy
+        val book = com.stratum.core.domain.strategy.StrategyBook(strategy.resources, strategy.structures, strategy.units)
+        val outpost = com.stratum.core.domain.strategy.Outpost(
+            id = "hold", name = "Umuaka Hold", centerX = 0, centerY = 0,
+            structures = mapOf(strategy.hearth.id to 1, strategy.farm.id to 2, strategy.lumberCamp.id to 1, strategy.barracks.id to 1),
+            stockpile = mapOf(strategy.food.id to 64f, strategy.timber.id to 41f, strategy.stone.id to 18f, strategy.metal.id to 3f),
+            garrison = mapOf(strategy.militia.id to 2),
+            raidIn = 214f,
+        )
+        val Colony = com.stratum.core.domain.strategy.Colony
+        val panel = RealmPanel(
+            active = true, here = outpost, outposts = listOf(outpost), resources = book.resources,
+            netPerMinute = Colony.netPerMinute(outpost, book), population = Colony.population(outpost, book),
+            workers = Colony.workersNeeded(outpost, book), defense = Colony.defense(outpost, book),
+            structures = book.structures.map { RealmOption(it, Colony.canBuild(outpost, book, it.id), outpost.count(it.id)) },
+            units = book.units.map { RealmOption(it, Colony.canRecruit(outpost, book, it.id), outpost.garrison[it.id] ?: 0) },
+            followers = 2,
+        )
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session).copy(realm = panel, realmOpen = true), world = session.world, modifier = Modifier.fillMaxSize())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/realm.png")
     }
 
     @Test

@@ -19,7 +19,10 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.passive.PassiveBuild
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.session.HeroSave
+import com.stratum.core.domain.faction.Factions
 import com.stratum.core.domain.faction.Reputation
+import com.stratum.core.domain.strategy.FollowerOrder
+import com.stratum.core.domain.strategy.Outpost
 import com.stratum.core.domain.stats.ModifierKind
 import com.stratum.core.domain.stats.StatModifier
 import com.stratum.core.domain.survival.ConsumableDefinition
@@ -122,6 +125,7 @@ class WorldSession(
     val clock = WorldClock(config.rules.dayLengthMinutes * 60f)
     private val crowd = CrowdControl(streamingWorld, director)
     private val garrisons = Garrisons(director)
+    private val realm = RealmSystem(content, config.rules.raids)
 
     /** Neutral people the player has struck: they fight back until they are dead or the player leaves. */
     private val provoked = HashSet<String>()
@@ -368,7 +372,8 @@ class WorldSession(
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
         streamingWorld.focusOn(player.blockPos)
 
-        val produced = pending.toList().also { pending.clear() } + monstersAct(deltaSeconds) + collectLoot() + collectInserts()
+        val news = realm.advance(deltaSeconds, player.position, random).onEach(::onRealm).map(CombatEvent::Realm)
+        val produced = pending.toList().also { pending.clear() } + news + monstersAct(deltaSeconds) + collectLoot() + collectInserts() + endRaids()
         animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { hitFlashes.intensity(it) > 0f }
         player = player.copy(
             cooldowns = player.cooldowns.advanced(deltaSeconds),
@@ -657,7 +662,7 @@ class WorldSession(
             towns.none { it.contains(kotlin.math.floor(spot.x).toInt(), kotlin.math.floor(spot.y).toInt()) && !isHostileTown(it) }
         }
         enemies = enemies + garrisons.muster(towns, enemies, player.level, random)
-        enemies = crowd.advance(enemies, player.position, ::isHostile, deltaSeconds)
+        enemies = crowd.advance(enemies, player.position, ::isHostile, deltaSeconds, allyOrders())
 
         val incoming = combat.enemyAttacks(
             enemies = enemies.filter(::isHostile),
@@ -670,6 +675,9 @@ class WorldSession(
         incoming.enemies.filter { it.attackCooldown > 0f && it.isAlive }.forEach { animator.holdAttack(it.instanceId) }
         val swung = incoming.enemies.associateBy { it.instanceId }
         enemies = enemies.map { swung[it.instanceId] ?: it }
+        skirmish()
+        homeComing()
+        rally(deltaSeconds)
         return if (incoming.totalDamage > 0) takeHit(incoming) else emptyList()
     }
 
@@ -776,7 +784,141 @@ class WorldSession(
     /** Towns whose people the player should be able to see or meet. */
     private fun townsInSight(): List<SettlementPlan> = settlementsNear(TOWN_SIGHT)
 
+    // ---- the realm -------------------------------------------------------------
+
+    /** Whether the loaded packs give outposts something to build. */
+    val realmActive: Boolean get() = realm.active
+
+    val outposts: List<Outpost> get() = realm.outposts
+
+    /** The outpost the player stands in. */
+    val currentOutpost: Outpost? get() = realm.outpostAt(player.blockPos.x, player.blockPos.y)
+
+    /** The player's followers in the field. */
+    val followers: List<EnemyInstance> get() = enemies.filter { it.factionId == Factions.PLAYER && it.home == null && it.isAlive }
+
+    val followerOrder: FollowerOrder get() = realm.order
+
+    fun foundOutpost(name: String): RealmResult = realm.found(player, townsInSight(), name).also { player = it.first }.second
+
+    fun build(outpostId: String, structureId: String): RealmResult = realm.build(outpostId, structureId)
+
+    fun recruit(outpostId: String, unitId: String): RealmResult = realm.recruit(outpostId, unitId)
+
+    fun deposit(): RealmResult = realm.deposit(player).also { player = it.first }.second
+
+    /** Takes soldiers from this outpost's garrison to follow the player, up to the follower limit. */
+    fun muster(count: Int = RealmSystem.MAX_FOLLOWERS): RealmResult {
+        val room = (RealmSystem.MAX_FOLLOWERS - followers.size).coerceAtLeast(0)
+        val (unitIds, result) = realm.muster(player, minOf(count, room))
+        enemies = enemies + unitIds.mapNotNull { spawnSoldier(it, near = player.position, home = null) }
+        return result
+    }
+
+    fun command(order: FollowerOrder): RealmResult = realm.command(order, player.position)
+
+    private fun allyOrders() = AllyOrders(realm.order, player.position, realm.holdAt, realm.returnPoint(player.position))
+
+    private fun spawnSoldier(unitId: String, near: WorldPoint, home: WorldPoint?): EnemyInstance? {
+        val unit = content.strategyBook.unit(unitId) ?: return null
+        val body = director.definition(unit.actorId) ?: return null
+        val spot = director.grounded(near.translated(random.nextFloat() * 2f - 1f, random.nextFloat() * 2f - 1f, 0f)) ?: near
+        return director.instantiate(body, spot, player.level, random).copy(squadId = UNIT_SQUAD + unitId, home = home)
+    }
+
+    /** Followers and hostiles in reach trade blows; a hostile that already swung at the player waits its turn. */
+    private fun skirmish() {
+        val friends = enemies.filter { it.factionId == Factions.PLAYER && it.isAlive }
+        if (friends.isEmpty()) return
+        val foes = enemies.filter { isHostile(it) && it.isAlive }
+        val (foesAfter, friendsHit, _) = Skirmish.exchange(foes, friends, random)
+        val (friendsAfter, foesHit, _) = Skirmish.exchange(friendsHit, foesAfter, random)
+        val updated = (friendsAfter + foesHit).associateBy { it.instanceId }
+        enemies = enemies.map { updated[it.instanceId] ?: it }
+        val fallen = enemies.filter { !it.isAlive }
+        enemies = enemies.filter { it.isAlive || it.factionId != Factions.PLAYER }
+        val slain = fallen.filter { it.factionId != Factions.PLAYER }
+        if (slain.isNotEmpty()) buryTheDead(slain)
+    }
+
+    /** Seconds each follower has spent failing to close on the player. */
+    private val lagging = HashMap<String, Float>()
+
+    /**
+     * A follower stuck under a ledge the player climbed, or left far behind,
+     * catches up: it reappears beside the player. Every ARPG with followers
+     * does this, because a follower stuck on a rock is not a follower.
+     */
+    private fun rally(deltaSeconds: Float) {
+        if (realm.order != FollowerOrder.FOLLOW && realm.order != FollowerOrder.FIGHT) return lagging.clear()
+        val present = followers
+        lagging.keys.retainAll(present.map { it.instanceId }.toSet())
+        enemies = enemies.map { enemy ->
+            if (enemy !in present) return@map enemy
+            val distance = enemy.position.horizontalDistanceTo(player.position)
+            val stuck = distance > RALLY_NEAR && enemy.state != com.stratum.core.domain.actor.EnemyState.ATTACKING
+            lagging[enemy.instanceId] = if (stuck) (lagging[enemy.instanceId] ?: 0f) + deltaSeconds else 0f
+            if (distance > RALLY_FAR || (lagging[enemy.instanceId] ?: 0f) > RALLY_AFTER) {
+                lagging[enemy.instanceId] = 0f
+                director.grounded(player.position.translated(-1f, -1f, 0f))?.let { enemy.copy(position = it) } ?: enemy
+            } else {
+                enemy
+            }
+        }
+    }
+
+    /** Followers sent home go back into the garrison when they arrive. */
+    private fun homeComing() {
+        if (realm.order != FollowerOrder.RETURN) return
+        val home = realm.returnPoint(player.position) ?: return
+        val arrived = followers.filter { it.position.horizontalDistanceTo(home) <= ARRIVED_HOME }
+        if (arrived.isEmpty()) return
+        realm.garrison(arrived.mapNotNull { it.squadId?.removePrefix(UNIT_SQUAD) }, home)
+        enemies = enemies - arrived.toSet()
+    }
+
+    private fun onRealm(event: RealmEvent) {
+        if (event is RealmEvent.RaidArrived) raid(event.outpost, event.attackers)
+    }
+
+    /**
+     * A raid the player is there to fight: raiders from a hostile faction --
+     * or the wilds, when no faction wants the land -- close in from outside
+     * the walls, and the garrison turns out to meet them at the square.
+     */
+    private fun raid(outpost: Outpost, attackers: Int) {
+        val raiders = raiderDefinitions()
+        if (raiders.isEmpty()) return
+        val squad = RAID_SQUAD + outpost.id
+        val wave = List(attackers) { i ->
+            val angle = i * 2 * Math.PI / attackers + random.nextFloat()
+            val at = WorldPoint(outpost.centerX + (kotlin.math.cos(angle) * (outpost.radius + RAID_DISTANCE)).toFloat(), outpost.centerY + (kotlin.math.sin(angle) * (outpost.radius + RAID_DISTANCE)).toFloat(), player.position.z)
+            director.grounded(at)?.let { spot -> director.instantiate(raiders[i % raiders.size], spot, player.level, random).copy(squadId = squad, isLeader = i == 0) }
+        }.filterNotNull()
+        val square = WorldPoint(outpost.centerX + 0.5f, outpost.centerY + 0.5f, player.position.z)
+        val (turnedOut, _) = realm.muster(player.copy(position = square), RealmSystem.MAX_RAIDERS)
+        val defenders = turnedOut.mapNotNull { spawnSoldier(it, near = square, home = square) }
+        enemies = enemies + wave + defenders
+        // Raiders are hostile to the player whatever their faction thinks: they came to burn it.
+        provoked += wave.map { it.instanceId }
+    }
+
+    private fun raiderDefinitions() = content.enemies.filter { enemy ->
+        enemy.factionId != null && enemy.factionId != Factions.PLAYER && content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE
+    }.ifEmpty { content.enemies.filter { it.factionId == null && it.spawnWeight > 0 } }
+
+    /** Fought raids whose raiders are all gone are over; the garrison that turned out goes home. */
+    private fun endRaids(): List<CombatEvent> = realm.raidsOver { id -> enemies.count { it.squadId == RAID_SQUAD + id && it.isAlive } }.map { event ->
+        if (event is RealmEvent.RaidRepelled) {
+            val defenders = enemies.filter { it.factionId == Factions.PLAYER && it.home != null }
+            realm.garrison(defenders.mapNotNull { it.squadId?.removePrefix(UNIT_SQUAD) }, WorldPoint(event.outpost.centerX.toFloat(), event.outpost.centerY.toFloat(), 0f))
+            enemies = enemies - defenders.toSet()
+        }
+        CombatEvent.Realm(event)
+    }
+
     private fun liberate(town: SettlementPlan) {
+        realm.adopt(town)
         cues.townFreed(town.name, player.position)
         town.factionId?.let { owner ->
             // Freeing a town from a faction is a blow against it and a gift to its enemies.
@@ -950,6 +1092,13 @@ class WorldSession(
         /** How far away a town's people muster, in blocks. */
         const val TOWN_SIGHT = 40
         const val LIBERATION_STANDING = 25
+        const val UNIT_SQUAD = "unit:"
+        const val RAID_SQUAD = "raid:"
+        const val RAID_DISTANCE = 8
+        const val ARRIVED_HOME = 3f
+        const val RALLY_NEAR = 4.5f
+        const val RALLY_FAR = 16f
+        const val RALLY_AFTER = 2f
 
         /** How long an actor is considered mid-swing, for animation only. */
         const val ATTACK_ANIMATION_HOLD = ActorAnimator.HOLD_SECONDS

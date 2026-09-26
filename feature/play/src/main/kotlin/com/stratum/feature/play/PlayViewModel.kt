@@ -39,6 +39,11 @@ import com.stratum.engine.world.Held
 import com.stratum.engine.world.PassiveResult
 import com.stratum.engine.world.SupportResult
 import com.stratum.engine.world.SurvivalResult
+import com.stratum.engine.world.RealmEvent
+import com.stratum.engine.world.RealmResult
+import com.stratum.core.domain.strategy.Affordability
+import com.stratum.core.domain.strategy.Colony
+import com.stratum.core.domain.strategy.FollowerOrder
 import com.stratum.engine.world.DodgeResult
 import com.stratum.engine.world.EquipResult
 import com.stratum.engine.world.FeedbackMark
@@ -306,6 +311,79 @@ class PlayViewModel(
         )
     }
 
+    // ---- realm -------------------------------------------------------------
+
+    fun toggleRealm() {
+        _state.value = _state.value.copy(realmOpen = !_state.value.realmOpen)
+        publish()
+    }
+
+    fun foundOutpost() = publish(message = describe(session.foundOutpost("Outpost ${session.outposts.size + 1}")))
+
+    fun deposit() = publish(message = describe(session.deposit()))
+
+    fun buildStructure(structureId: String) = session.currentOutpost?.let { publish(message = describe(session.build(it.id, structureId))) }
+
+    fun recruit(unitId: String) = session.currentOutpost?.let { publish(message = describe(session.recruit(it.id, unitId))) }
+
+    fun muster() = publish(message = describe(session.muster()))
+
+    fun command(order: FollowerOrder) = publish(message = describe(session.command(order)))
+
+    private fun describe(result: RealmResult): String = when (result) {
+        is RealmResult.Founded -> "${result.outpost.name} is founded"
+        is RealmResult.Built -> "Built ${session.content.strategyBook.structure(result.structureId)?.name ?: "it"}"
+        is RealmResult.Recruited -> "${session.content.strategyBook.unit(result.unitId)?.name ?: "A soldier"} joins the garrison"
+        is RealmResult.Deposited -> if (result.gained.isEmpty()) "Nothing you carry is of use here" else "Stored " + result.gained.entries.joinToString(", ") { (id, n) -> "${n.toInt()} ${resourceName(id)}" }
+        is RealmResult.Mustered -> "${result.count} follow you"
+        is RealmResult.Ordered -> result.order.label
+        is RealmResult.CannotAfford -> when (val why = result.why) {
+            is Affordability.Missing -> "Short of " + why.resources.keys.joinToString(", ", transform = ::resourceName)
+            is Affordability.Requires -> "Needs a ${session.content.strategyBook.structure(why.structureId)?.name ?: why.structureId} first"
+            Affordability.AtLimit -> "There is no room for another"
+            else -> "That cannot be done here"
+        }
+        RealmResult.NotHere -> "Stand inside an outpost for that"
+        RealmResult.TooClose -> "Too close to a town or another outpost"
+        RealmResult.NotEnoughBlocks -> "Founding takes ${com.stratum.core.domain.strategy.StandardStrategy.FOUNDING_BLOCKS} blocks from your bag"
+        RealmResult.NoStrategy -> "This world has no outposts"
+        RealmResult.NoneToMuster -> "Nobody in the garrison to muster"
+    }
+
+    private fun describe(event: RealmEvent): String = when (event) {
+        is RealmEvent.RaidArrived -> "Raiders at ${event.outpost.name}: ${event.attackers} of them"
+        is RealmEvent.RaidRepelled -> "${event.outpost.name} holds"
+        is RealmEvent.RaidResolved -> if (event.outcome.defended) {
+            "${event.outpost.name} beat off a raid"
+        } else {
+            "${event.outpost.name} was sacked" + if (event.outcome.razed.isNotEmpty()) ", and a building burned" else ""
+        }
+    }
+
+    private fun resourceName(id: String): String = session.content.strategyBook.resources.firstOrNull { it.id == id }?.name?.lowercase() ?: id
+
+    /** What the realm panel shows. Options are only worked out while it is open. */
+    private fun realmPanel(): RealmPanel {
+        if (!session.realmActive) return RealmPanel()
+        val book = session.content.strategyBook
+        val here = session.currentOutpost
+        val open = _state.value.realmOpen
+        return RealmPanel(
+            active = true,
+            here = here,
+            outposts = session.outposts,
+            resources = book.resources,
+            netPerMinute = here?.let { Colony.netPerMinute(it, book) }.orEmpty(),
+            population = here?.let { Colony.population(it, book) } ?: 0,
+            workers = here?.let { Colony.workersNeeded(it, book) } ?: 0,
+            defense = here?.let { Colony.defense(it, book) } ?: 0,
+            structures = if (open && here != null) book.structures.map { RealmOption(it, Colony.canBuild(here, book, it.id), here.count(it.id)) } else emptyList(),
+            units = if (open && here != null) book.units.map { RealmOption(it, Colony.canRecruit(here, book, it.id), here.garrison[it.id] ?: 0) } else emptyList(),
+            followers = session.followers.size,
+            order = session.followerOrder,
+        )
+    }
+
     fun toggleTable() {
         _state.value = _state.value.copy(tableOpen = !_state.value.tableOpen)
     }
@@ -373,7 +451,8 @@ class PlayViewModel(
         // would drown out the messages that are not.
         is CombatEvent.PlayerHurt -> null
         is CombatEvent.InsertTaken -> "Picked up ${event.insert.name}"
-        is CombatEvent.TownLiberated -> "${event.town.name} is liberated"
+        is CombatEvent.TownLiberated -> "${event.town.name} is liberated, and yours to hold"
+        is CombatEvent.Realm -> describe(event.event)
     }
 
     // ---- dying -----------------------------------------------------------
@@ -691,6 +770,7 @@ class PlayViewModel(
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
             heldCurrency = session.heldCurrency,
             survival = survivalPanel(),
+            realm = realmPanel(),
             settlementName = snapshot.settlement?.name,
             settlementHostile = snapshot.settlementHostile,
             hero = heroPanel(),
@@ -959,6 +1039,9 @@ data class PlayUiState(
     /** Needs, food and the camp's recipes. */
     val survival: SurvivalPanel = SurvivalPanel(),
     val campOpen: Boolean = false,
+    /** Outposts, their stock and the followers in the field. */
+    val realm: RealmPanel = RealmPanel(),
+    val realmOpen: Boolean = false,
     /** The town the player stands in, or null in the wilds. */
     val settlementName: String? = null,
     /** Whether that town is a stronghold held against the player. */
