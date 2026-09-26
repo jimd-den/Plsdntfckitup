@@ -99,17 +99,19 @@ private data class HeroSchema(
     val supports: Map<String, List<String>> = emptyMap(),
     val waystones: List<WaystoneSchema> = emptyList(),
     val highestTier: Int = 0,
+    val reputation: Map<String, Int> = emptyMap(),
     val savedAt: Long = 0L,
 ) {
     fun toDomain() = HeroSave(
         id, heroClassId, level, experience, passives.toSet(), weapon?.toDomain(), bag.map { it.toDomain() },
-        inserts, currency, supportBag, supports, waystones.map { it.toDomain() }, highestTier, savedAt,
+        inserts, currency, supportBag, supports, waystones.map { it.toDomain() }, highestTier, reputation, savedAt,
     )
 
     companion object {
         fun of(h: HeroSave) = HeroSchema(
             FORMAT_VERSION, h.id, h.heroClassId, h.level, h.experience, h.passives.sorted(), h.equippedWeapon?.let(ItemSchema::of),
-            h.bag.map(ItemSchema::of), h.insertBag, h.currency, h.supportBag, h.supports, h.waystones.map(WaystoneSchema::of), h.highestTier, h.savedAt,
+            h.bag.map(ItemSchema::of), h.insertBag, h.currency, h.supportBag, h.supports, h.waystones.map(WaystoneSchema::of), h.highestTier,
+            h.reputation, h.savedAt,
         )
     }
 }

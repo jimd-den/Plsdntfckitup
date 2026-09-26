@@ -13,7 +13,10 @@ import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.crafting.CurrencyDefinition
 import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.difficulty.WaystoneMod
+import com.stratum.core.domain.actor.EnemyPackDefinition
+import com.stratum.core.domain.faction.FactionDefinition
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.settlement.SettlementRecipe
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.sprite.SpriteSheet
@@ -79,6 +82,12 @@ data class ContentPack(
     val currencies: List<CurrencyDefinition> = emptyList(),
     val supports: List<SupportDefinition> = emptyList(),
     val waystoneMods: List<WaystoneMod> = emptyList(),
+    /** The sides in the world, and how they regard each other. */
+    val factions: List<FactionDefinition> = emptyList(),
+    /** Groups of monsters that spawn and fight together. */
+    val enemyPacks: List<EnemyPackDefinition> = emptyList(),
+    /** Kinds of town the world generator may build. */
+    val settlements: List<SettlementRecipe> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

@@ -241,7 +241,7 @@ object IgboContentPack {
             "voxel world, with bronze at the bottom of it and something in it that bites.",
         origin = PackOrigin.BUILT_IN,
         palette = palette,
-        blocks = IgboPackBlocks.all,
+        blocks = IgboPackBlocks.all + IgboPackWorld.raffiaThatch,
         biomes = IgboPackBiomes.all,
         heroClasses = heroClasses,
         loreEntries = lore,
@@ -249,9 +249,12 @@ object IgboContentPack {
         affixes = IgboPackCombat.affixes,
         inserts = IgboPackCombat.inserts,
         weapons = IgboPackCombat.weapons,
-        enemies = IgboPackCombat.enemies,
+        enemies = IgboPackCombat.enemies + IgboPackWorld.people,
         skills = IgboPackCombat.skills,
         rarityStyles = IgboPackCombat.rarityStyles,
         terrain = terrain,
+        factions = IgboPackWorld.factions,
+        enemyPacks = IgboPackWorld.packs,
+        settlements = IgboPackWorld.settlements,
     )
 }

@@ -31,7 +31,7 @@ class HeroSaveStoreTest {
         equippedWeapon = blade, bag = listOf(blade.copy(instanceId = "item_2", sockets = SocketSet.NONE)),
         insertBag = mapOf("igbo:bead" to 2), currency = mapOf("stratum:currency/reforge" to 7),
         supportBag = mapOf("stratum:support/brutality" to 1), supports = mapOf("igbo:bolt" to listOf("stratum:support/swiftcast")),
-        waystones = listOf(Waystone("waystone_1", tier = 4, mods = WaystoneMods.standard.take(2))), highestTier = 3, savedAt = 1_700_000_000_000,
+        waystones = listOf(Waystone("waystone_1", tier = 4, mods = WaystoneMods.standard.take(2))), highestTier = 3, reputation = mapOf("igbo:nri" to 240), savedAt = 1_700_000_000_000,
     )
 
     private fun store() = FileHeroSaveStore(Files.createTempDirectory("heroes").toFile())

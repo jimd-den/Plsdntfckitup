@@ -5,6 +5,7 @@ import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.HeroClassDefinition
 import com.stratum.core.domain.difficulty.Waystone
+import com.stratum.core.domain.faction.Reputation
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.stats.Stat
@@ -69,6 +70,8 @@ data class PlayerState(
     val waystones: List<Waystone> = emptyList(),
     /** The hardest world tier this character has unlocked; 0 is the base game. */
     val highestTier: Int = 0,
+    /** Standing with every faction. */
+    val reputation: Reputation = Reputation(),
 ) {
     val blockPos: BlockPos get() = position.toBlockPos()
 

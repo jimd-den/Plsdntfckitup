@@ -19,6 +19,12 @@ import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.passive.PassiveBuild
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.session.HeroSave
+import com.stratum.core.domain.faction.Reputation
+import com.stratum.core.domain.faction.Stance
+import com.stratum.core.domain.settlement.SettlementRecipe
+import com.stratum.core.domain.settlement.SettlementAtlas
+import com.stratum.core.domain.settlement.SettlementPlan
+import com.stratum.engine.settlement.SettlementTerrain
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.stats.Stat
@@ -69,7 +75,10 @@ class WorldSession(
     /** A character carried in from an earlier world; null starts fresh at level one. */
     hero: HeroSave? = null,
 ) {
-    private val generator: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(content.terrainContext(config))
+    private val generator: TerrainGenerator = terrainGenerator ?: withTowns(StratumTerrain.create(content.terrainContext(config)))
+
+    /** The towns in this world, when the generator builds any. */
+    private val atlas: SettlementAtlas? = generator as? SettlementAtlas
 
     /**
      * Only generators that claim to know about biomes are asked. One that does
@@ -95,7 +104,15 @@ class WorldSession(
     private val workbench = Workbench(content, ItemCrafter(lootRoller))
     private val ground = GroundItems()
     private val gear = PlayerGear(::insertOrNull)
-    private val director = EnemyDirector(streamingWorld, content.enemies, difficulty = difficulty)
+    private val director = EnemyDirector(streamingWorld, content.enemies, difficulty = difficulty, packs = content.enemyPacks)
+    private val crowd = CrowdControl(streamingWorld, director)
+    private val garrisons = Garrisons(director)
+
+    /** Neutral people the player has struck: they fight back until they are dead or the player leaves. */
+    private val provoked = HashSet<String>()
+
+    /** Things that happened outside a tick, such as a town freed by a skill, reported with the next one. */
+    private val pending = mutableListOf<CombatEvent>()
     private val mining = MiningProgress()
     private val building = BuildSession(streamingWorld, interaction, content.registry)
     private val roomScanner = RoomScanner(streamingWorld)
@@ -167,6 +184,26 @@ class WorldSession(
      * Exposed for the renderer: art direction is per region.
      */
     fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = biomeSource?.biomeAt(worldX, worldY)
+
+    /** The town the player is standing in, or null out in the wilds. */
+    val currentSettlement: SettlementPlan?
+        get() = atlas?.settlementAt(player.blockPos.x, player.blockPos.y)
+
+    /** Towns within [radius] blocks of the player, for a map or a compass. */
+    fun settlementsNear(radius: Int): List<SettlementPlan> = atlas?.settlementsNear(player.blockPos.x, player.blockPos.y, radius).orEmpty()
+
+    /**
+     * Hand-authored maps are left as their author drew them; every other
+     * world gets the towns its packs describe, laid over its terrain.
+     */
+    private fun withTowns(base: TerrainGenerator): TerrainGenerator =
+        if (content.terrain.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP) base
+        else SettlementTerrain.over(base, content.registry, config.seed, content.settlements, welcoming = ::welcoming)
+
+    /** A town the player can begin in: one whose people are not hostile to a newcomer. */
+    private fun welcoming(recipe: SettlementRecipe): Boolean =
+        if (recipe.factionId != null) content.factionBook.stanceToPlayer(recipe.factionId, Reputation()) != Stance.HOSTILE
+        else recipe.garrison.isEmpty()
 
     /** The biome under the player's feet, from the same function of position that made the terrain. */
     val currentBiome: BiomeDefinition
@@ -305,7 +342,7 @@ class WorldSession(
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * player.build.multiplier(Stat.MOVE_SPEED))
         streamingWorld.focusOn(player.blockPos)
 
-        val produced = monstersAct(deltaSeconds) + collectLoot() + collectInserts()
+        val produced = pending.toList().also { pending.clear() } + monstersAct(deltaSeconds) + collectLoot() + collectInserts()
         animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { hitFlashes.intensity(it) > 0f }
         player = player.copy(
             cooldowns = player.cooldowns.advanced(deltaSeconds),
@@ -320,7 +357,7 @@ class WorldSession(
         if (player.attackCooldown > 0f) return AttackReport.NotReady
         val stats = playerStats
         val damageType = player.equippedWeapon?.damageTypeWithSockets(::insertOrNull) ?: DEFAULT_DAMAGE_TYPE
-        val outcome = combat.playerAttack(stats, player.position, player.facing, enemies, damageType, random)
+        val outcome = combat.playerAttack(stats, player.position, player.facing, enemies.filterNot(::isAllied), damageType, random)
         player = player.copy(attackCooldown = stats.secondsBetweenAttacks)
         animator.holdAttack(PLAYER_ACTOR_ID)
         return applyOutcome(outcome)
@@ -332,7 +369,7 @@ class WorldSession(
         if (!player.cooldowns.isReady(skillId)) return AttackReport.OnCooldown
         if (player.resource < skill.resourceCost) return AttackReport.NotEnoughResource
 
-        val outcome = combat.castSkill(playerStats, player.position, player.facing, enemies, skill, random)
+        val outcome = combat.castSkill(playerStats, player.position, player.facing, enemies.filterNot(::isAllied), skill, random)
         // Cost and cooldown are paid whether or not anything was standing there,
         // so a skill cannot be spammed to scout for targets for free.
         player = player.copy(
@@ -555,6 +592,8 @@ class WorldSession(
         heldInserts = heldInserts,
         skills = skills,
         activeBoons = activeBoons,
+        settlement = currentSettlement,
+        settlementHostile = currentSettlement?.let(::isHostileTown) ?: false,
     )
 
     // ---- the steps a tick is made of ----------------------------------------
@@ -562,11 +601,16 @@ class WorldSession(
     /** Monsters spawn, close in and swing. Returns what the player should be told. */
     private fun monstersAct(deltaSeconds: Float): List<CombatEvent> {
         if (content.enemies.isEmpty()) return emptyList()
-        enemies = director.maintainPopulation(enemies, player.position, currentBiome.id, player.level, random)
-            .map { director.advance(it, player.position, deltaSeconds) }
+        val towns = townsInSight()
+        enemies = director.maintainPopulation(enemies, player.position, currentBiome.id, player.level, random) { spot ->
+            // Friendly streets are safe: nothing wild spawns inside their walls.
+            towns.none { it.contains(kotlin.math.floor(spot.x).toInt(), kotlin.math.floor(spot.y).toInt()) && !isHostileTown(it) }
+        }
+        enemies = enemies + garrisons.muster(towns, enemies, player.level, random)
+        enemies = crowd.advance(enemies, player.position, ::isHostile, deltaSeconds)
 
         val incoming = combat.enemyAttacks(
-            enemies = enemies,
+            enemies = enemies.filter(::isHostile),
             defender = playerStats,
             defenderPosition = player.position,
             cooldownFor = { it.stats.secondsBetweenAttacks },
@@ -574,7 +618,8 @@ class WorldSession(
         )
         // Whoever swung is mid-attack for a beat, so the animation reads.
         incoming.enemies.filter { it.attackCooldown > 0f && it.isAlive }.forEach { animator.holdAttack(it.instanceId) }
-        enemies = incoming.enemies
+        val swung = incoming.enemies.associateBy { it.instanceId }
+        enemies = enemies.map { swung[it.instanceId] ?: it }
         return if (incoming.totalDamage > 0) takeHit(incoming) else emptyList()
     }
 
@@ -601,6 +646,7 @@ class WorldSession(
         if (outcome !is AttackOutcome.Hits) return AttackReport.Missed
         val byId = outcome.hits.associateBy { it.enemyId }
         enemies = enemies.map { byId[it.instanceId]?.enemy ?: it }
+        provoked += outcome.hits.map { it.enemyId }
         outcome.hits.forEach(::showHit)
 
         val healed = outcome.hits.sumOf { it.result.healedAttacker }
@@ -643,12 +689,44 @@ class WorldSession(
             drops.insertFor(enemy, player.level, random)?.let(ground::drop)
             drops.valuablesFor(enemy, player.level, random, earnings.lootFind).forEach { pocket(it, enemy.position) }
             if (enemy.rank >= EnemyRank.CHAMPION) conquer(enemy.position)
+            enemy.factionId?.let { player = player.copy(reputation = player.reputation.afterKilling(it, content.factionBook)) }
+            provoked -= enemy.instanceId
         }
+        garrisons.onSlain(slain, townsInSight()).forEach(::liberate)
         awardExperience(slain.sumOf { it.experience })
     }
 
     /** The build and the world's rewards together: what a kill here pays this character. */
     private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers
+
+    // ---- factions and towns --------------------------------------------------
+
+    /** Whether [enemy] fights the player: its faction is hostile, or the player struck it. */
+    fun isHostile(enemy: EnemyInstance): Boolean =
+        enemy.instanceId in provoked || content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE
+
+    /** Whether [enemy] is on the player's side, and so is never a target. */
+    fun isAllied(enemy: EnemyInstance): Boolean =
+        enemy.instanceId !in provoked && content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.ALLIED
+
+    /** Whether [town] is held against the player: a hostile faction's, or an unaligned camp with a garrison, and not yet freed. */
+    fun isHostileTown(town: SettlementPlan): Boolean {
+        if (garrisons.isLiberated(town.id)) return false
+        return if (town.factionId != null) content.factionBook.stanceToPlayer(town.factionId, player.reputation) == Stance.HOSTILE
+        else town.recipe.garrison.isNotEmpty()
+    }
+
+    /** Towns whose people the player should be able to see or meet. */
+    private fun townsInSight(): List<SettlementPlan> = settlementsNear(TOWN_SIGHT)
+
+    private fun liberate(town: SettlementPlan) {
+        cues.townFreed(town.name, player.position)
+        town.factionId?.let { owner ->
+            // Freeing a town from a faction is a blow against it and a gift to its enemies.
+            player = player.copy(reputation = player.reputation.adjusted(owner, -LIBERATION_STANDING, content.factionBook))
+        }
+        pending += CombatEvent.TownLiberated(town)
+    }
 
     /** Currency, supports and waystones go straight into the pouch. */
     private fun pocket(valuable: Valuable, at: WorldPoint) {
@@ -810,6 +888,10 @@ class WorldSession(
         const val LIGHT_HIT_DAMPING = 0.2f
 
         const val PLAYER_ACTOR_ID = "player"
+
+        /** How far away a town's people muster, in blocks. */
+        const val TOWN_SIGHT = 40
+        const val LIBERATION_STANDING = 25
 
         /** How long an actor is considered mid-swing, for animation only. */
         const val ATTACK_ANIMATION_HOLD = ActorAnimator.HOLD_SECONDS

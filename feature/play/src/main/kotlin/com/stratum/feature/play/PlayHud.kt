@@ -122,7 +122,9 @@ internal fun FeatureDock(entries: List<DockEntry>, modifier: Modifier = Modifier
 @Composable
 internal fun RegionBanner(state: PlayUiState, modifier: Modifier = Modifier) {
     val colors = StratumTheme.colors
-    val line = state.message ?: if (state.buildMode) {
+    val line = state.message ?: if (state.settlementHostile) {
+        "Defeat the garrison to liberate it"
+    } else if (state.buildMode) {
         "Drag on the ground to build · pick a shape and a block below"
     } else {
         "Stick to move · tap ground to dig · hold to place"
@@ -135,7 +137,9 @@ internal fun RegionBanner(state: PlayUiState, modifier: Modifier = Modifier) {
             .padding(horizontal = Space.medium, vertical = Space.tight),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(state.biomeName.ifBlank { "Uncharted" }.uppercase(), style = MaterialTheme.typography.labelMedium, color = colors.accent, maxLines = 1)
+        // In a town, the town is the place; out in the wilds, the region is.
+        val place = state.settlementName?.let { if (state.settlementHostile) "$it · stronghold" else it } ?: state.biomeName.ifBlank { "Uncharted" }
+        Text(place.uppercase(), style = MaterialTheme.typography.labelMedium, color = if (state.settlementHostile) colors.danger else colors.accent, maxLines = 1)
         Text(line, style = MaterialTheme.typography.labelSmall, color = colors.ink, textAlign = TextAlign.Center, maxLines = 2)
     }
 }

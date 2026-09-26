@@ -48,6 +48,9 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
     fun tierOpened(tier: Int, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, "WORLD TIER $tier OPENED", at, LEVEL, emphasis = 1.9f, lifetime = 2.4f)
 
+    fun townFreed(name: String, at: WorldPoint) =
+        log.add(FeedbackKind.LEVEL_UP, "${name.uppercase()} LIBERATED", at, LEVEL, emphasis = 1.9f, lifetime = 2.6f)
+
     fun passiveTaken(name: String, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, name, at, LEVEL, emphasis = 1.2f, lifetime = 1.2f)
 

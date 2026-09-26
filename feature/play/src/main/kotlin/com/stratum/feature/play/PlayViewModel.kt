@@ -331,6 +331,7 @@ class PlayViewModel(
         // would drown out the messages that are not.
         is CombatEvent.PlayerHurt -> null
         is CombatEvent.InsertTaken -> "Picked up ${event.insert.name}"
+        is CombatEvent.TownLiberated -> "${event.town.name} is liberated"
     }
 
     // ---- dying -----------------------------------------------------------
@@ -646,6 +647,8 @@ class PlayViewModel(
             activeBoons = snapshot.activeBoons,
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
             heldCurrency = session.heldCurrency,
+            settlementName = snapshot.settlement?.name,
+            settlementHostile = snapshot.settlementHostile,
             hero = heroPanel(),
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
@@ -909,6 +912,10 @@ data class PlayUiState(
     val use3D: Boolean = true,
     /** The texture forge's latest progress, or null when it has not run. */
     val forgeProgress: ForgeProgress? = null,
+    /** The town the player stands in, or null in the wilds. */
+    val settlementName: String? = null,
+    /** Whether that town is a stronghold held against the player. */
+    val settlementHostile: Boolean = false,
     /** Crafting currency held, for the anvil. */
     val heldCurrency: List<Held<CurrencyDefinition>> = emptyList(),
     /** The tree, skills and worlds panel. */

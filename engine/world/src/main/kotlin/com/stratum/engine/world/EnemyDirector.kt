@@ -1,6 +1,7 @@
 package com.stratum.engine.world
 
 import com.stratum.core.domain.actor.EnemyDefinition
+import com.stratum.core.domain.actor.EnemyPackDefinition
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.actor.EnemyState
@@ -28,7 +29,12 @@ class EnemyDirector(
     private val config: DirectorConfig = DirectorConfig(),
     /** The world tier and waystone mods every monster here is made with. */
     private val difficulty: Difficulty = Difficulty.BASE,
+    /** Groups that spawn together; see [EnemyPackDefinition]. */
+    private val packs: List<EnemyPackDefinition> = emptyList(),
 ) {
+    private val byId = definitions.associateBy { it.id }
+
+    fun definition(id: String): EnemyDefinition? = byId[id]
 
     /**
      * Tops the population back up around [focus].
@@ -43,23 +49,79 @@ class EnemyDirector(
         biomeId: String,
         playerLevel: Int,
         random: Random,
+        /** False where nothing may spawn: inside a friendly town's walls. */
+        spawnAllowed: (WorldPoint) -> Boolean = { true },
     ): List<EnemyInstance> {
         val alive = current.filter { it.isAlive }
-        val nearby = alive.filter { it.position.horizontalDistanceTo(focus) <= config.despawnRadius }
+        val nearby = alive.filter { it.position.horizontalDistanceTo(focus) <= keepWithin(it) }
         if (nearby.size >= config.maxAlive) return nearby
 
-        val eligible = definitions.filter { it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds }
+        // A spawn weight of zero means "never on its own": garrison troops and pack-only followers.
+        val eligible = definitions.filter { it.spawnWeight > 0 && (it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds) }
         if (eligible.isEmpty()) return nearby
+        val eligiblePacks = packs.filter { it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds }
 
         val spawned = mutableListOf<EnemyInstance>()
         var attempts = 0
         while (nearby.size + spawned.size < config.maxAlive && attempts < config.maxSpawnAttempts) {
             attempts++
-            val position = findSpawnPoint(focus, random) ?: continue
-            val definition = pickWeighted(eligible, random) ?: continue
-            spawned += instantiate(definition, position, playerLevel, random)
+            val position = findSpawnPoint(focus, random)?.takeIf(spawnAllowed) ?: continue
+            val room = config.maxAlive - nearby.size - spawned.size
+            val pack = eligiblePacks.takeIf { random.nextFloat() < config.packChance }?.let { pickPack(it, room, random) }
+            spawned += if (pack != null) spawnPack(pack, position, playerLevel, random) else {
+                val definition = pickWeighted(eligible, random) ?: continue
+                listOf(instantiate(definition, position, playerLevel, random))
+            }
         }
         return nearby + spawned
+    }
+
+    /** A garrison holds its town while the player is anywhere near it, not just on screen. */
+    private fun keepWithin(enemy: EnemyInstance): Float =
+        if (enemy.home != null) config.despawnRadius + GARRISON_REACH else config.despawnRadius
+
+    private fun pickPack(eligible: List<EnemyPackDefinition>, room: Int, random: Random): EnemyPackDefinition? {
+        val fitting = eligible.filter { it.size in 1..room }
+        val total = fitting.sumOf { it.weight.coerceAtLeast(0) }
+        if (total <= 0) return null
+        var roll = random.nextInt(total)
+        return fitting.firstOrNull { roll -= it.weight.coerceAtLeast(0); roll < 0 }
+    }
+
+    /**
+     * A pack arrives together: the leader in the middle, the rest in a loose
+     * ring round it, all sharing a squad id so they alert, fight and break as
+     * one.
+     */
+    fun spawnPack(pack: EnemyPackDefinition, at: WorldPoint, playerLevel: Int, random: Random, home: WorldPoint? = null, squadId: String? = null): List<EnemyInstance> {
+        val squad = squadId ?: "squad_${random.nextLong().toULong().toString(16)}"
+        val leader = pack.leaderId?.let(byId::get)?.let { instantiate(it, at, playerLevel, random).copy(squadId = squad, isLeader = true, home = home) }
+        val members = pack.members.flatMap { member -> List(member.count) { member.enemyId } }.mapNotNull(byId::get)
+        val ring = members.mapIndexed { i, definition ->
+            val angle = i * TWO_PI / members.size.coerceAtLeast(1)
+            val spot = WorldPoint(at.x + kotlin.math.cos(angle) * PACK_SPREAD, at.y + kotlin.math.sin(angle) * PACK_SPREAD, at.z)
+            instantiate(definition, grounded(spot) ?: at, playerLevel, random).copy(squadId = squad, home = home?.let { spot })
+        }
+        return listOfNotNull(leader) + ring
+    }
+
+    /** [spot] dropped onto the ground beneath it, or null when there is none. */
+    fun grounded(spot: WorldPoint): WorldPoint? {
+        val x = kotlin.math.floor(spot.x).toInt()
+        val y = kotlin.math.floor(spot.y).toInt()
+        val surface = world.surfaceAt(x, y)
+        if (surface < 0 || surface >= Chunk.HEIGHT - 2) return null
+        return WorldPoint(spot.x, spot.y, (surface + 1).toFloat())
+    }
+
+    /**
+     * Moves one step along [direction], resolving terrain the way a chase
+     * does. The crowd decides where each body wants to go; this is how it
+     * gets there without walking through walls.
+     */
+    internal fun stepAlong(from: WorldPoint, direction: com.stratum.engine.crowd.Vec2, distance: Float): WorldPoint {
+        if (distance <= 0f || direction == com.stratum.engine.crowd.Vec2.ZERO) return from
+        return step(from, WorldPoint(from.x + direction.x, from.y + direction.y, from.z), distance)
     }
 
     private fun findSpawnPoint(focus: WorldPoint, random: Random): WorldPoint? {
@@ -109,6 +171,8 @@ class EnemyDirector(
             damageTypeId = definition.damageTypeId,
             experience = (definition.experience * rank.experienceMultiplier * levelScale).roundToInt(),
             bodyColor = definition.bodyColor,
+            factionId = definition.factionId,
+            role = definition.role,
         )
     }
 
@@ -136,7 +200,7 @@ class EnemyDirector(
     ): EnemyInstance {
         if (!enemy.isAlive) return enemy
 
-        val definition = definitions.firstOrNull { it.id == enemy.definitionId }
+        val definition = byId[enemy.definitionId]
         val aggroRange = definition?.aggroRange ?: DEFAULT_AGGRO
         val distance = enemy.position.horizontalDistanceTo(target)
         val cooled = (enemy.attackCooldown - deltaSeconds).coerceAtLeast(0f)
@@ -229,6 +293,8 @@ class EnemyDirector(
         const val STEP_UP = 1
         const val DEFAULT_AGGRO = 8
         const val DEFAULT_SPEED = 2.2f
+        const val PACK_SPREAD = 1.6f
+        const val GARRISON_REACH = 60f
 
         /**
          * Below this a step is not a turn.
@@ -255,6 +321,8 @@ data class DirectorConfig(
     val championChance: Float = 0.04f,
     val bossChance: Float = 0.01f,
     val scalingPerLevel: Float = 0.12f,
+    /** Share of spawns that are a whole pack rather than one monster, when packs are defined. */
+    val packChance: Float = 0.35f,
 ) {
     init {
         require(safeRadius < spawnRadius) { "Spawn ring is inverted" }

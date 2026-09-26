@@ -1,5 +1,6 @@
 package com.stratum.plugins.schema
 
+import com.stratum.core.domain.actor.CombatRole
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.actor.SkillDefinition
@@ -153,17 +154,20 @@ internal data class EnemySchema(
     val bonusDropChance: Float = ENEMY.bonusDropChance,
     val bodyColor: String = SchemaValues.color(ENEMY.bodyColor),
     val spriteSet: String? = null,
+    val faction: String? = null,
+    val role: String = SchemaValues.name(ENEMY.role),
 ) {
     fun toDomain() = EnemyDefinition(
         id, name, description, SchemaValues.enum<EnemyRank>(rank, "enemy '$id' rank"), stats.toDomain(), damageType, moveSpeed,
         aggroRange, fleeBelowHealth, canFlee, experience, spawnBiomes, spawnWeight, bonusDropChance,
-        SchemaValues.color(bodyColor, "enemy '$id' bodyColor"), spriteSet,
+        SchemaValues.color(bodyColor, "enemy '$id' bodyColor"), spriteSet, faction, SchemaValues.enum<CombatRole>(role, "enemy '$id' role"),
     )
 
     companion object {
         fun of(e: EnemyDefinition) = EnemySchema(
             e.id, e.name, e.description, SchemaValues.name(e.rank), StatsSchema.of(e.baseStats), e.damageTypeId, e.moveSpeed, e.aggroRange,
             e.fleeBelowHealth, e.canFlee, e.experience, e.spawnBiomeIds, e.spawnWeight, e.bonusDropChance, SchemaValues.color(e.bodyColor), e.spriteSetId,
+            e.factionId, SchemaValues.name(e.role),
         )
     }
 }

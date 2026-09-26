@@ -7,6 +7,7 @@ import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.settlement.SettlementPlan
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.tabletop.ActiveBoon
 import com.stratum.core.domain.tabletop.CheckResult
@@ -49,6 +50,10 @@ data class SessionSnapshot(
     val skills: List<SkillDefinition> = emptyList(),
     /** Boons and banes running from tabletop checks. */
     val activeBoons: List<ActiveBoon> = emptyList(),
+    /** The town the player stands in, or null in the wilds. */
+    val settlement: SettlementPlan? = null,
+    /** Whether that town is held against the player. */
+    val settlementHostile: Boolean = false,
 )
 
 /** What a pending build would cost and cover. */
@@ -136,6 +141,9 @@ sealed interface CombatEvent {
     data class LootTaken(val item: ItemInstance, val equipped: Boolean) : CombatEvent
     data class InsertTaken(val insert: InsertDefinition) : CombatEvent
     data object PlayerDied : CombatEvent
+
+    /** A stronghold's garrison is gone: the town is the player's side's now. */
+    data class TownLiberated(val town: SettlementPlan) : CombatEvent
 }
 
 /** What trying a tabletop check did. */

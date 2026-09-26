@@ -14,7 +14,11 @@ import com.stratum.core.domain.crafting.StandardCrafting
 import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.difficulty.WaystoneMod
 import com.stratum.core.domain.difficulty.WaystoneMods
+import com.stratum.core.domain.actor.EnemyPackDefinition
+import com.stratum.core.domain.faction.FactionBook
+import com.stratum.core.domain.faction.FactionDefinition
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.settlement.SettlementRecipe
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.passive.PassiveTreeGenerator
 import com.stratum.core.domain.tabletop.SkillCheck
@@ -62,6 +66,9 @@ class ContentPackAssembler {
             currencies = merger.merge(ContentPack::currencies, CurrencyDefinition::id),
             supports = merger.merge(ContentPack::supports, SupportDefinition::id),
             waystoneMods = merger.merge(ContentPack::waystoneMods, WaystoneMod::id),
+            factions = merger.merge(ContentPack::factions, FactionDefinition::id),
+            enemyPacks = merger.merge(ContentPack::enemyPacks, EnemyPackDefinition::id),
+            settlements = merger.merge(ContentPack::settlements, SettlementRecipe::id),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
         ContentValidation.requireValid(content)
@@ -117,7 +124,7 @@ internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
         val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content) +
-            content.passiveTree?.problems().orEmpty()
+            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content)
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -166,6 +173,34 @@ internal object ContentValidation {
     }
 }
 
+/**
+ * Checks for the parts of a world that refer to each other by id: factions,
+ * the monsters that belong to them, the packs they travel in and the towns
+ * they hold. A town naming a block or a garrison nobody defined fails at
+ * load, where the message can name it, not mid-generation.
+ */
+internal object WorldPoliticsValidation {
+
+    fun problems(content: AssembledContent): List<String> {
+        val factionIds = content.factions.mapTo(HashSet()) { it.id }
+        val enemyIds = content.enemies.mapTo(HashSet()) { it.id }
+        fun unknownFaction(id: String?) = id != null && id !in factionIds
+        return content.factionBook.problems() +
+            content.enemies.filter { unknownFaction(it.factionId) }.map { "enemy '${it.id}' belongs to unknown faction '${it.factionId}'" } +
+            content.enemyPacks.flatMap { pack -> packProblems(pack, enemyIds) } +
+            content.settlements.flatMap { recipe -> settlementProblems(recipe, content, enemyIds, factionIds) }
+    }
+
+    private fun packProblems(pack: EnemyPackDefinition, enemyIds: Set<String>): List<String> =
+        (listOfNotNull(pack.leaderId) + pack.members.map { it.enemyId }).filter { it !in enemyIds }
+            .map { "pack '${pack.id}' names unknown enemy '$it'" }
+
+    private fun settlementProblems(recipe: SettlementRecipe, content: AssembledContent, enemyIds: Set<String>, factionIds: Set<String>): List<String> =
+        recipe.referencedBlockIds().filterNot(content.registry::contains).map { "settlement '${recipe.id}' uses unknown block '$it'" } +
+            recipe.garrison.map { it.enemyId }.filter { it !in enemyIds }.map { "settlement '${recipe.id}' garrisons unknown enemy '$it'" } +
+            listOfNotNull(recipe.factionId).filter { it !in factionIds }.map { "settlement '${recipe.id}' belongs to unknown faction '$it'" }
+}
+
 /** The flattened, validated result the engine actually runs on. */
 data class AssembledContent(
     val packs: List<ContentPack>,
@@ -195,7 +230,13 @@ data class AssembledContent(
     val currencies: List<CurrencyDefinition> = emptyList(),
     val supports: List<SupportDefinition> = emptyList(),
     val waystoneMods: List<WaystoneMod> = emptyList(),
+    val factions: List<FactionDefinition> = emptyList(),
+    val enemyPacks: List<EnemyPackDefinition> = emptyList(),
+    val settlements: List<SettlementRecipe> = emptyList(),
 ) {
+    /** The loaded factions, for the questions the engine asks of them. */
+    val factionBook: FactionBook by lazy { FactionBook(factions) }
+
     fun biome(id: String): BiomeDefinition =
         biomes.firstOrNull { it.id == id } ?: throw ContentPackException("Unknown biome '$id'")
 
@@ -211,7 +252,7 @@ data class AssembledContent(
     fun support(id: String): SupportDefinition? = supports.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
-    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps)
+    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps, settlements)
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 

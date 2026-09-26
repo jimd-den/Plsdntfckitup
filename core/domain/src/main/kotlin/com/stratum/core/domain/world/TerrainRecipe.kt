@@ -171,6 +171,8 @@ data class TerrainContext(
     val recipe: TerrainRecipe,
     /** Hand-authored levels a generator such as [TerrainRecipe.TILE_MAP] can build from. */
     val maps: List<TileMap> = emptyList(),
+    /** Kinds of town a generator may build; see the settlement layer. */
+    val settlements: List<com.stratum.core.domain.settlement.SettlementRecipe> = emptyList(),
 )
 
 /** Builds a generator from a recipe. This is the seam a new algorithm plugs into. */

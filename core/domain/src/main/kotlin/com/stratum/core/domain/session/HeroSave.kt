@@ -1,6 +1,7 @@
 package com.stratum.core.domain.session
 
 import com.stratum.core.domain.difficulty.Waystone
+import com.stratum.core.domain.faction.Reputation
 import com.stratum.core.domain.item.ItemInstance
 
 /**
@@ -29,6 +30,8 @@ data class HeroSave(
     val waystones: List<Waystone> = emptyList(),
     /** The hardest world tier this hero has unlocked. */
     val highestTier: Int = 0,
+    /** Standing with each faction, by id. Carried between worlds: a name travels. */
+    val reputation: Map<String, Int> = emptyMap(),
     /** Epoch millis, for sorting a roster. */
     val savedAt: Long = 0L,
 ) {
@@ -48,6 +51,7 @@ data class HeroSave(
         supports = supports,
         waystones = waystones,
         highestTier = highestTier,
+        reputation = Reputation(reputation),
     )
 
     companion object {
@@ -65,6 +69,7 @@ data class HeroSave(
             supports = player.supports,
             waystones = player.waystones,
             highestTier = player.highestTier,
+            reputation = player.reputation.standing,
             savedAt = savedAt,
         )
     }

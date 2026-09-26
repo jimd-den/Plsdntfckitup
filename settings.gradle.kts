@@ -30,7 +30,9 @@ rootProject.name = "Stratum"
 //                                     -> :core:data      -> :core:domain
 //                                        :engine:scene   -> :core:domain
 //                                        :engine:render  -> :engine:world
-//                                        :engine:world   -> :core:domain
+//                                        :engine:world   -> :engine:settlement, :engine:crowd
+//                                        :engine:settlement -> :core:domain
+//                                        :engine:crowd   -> :core:domain
 //                                        :content:igbo   -> :core:domain
 //                                        :importer:*     -> :core:domain
 // Nothing ever points back inward. :core:domain and :engine:world are pure
@@ -41,6 +43,8 @@ include(":core:domain")
 include(":core:data")
 include(":core:designsystem")
 include(":engine:world")
+include(":engine:settlement")
+include(":engine:crowd")
 include(":engine:render")
 include(":engine:scene")
 include(":feature:play")
