@@ -56,6 +56,7 @@ internal object IgboPackBiomes {
                 floorBlockId = IgboPackBlocks.lateritePaving.id,
             ),
         ),
+        temperature = 0.62f,
     )
 
     val ozoCourtyard = BiomeDefinition(
@@ -85,6 +86,7 @@ internal object IgboPackBiomes {
                 chance = 0.85f,
             ),
         ),
+        temperature = 0.7f,
     )
 
     val thunderPeak = BiomeDefinition(
@@ -112,6 +114,7 @@ internal object IgboPackBiomes {
                 clearRadius = 4,
             ),
         ),
+        temperature = 0.3f,
     )
 
     val bronzeCatacombs = BiomeDefinition(
@@ -128,6 +131,7 @@ internal object IgboPackBiomes {
         ),
         deposits = listOf(bronzeVein.copy(chance = 0.22f, clusterSize = 5), ironVein),
         ambientLight = 5,
+        temperature = 0.4f,
     )
 
     val mistMarsh = BiomeDefinition(
@@ -145,6 +149,7 @@ internal object IgboPackBiomes {
         ),
         deposits = listOf(ironVein.copy(chance = 0.18f)),
         ambientLight = 9,
+        temperature = 0.5f,
     )
 
     val all = listOf(sacredGrove, ozoCourtyard, thunderPeak, bronzeCatacombs, mistMarsh)

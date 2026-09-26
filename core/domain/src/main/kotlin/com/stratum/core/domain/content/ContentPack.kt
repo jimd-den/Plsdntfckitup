@@ -88,6 +88,13 @@ data class ContentPack(
     val enemyPacks: List<EnemyPackDefinition> = emptyList(),
     /** Kinds of town the world generator may build. */
     val settlements: List<SettlementRecipe> = emptyList(),
+    /** How this pack suggests its worlds be played; the player can change it. The last pack with an opinion wins. */
+    val rules: com.stratum.core.domain.world.WorldRules? = null,
+    /** Survival: what the body needs, what feeds it, where food is found and how it is prepared. */
+    val needs: List<com.stratum.core.domain.survival.NeedDefinition> = emptyList(),
+    val consumables: List<com.stratum.core.domain.survival.ConsumableDefinition> = emptyList(),
+    val forageRules: List<com.stratum.core.domain.survival.ForageRule> = emptyList(),
+    val recipes: List<com.stratum.core.domain.survival.RecipeDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 
@@ -141,6 +148,8 @@ data class BiomeDefinition(
     val ambientLight: Int = 12,
     /** How the region is laid out beyond its noise. See [BiomeComposition]. */
     val composition: BiomeComposition = BiomeComposition(),
+    /** 0 freezing to 1 hot: how warm a body stays here, for survival. */
+    val temperature: Float = 0.55f,
 )
 
 /**

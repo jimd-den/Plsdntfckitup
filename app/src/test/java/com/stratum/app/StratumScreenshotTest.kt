@@ -438,6 +438,17 @@ class StratumScreenshotTest {
         feedback = session.feedback,
         flashFor = session::flashFor,
         use3D = false,
+        settlementName = session.currentSettlement?.name,
+        survival = com.stratum.feature.play.SurvivalPanel(
+            active = true,
+            needs = session.content.needs.mapIndexed { i, need -> com.stratum.feature.play.NeedView(need, listOf(72f, 22f, 55f).getOrElse(i) { 80f }) },
+            night = true,
+            day = 3,
+            nearFire = true,
+            canDrink = true,
+            food = session.content.consumables.take(3).map { com.stratum.engine.world.Held(it, 2) },
+            recipes = session.content.recipes.mapIndexed { i, r -> com.stratum.engine.world.RecipeOption(r, haveIngredients = i == 0, atStation = true) },
+        ),
     )
 
     @Test
@@ -462,6 +473,17 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/build_landscape.png")
+    }
+
+    @Test
+    fun camp_screen() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session).copy(campOpen = true), world = session.world, modifier = Modifier.fillMaxSize())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/camp.png")
     }
 
     @Test

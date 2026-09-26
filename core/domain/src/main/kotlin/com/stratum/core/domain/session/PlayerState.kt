@@ -72,6 +72,8 @@ data class PlayerState(
     val highestTier: Int = 0,
     /** Standing with every faction. */
     val reputation: Reputation = Reputation(),
+    /** Survival needs by id, 0..100; a need not listed is full. */
+    val needs: Map<String, Float> = emptyMap(),
 ) {
     val blockPos: BlockPos get() = position.toBlockPos()
 

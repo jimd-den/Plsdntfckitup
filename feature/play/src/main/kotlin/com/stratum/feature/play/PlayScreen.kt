@@ -62,6 +62,9 @@ fun PlayScreen(
             onOpenWaystone = viewModel::openWaystone,
         )
     }
+    val survivalActions = remember(viewModel) {
+        SurvivalActions(onToggleCamp = viewModel::toggleCamp, onEat = viewModel::eat, onDrink = viewModel::drink, onMake = viewModel::make)
+    }
     PlayScreenContent(
         state = state,
         world = viewModel.world,
@@ -99,6 +102,7 @@ fun PlayScreen(
         onOpenMenu = onOpenMenu,
         onCraft = viewModel::craft,
         heroActions = heroActions,
+        survivalActions = survivalActions,
     )
 }
 
@@ -141,6 +145,7 @@ fun PlayScreenContent(
     onOpenMenu: () -> Unit = {},
     onCraft: (String) -> Unit = {},
     heroActions: HeroActions = HeroActions(),
+    survivalActions: SurvivalActions = SurvivalActions(),
 ) {
     val colors = StratumTheme.colors
 
@@ -243,7 +248,8 @@ fun PlayScreenContent(
                 onSelectSlot = onSelectSlot,
                 onZoom = onZoom,
                 onOpenMenu = onOpenMenu,
-                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D),
+                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp),
+                onDrink = survivalActions.onDrink,
             )
         }
 
@@ -288,6 +294,16 @@ fun PlayScreenContent(
                 onClose = onToggleAnvil,
                 modifier = Modifier.fillMaxSize(),
                 onCraft = onCraft,
+            )
+        }
+
+        if (state.campOpen && !state.isDead) {
+            CampOverlay(
+                panel = state.survival,
+                onEat = survivalActions.onEat,
+                onDrink = survivalActions.onDrink,
+                onMake = survivalActions.onMake,
+                onClose = survivalActions.onToggleCamp,
             )
         }
 
@@ -379,6 +395,7 @@ private fun Hud(
     onZoom: (Float) -> Unit,
     onOpenMenu: () -> Unit,
     dock: List<DockEntry>,
+    onDrink: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().safeContent().padding(Space.medium)) {
         Row(Modifier.align(Alignment.TopStart).fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -393,12 +410,12 @@ private fun Hud(
             GameButton(glyph = "Ⅱ", label = "Menu", onClick = onOpenMenu, size = DOCK_BUTTON)
         }
         if (!landscape) {
-            FeatureDock(dock, Modifier.align(Alignment.TopEnd).padding(top = DOCK_TOP_PORTRAIT))
+            FeatureDock(dock, Modifier.align(Alignment.TopEnd).padding(top = DOCK_TOP_PORTRAIT), perRow = PORTRAIT_DOCK_ROW)
         }
 
         RegionBanner(
             state,
-            Modifier.align(Alignment.TopCenter).padding(top = if (landscape) DOCK_BUTTON + Space.wide else DOCK_TOP_PORTRAIT + DOCK_BUTTON + Space.wide),
+            Modifier.align(Alignment.TopCenter).padding(top = if (landscape) DOCK_BUTTON + Space.wide else DOCK_TOP_PORTRAIT + (DOCK_BUTTON + Space.wide) * dockRows(dock.size)),
         )
 
         if (!landscape) ZoomPair(onZoom, Modifier.align(Alignment.CenterEnd))
@@ -461,7 +478,9 @@ private fun Hud(
                 primaryGlyph = "⚔",
                 primaryLabel = "Strike",
                 onPrimary = onAttack,
-                around = fightButtons(state, onDodge, onCastSkill),
+                around = fightButtons(state, onDodge, onCastSkill) +
+                    // Water in reach offers a drink where the thumb already is.
+                    listOfNotNull(ArcButton("💧", "Drink", onDrink).takeIf { state.survival.canDrink }),
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
@@ -493,6 +512,7 @@ private fun dockEntries(
     onToggleTable: () -> Unit,
     onToggleStyle: () -> Unit,
     onToggle3D: () -> Unit,
+    onToggleCamp: () -> Unit,
 ): List<DockEntry> {
     val points = state.player.unspentPassivePoints
     val craftables = state.heldInserts.sumOf { it.count } + state.heldCurrency.sumOf { it.count }
@@ -502,9 +522,14 @@ private fun dockEntries(
         DockEntry("✦", "Hero", onToggleHero, badge = points.takeIf { it > 0 }?.let { "+$it" }, active = state.hero.open, calling = points > 0),
         DockEntry("🎲", "Table", onToggleTable, badge = state.activeBoons.size.takeIf { it > 0 }?.toString(), active = state.tableOpen)
             .takeIf { state.checks.isNotEmpty() },
+        DockEntry("🏕", "Camp", onToggleCamp, badge = "!".takeIf { state.survival.anyLow }, active = state.campOpen, calling = state.survival.anyLow)
+            .takeIf { state.survival.active },
         DockEntry("🎨", "Style", onToggleStyle, badge = state.forgeProgress?.takeUnless { it.isFinished }?.let { "${(it.fraction * 100).toInt()}%" }, active = state.styleOpen),
         DockEntry(if (state.use3D) "3D" else "2D", "View", onToggle3D),
     )
 }
 
 private val DOCK_TOP_PORTRAIT = 120.dp
+
+private fun dockRows(entries: Int): Int = (entries + PORTRAIT_DOCK_ROW - 1) / PORTRAIT_DOCK_ROW
+private const val PORTRAIT_DOCK_ROW = 5

@@ -76,6 +76,10 @@ internal fun VitalsCard(state: PlayUiState, modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (state.survival.active) {
+            Spacer(Modifier.height(Space.tight))
+            NeedMeters(state.survival)
+        }
     }
 }
 
@@ -95,9 +99,16 @@ internal data class DockEntry(
  * table, style. A badge says when something inside is waiting, so a new
  * feature is found by the number on it rather than by reading a manual.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-internal fun FeatureDock(entries: List<DockEntry>, modifier: Modifier = Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+internal fun FeatureDock(entries: List<DockEntry>, modifier: Modifier = Modifier, perRow: Int = Int.MAX_VALUE) {
+    // Wraps rather than running off a narrow screen; right-aligned, under the thumb's reach.
+    androidx.compose.foundation.layout.FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(Space.small, Alignment.End),
+        verticalArrangement = Arrangement.spacedBy(Space.small),
+        maxItemsInEachRow = perRow,
+    ) {
         entries.forEach { entry ->
             GameButton(
                 glyph = entry.glyph,

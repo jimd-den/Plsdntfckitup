@@ -20,6 +20,11 @@ import com.stratum.core.domain.passive.PassiveBuild
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.faction.Reputation
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.StatModifier
+import com.stratum.core.domain.survival.ConsumableDefinition
+import com.stratum.core.domain.survival.Environment
+import com.stratum.core.domain.world.WorldRules
 import com.stratum.core.domain.faction.Stance
 import com.stratum.core.domain.settlement.SettlementRecipe
 import com.stratum.core.domain.settlement.SettlementAtlas
@@ -104,7 +109,17 @@ class WorldSession(
     private val workbench = Workbench(content, ItemCrafter(lootRoller))
     private val ground = GroundItems()
     private val gear = PlayerGear(::insertOrNull)
-    private val director = EnemyDirector(streamingWorld, content.enemies, difficulty = difficulty, packs = content.enemyPacks)
+    /** How this world plays; see [WorldRules]. */
+    val rules: WorldRules get() = config.rules
+
+    private val director = EnemyDirector(
+        streamingWorld, content.enemies,
+        config = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1)),
+        difficulty = difficulty, packs = content.enemyPacks,
+    )
+
+    /** Dawn to dawn; night is colder and busier. */
+    val clock = WorldClock(config.rules.dayLengthMinutes * 60f)
     private val crowd = CrowdControl(streamingWorld, director)
     private val garrisons = Garrisons(director)
 
@@ -116,6 +131,7 @@ class WorldSession(
     private val mining = MiningProgress()
     private val building = BuildSession(streamingWorld, interaction, content.registry)
     private val roomScanner = RoomScanner(streamingWorld)
+    private val survival = SurvivalSystem(content, config.rules.survival, streamingWorld, roomScanner)
     private val table = TableState()
     private val passiveProgress = PassiveProgress(content.passiveTree)
     private val damageTypeIds = content.damageTypes.map { it.id }
@@ -128,6 +144,9 @@ class WorldSession(
         ?: content.heroClasses.firstOrNull()
 
     val world: World get() = streamingWorld
+
+    /** The world with write access, for persistence and tests in this module; features see [world]. */
+    internal val editableWorld: StreamingWorld get() = streamingWorld
 
     /**
      * Writable inside the engine only. Feature modules see an immutable value,
@@ -198,7 +217,10 @@ class WorldSession(
      */
     private fun withTowns(base: TerrainGenerator): TerrainGenerator =
         if (content.terrain.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP) base
-        else SettlementTerrain.over(base, content.registry, config.seed, content.settlements, welcoming = ::welcoming)
+        else SettlementTerrain.over(
+            base, content.registry, config.seed, content.settlements,
+            startingTown = config.rules.startInTown, density = config.rules.townDensity, welcoming = ::welcoming,
+        )
 
     /** A town the player can begin in: one whose people are not hostile to a newcomer. */
     private fun welcoming(recipe: SettlementRecipe): Boolean =
@@ -249,6 +271,7 @@ class WorldSession(
             is MineResult.Broken -> {
                 mining.reset()
                 player = motion.advance(pocketed(player, result.drop), 0f)
+                survival.forage(result.block.id, result.block.material, random).forEach { player = player.withItem(it) }
             }
             is MineResult.Rejected -> mining.reset()
         }
@@ -339,7 +362,10 @@ class WorldSession(
         advanceImpacts(deltaSeconds)
         // Movement first: a roll should be able to carry the player out of
         // reach before the monsters around them take their swing.
-        player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * player.build.multiplier(Stat.MOVE_SPEED))
+        clock.advance(deltaSeconds)
+        player = survival.advance(player, deltaSeconds, clock, currentBiome)
+        val pace = (player.build + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED)
+        player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
         streamingWorld.focusOn(player.blockPos)
 
         val produced = pending.toList().also { pending.clear() } + monstersAct(deltaSeconds) + collectLoot() + collectInserts()
@@ -409,7 +435,7 @@ class WorldSession(
      */
     fun revive(): ReviveResult {
         if (player.isAlive) return ReviveResult.StillStanding
-        val lost = (player.experience * EXPERIENCE_LOST_ON_DEATH).roundToInt()
+        val lost = (player.experience * config.rules.deathPenalty).roundToInt()
         player = player.copy(
             position = findSpawn(),
             experience = (player.experience - lost).coerceAtLeast(0),
@@ -454,7 +480,31 @@ class WorldSession(
      * counted in. Every combat path reads this, so a rune or a blessing is
      * never in the tooltip but missing from the swing.
      */
-    val playerStats: CombatStats get() = table.applyTo(player.combatStatsWith(::insertOrNull, damageTypeIds))
+    val playerStats: CombatStats
+        get() = table.applyTo(StatSheet(survival.modifiers(player)).applyTo(player.combatStatsWith(::insertOrNull, damageTypeIds), damageTypeIds))
+
+    // ---- survival ------------------------------------------------------------
+
+    /** Whether this world's rules and packs make the body's needs matter. */
+    val survivalActive: Boolean get() = survival.active
+
+    /** The surroundings as the body last felt them: night, a roof, a fire. */
+    val surroundings: Environment get() = survival.surroundings
+
+    /** Food and drink the player is carrying, with counts. */
+    val heldFood: List<Held<ConsumableDefinition>>
+        get() = content.consumables.mapNotNull { food -> player.countOf(food.id).takeIf { it > 0 }?.let { Held(food, it) } }
+
+    /** Every recipe, and whether it can be made here and now. */
+    val recipeOptions: List<RecipeOption> get() = survival.options(player)
+
+    val canDrink: Boolean get() = survival.active && survival.waterNear(player.blockPos)
+
+    fun consume(itemId: String): SurvivalResult = survival.consume(player, itemId).also { player = it.first }.second
+
+    fun drink(): SurvivalResult = survival.drink(player).also { player = it.first }.second
+
+    fun make(recipeId: String): SurvivalResult = survival.make(player, recipeId).also { player = it.first }.second
 
     // ---- the passive tree --------------------------------------------------
 
@@ -688,6 +738,7 @@ class WorldSession(
             drops.gearFor(enemy, player.level, random, earnings.lootFind)?.let(ground::drop)
             drops.insertFor(enemy, player.level, random)?.let(ground::drop)
             drops.valuablesFor(enemy, player.level, random, earnings.lootFind).forEach { pocket(it, enemy.position) }
+            survival.carcass(random)?.let { player = player.withItem(it) }
             if (enemy.rank >= EnemyRank.CHAMPION) conquer(enemy.position)
             enemy.factionId?.let { player = player.copy(reputation = player.reputation.afterKilling(it, content.factionBook)) }
             provoked -= enemy.instanceId
@@ -697,7 +748,13 @@ class WorldSession(
     }
 
     /** The build and the world's rewards together: what a kill here pays this character. */
-    private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers
+    private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers + ruleRewards
+
+    /** The world rules' loot and experience dials, as the modifiers they are. */
+    private val ruleRewards = listOfNotNull(
+        StatModifier(Stat.ITEM_QUANTITY, ModifierKind.MORE, config.rules.lootMultiplier - 1f).takeIf { config.rules.lootMultiplier != 1f },
+        StatModifier(Stat.EXPERIENCE_GAIN, ModifierKind.MORE, config.rules.experienceMultiplier - 1f).takeIf { config.rules.experienceMultiplier != 1f },
+    )
 
     // ---- factions and towns --------------------------------------------------
 
@@ -832,6 +889,7 @@ class WorldSession(
         impacts.clear()
         animator.clear()
         table.clear()
+        survival.clear()
     }
 
     /**

@@ -114,17 +114,18 @@ internal data class BiomeSchema(
     val path: String? = null,
     val pathWidth: Float = BIOME.composition.pathWidth,
     val landmark: LandmarkSchema? = null,
+    val temperature: Float = BIOME.temperature,
 ) {
     fun toDomain() = BiomeDefinition(
         id, name, description, surface, subsurface, filler, heightBias, roughness, scatter.map { it.toDomain() },
-        deposits.map { it.toDomain() }, ambientLight, BiomeComposition(path, pathWidth, landmark?.toDomain()),
+        deposits.map { it.toDomain() }, ambientLight, BiomeComposition(path, pathWidth, landmark?.toDomain()), temperature,
     )
 
     companion object {
         fun of(b: BiomeDefinition) = BiomeSchema(
             b.id, b.name, b.description, b.surfaceBlockId, b.subsurfaceBlockId, b.bedrockFillerBlockId, b.heightBias, b.roughness,
             b.scatter.map(ScatterSchema::of), b.deposits.map(DepositSchema::of), b.ambientLight, b.composition.pathBlockId,
-            b.composition.pathWidth, b.composition.landmark?.let(LandmarkSchema::of),
+            b.composition.pathWidth, b.composition.landmark?.let(LandmarkSchema::of), b.temperature,
         )
     }
 }

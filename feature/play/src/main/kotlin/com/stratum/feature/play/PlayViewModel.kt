@@ -38,6 +38,7 @@ import com.stratum.engine.world.CraftResult
 import com.stratum.engine.world.Held
 import com.stratum.engine.world.PassiveResult
 import com.stratum.engine.world.SupportResult
+import com.stratum.engine.world.SurvivalResult
 import com.stratum.engine.world.DodgeResult
 import com.stratum.engine.world.EquipResult
 import com.stratum.engine.world.FeedbackMark
@@ -262,6 +263,47 @@ class PlayViewModel(
 
     fun toggleStyle() {
         _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
+    }
+
+    // ---- survival ----------------------------------------------------------
+
+    fun toggleCamp() {
+        _state.value = _state.value.copy(campOpen = !_state.value.campOpen)
+        publish()
+    }
+
+    fun eat(itemId: String) = publish(message = describe(session.consume(itemId)))
+
+    fun drink() = publish(message = describe(session.drink()))
+
+    fun make(recipeId: String) = publish(message = describe(session.make(recipeId)))
+
+    private fun describe(result: SurvivalResult): String = when (result) {
+        is SurvivalResult.Consumed -> "Ate ${result.food.name}"
+        is SurvivalResult.Drank -> "You drink deep"
+        is SurvivalResult.Made -> "Made ${result.recipe.name.lowercase()}"
+        SurvivalResult.NoneHeld -> "You have none"
+        SurvivalResult.NoWaterNear -> "No water within reach"
+        SurvivalResult.NeedsStation -> "That needs a fire, or the right workbench"
+        SurvivalResult.MissingIngredients -> "Missing ingredients"
+        SurvivalResult.Unknown -> "That does not exist here"
+    }
+
+    /** What the HUD and the camp panel show of the body. Recipes are only worked out while the panel is open. */
+    private fun survivalPanel(): SurvivalPanel {
+        if (!session.survivalActive) return SurvivalPanel()
+        val environment = session.surroundings
+        return SurvivalPanel(
+            active = true,
+            needs = session.content.needs.map { NeedView(it, session.player.needs[it.id] ?: com.stratum.core.domain.survival.Survival.MAX) },
+            night = session.clock.isNight,
+            day = session.clock.day,
+            sheltered = environment.sheltered,
+            nearFire = environment.nearFire,
+            canDrink = session.canDrink,
+            food = session.heldFood,
+            recipes = if (_state.value.campOpen) session.recipeOptions else emptyList(),
+        )
     }
 
     fun toggleTable() {
@@ -621,7 +663,8 @@ class PlayViewModel(
             player = snapshot.player,
             camera = snapshot.player.position,
             biomeName = snapshot.biome.name,
-            worldTime = WorldTime(elapsedSeconds = elapsed),
+            // The session's clock, so the light and the cold agree on when night is.
+            worldTime = WorldTime(dayFraction = session.clock.dayFraction, elapsedSeconds = elapsed),
             miningTarget = snapshot.miningTarget,
             miningFraction = snapshot.miningFraction,
             worldRevision = snapshot.worldRevision,
@@ -647,6 +690,7 @@ class PlayViewModel(
             activeBoons = snapshot.activeBoons,
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
             heldCurrency = session.heldCurrency,
+            survival = survivalPanel(),
             settlementName = snapshot.settlement?.name,
             settlementHostile = snapshot.settlementHostile,
             hero = heroPanel(),
@@ -912,6 +956,9 @@ data class PlayUiState(
     val use3D: Boolean = true,
     /** The texture forge's latest progress, or null when it has not run. */
     val forgeProgress: ForgeProgress? = null,
+    /** Needs, food and the camp's recipes. */
+    val survival: SurvivalPanel = SurvivalPanel(),
+    val campOpen: Boolean = false,
     /** The town the player stands in, or null in the wilds. */
     val settlementName: String? = null,
     /** Whether that town is a stronghold held against the player. */

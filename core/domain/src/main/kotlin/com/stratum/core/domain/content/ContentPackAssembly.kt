@@ -18,6 +18,11 @@ import com.stratum.core.domain.actor.EnemyPackDefinition
 import com.stratum.core.domain.faction.FactionBook
 import com.stratum.core.domain.faction.FactionDefinition
 import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.survival.ConsumableDefinition
+import com.stratum.core.domain.survival.ForageRule
+import com.stratum.core.domain.survival.NeedDefinition
+import com.stratum.core.domain.survival.RecipeDefinition
+import com.stratum.core.domain.survival.StandardSurvival
 import com.stratum.core.domain.settlement.SettlementRecipe
 import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.core.domain.passive.PassiveTreeGenerator
@@ -69,6 +74,11 @@ class ContentPackAssembler {
             factions = merger.merge(ContentPack::factions, FactionDefinition::id),
             enemyPacks = merger.merge(ContentPack::enemyPacks, EnemyPackDefinition::id),
             settlements = merger.merge(ContentPack::settlements, SettlementRecipe::id),
+            needs = merger.merge(ContentPack::needs, NeedDefinition::id),
+            consumables = merger.merge(ContentPack::consumables, ConsumableDefinition::id),
+            forageRules = packs.flatMap { it.forageRules },
+            recipes = merger.merge(ContentPack::recipes, RecipeDefinition::id),
+            suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
         ContentValidation.requireValid(content)
@@ -83,6 +93,11 @@ class ContentPackAssembler {
             currencies = content.currencies.ifEmpty { StandardCrafting.currencies },
             supports = content.supports.ifEmpty { StandardCrafting.supports },
             waystoneMods = content.waystoneMods.ifEmpty { WaystoneMods.standard },
+            needs = content.needs.ifEmpty { StandardSurvival.needs },
+            // Standard food only when the pack brings no food of its own, so its recipes can name it.
+            consumables = content.consumables.ifEmpty { StandardSurvival.consumables },
+            forageRules = if (content.consumables.isEmpty()) content.forageRules + StandardSurvival.forage else content.forageRules,
+            recipes = if (content.consumables.isEmpty()) content.recipes + StandardSurvival.recipes else content.recipes,
         )
     }
 
@@ -188,7 +203,18 @@ internal object WorldPoliticsValidation {
         return content.factionBook.problems() +
             content.enemies.filter { unknownFaction(it.factionId) }.map { "enemy '${it.id}' belongs to unknown faction '${it.factionId}'" } +
             content.enemyPacks.flatMap { pack -> packProblems(pack, enemyIds) } +
-            content.settlements.flatMap { recipe -> settlementProblems(recipe, content, enemyIds, factionIds) }
+            content.settlements.flatMap { recipe -> settlementProblems(recipe, content, enemyIds, factionIds) } +
+            survivalProblems(content)
+    }
+
+    /** Food that restores a need nobody defined, or a recipe using an item that is neither a block nor food. */
+    private fun survivalProblems(content: AssembledContent): List<String> {
+        val needIds = content.needs.mapTo(HashSet()) { it.id }
+        val items = content.consumables.mapTo(HashSet()) { it.id }
+        fun known(id: String) = id in items || content.registry.contains(id)
+        return content.consumables.flatMap { food -> food.restores.keys.filter { it !in needIds }.map { "food '${food.id}' restores unknown need '$it'" } } +
+            content.recipes.flatMap { r -> (r.inputs.keys + r.outputId).filterNot(::known).map { "recipe '${r.id}' uses unknown item '$it'" } } +
+            content.forageRules.filterNot { known(it.itemId) }.map { "forage rule yields unknown item '${it.itemId}'" }
     }
 
     private fun packProblems(pack: EnemyPackDefinition, enemyIds: Set<String>): List<String> =
@@ -233,6 +259,12 @@ data class AssembledContent(
     val factions: List<FactionDefinition> = emptyList(),
     val enemyPacks: List<EnemyPackDefinition> = emptyList(),
     val settlements: List<SettlementRecipe> = emptyList(),
+    val needs: List<NeedDefinition> = emptyList(),
+    val consumables: List<ConsumableDefinition> = emptyList(),
+    val forageRules: List<ForageRule> = emptyList(),
+    val recipes: List<RecipeDefinition> = emptyList(),
+    /** The rules the loaded packs suggest, before the player changes them. */
+    val suggestedRules: com.stratum.core.domain.world.WorldRules = com.stratum.core.domain.world.WorldRules(),
 ) {
     /** The loaded factions, for the questions the engine asks of them. */
     val factionBook: FactionBook by lazy { FactionBook(factions) }
@@ -250,6 +282,10 @@ data class AssembledContent(
     fun currency(id: String): CurrencyDefinition? = currencies.firstOrNull { it.id == id }
 
     fun support(id: String): SupportDefinition? = supports.firstOrNull { it.id == id }
+
+    fun consumable(id: String): ConsumableDefinition? = consumables.firstOrNull { it.id == id }
+
+    fun recipe(id: String): RecipeDefinition? = recipes.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
     fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps, settlements)

@@ -46,6 +46,11 @@ internal data class PackSchema(
     val factions: List<FactionSchema> = emptyList(),
     val enemyPacks: List<EnemyPackSchema> = emptyList(),
     val settlements: List<SettlementSchema> = emptyList(),
+    val rules: RulesSchema? = null,
+    val needs: List<NeedSchema> = emptyList(),
+    val consumables: List<ConsumableSchema> = emptyList(),
+    val forage: List<ForageSchema> = emptyList(),
+    val recipes: List<RecipeSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -57,6 +62,8 @@ internal data class PackSchema(
         checks = checks.map { it.toDomain() }, passiveTrees = passiveTrees.map { it.toDomain() },
         currencies = currencies.map { it.toDomain() }, supports = supports.map { it.toDomain() }, waystoneMods = waystoneMods.map { it.toDomain() },
         factions = factions.map { it.toDomain() }, enemyPacks = enemyPacks.map { it.toDomain() }, settlements = settlements.map { it.toDomain() },
+        rules = rules?.toDomain(), needs = needs.map { it.toDomain() }, consumables = consumables.map { it.toDomain() },
+        forageRules = forage.map { it.toDomain() }, recipes = recipes.map { it.toDomain() },
     )
 
     companion object {
@@ -69,6 +76,8 @@ internal data class PackSchema(
             p.maps.map(MapSchema::of), p.checks.map(CheckSchema::of), p.passiveTrees.map(PassiveTreeSchema::of),
             p.currencies.map(CurrencySchema::of), p.supports.map(SupportSchema::of), p.waystoneMods.map(WaystoneModSchema::of),
             p.factions.map(FactionSchema::of), p.enemyPacks.map(EnemyPackSchema::of), p.settlements.map(SettlementSchema::of),
+            p.rules?.let(RulesSchema::of), p.needs.map(NeedSchema::of), p.consumables.map(ConsumableSchema::of),
+            p.forageRules.map(ForageSchema::of), p.recipes.map(RecipeSchema::of),
         )
     }
 }

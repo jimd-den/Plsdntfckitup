@@ -11,6 +11,8 @@ import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.crafting.StandardCrafting
 import com.stratum.core.domain.difficulty.WaystoneMods
 import com.stratum.core.domain.passive.PassiveKind
+import com.stratum.core.domain.survival.StandardSurvival
+import com.stratum.core.domain.world.RulesPresets
 import com.stratum.core.domain.passive.PassiveTreeGenerator
 import com.stratum.core.domain.plugin.PluginDependency
 import com.stratum.core.domain.plugin.PluginManifest
@@ -106,6 +108,25 @@ class PluginFormatTest {
         assertEquals(StandardCrafting.currencies, decoded.currencies)
         assertEquals(StandardCrafting.supports, decoded.supports)
         assertEquals(WaystoneMods.standard, decoded.waystoneMods)
+    }
+
+    @Test
+    fun `survival, climate and world rules survive the trip`() {
+        val pack = IgboContentPack.pack.copy(
+            needs = StandardSurvival.needs,
+            consumables = StandardSurvival.consumables,
+            forageRules = StandardSurvival.forage,
+            recipes = StandardSurvival.recipes,
+            rules = RulesPresets.survivor.rules,
+        )
+        val decoded = PackJson.decode(PackJson.encode(pack))
+
+        assertEquals(pack.needs, decoded.needs)
+        assertEquals(pack.consumables, decoded.consumables)
+        assertEquals(pack.forageRules, decoded.forageRules)
+        assertEquals(pack.recipes, decoded.recipes)
+        assertEquals(pack.rules, decoded.rules)
+        assertEquals(pack.biomes.map { it.temperature }, decoded.biomes.map { it.temperature })
     }
 
     /** What a person writes by hand: only what differs from the defaults. */
