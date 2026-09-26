@@ -1,5 +1,8 @@
 package com.stratum.feature.play
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -22,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.GameProgress
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -60,7 +64,9 @@ fun StyleOverlay(
             modifier = Modifier
                 .fillMaxWidth()
                 .safeContent()
-                .padding(Space.medium),
+                .padding(Space.medium)
+                .widthIn(max = PANEL_MAX_WIDTH)
+                .verticalScroll(rememberScrollState()),
         ) {
             SectionLabel(text = "World style")
 
@@ -87,7 +93,7 @@ fun StyleOverlay(
 
             Spacer(Modifier.height(Space.medium))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-                items(SUGGESTIONS) { suggestion ->
+                items(STYLE_SUGGESTIONS) { suggestion ->
                     StratumChip(
                         label = suggestion,
                         selected = typed.equals(suggestion, ignoreCase = true),
@@ -97,6 +103,15 @@ fun StyleOverlay(
                         },
                     )
                 }
+            }
+
+            state.forgeProgress?.let { progress ->
+                Spacer(Modifier.height(Space.medium))
+                GameProgress(
+                    fraction = progress.fraction,
+                    label = if (progress.isFinished) "Textures painted" else "Painting textures…",
+                    detail = progress.summary,
+                )
             }
 
             Spacer(Modifier.height(Space.medium))
@@ -119,8 +134,9 @@ fun StyleOverlay(
                 // model. The lighting restyle above is instant and free; this
                 // is the part that costs a few cents and a minute.
                 StratumAction(
-                    label = state.forging ?: "Forge art",
+                    label = "Paint textures",
                     onClick = onForge,
+                    enabled = state.forgeProgress?.isFinished != false,
                     emphasis = ActionEmphasis.SECONDARY,
                 )
                 StratumAction(
@@ -160,7 +176,7 @@ private fun GraphicsChooser(chosen: QualityTier?, onChoose: (QualityTier?) -> Un
  * only ones a player ever tries, they have still seen that the field takes a
  * mood, a genre and a way of drawing.
  */
-private val SUGGESTIONS = listOf(
+internal val STYLE_SUGGESTIONS = listOf(
     "dark grimdark",
     "kawaii pastel",
     "woodblock print",

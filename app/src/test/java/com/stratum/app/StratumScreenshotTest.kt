@@ -57,6 +57,71 @@ class StratumScreenshotTest {
     }
 
     @Test
+    @Config(qualifiers = "+land")
+    fun home_screen_landscape() {
+        composeTestRule.setContent {
+            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
+                StratumApp(modifier = Modifier.fillMaxSize())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home_landscape.png")
+    }
+
+    /** A run part way through: a progress bar, a gallery filling in, one failure. */
+    private fun forgeInProgress(): com.stratum.feature.play.TextureForgeUiState {
+        val content = GameSetup.assemble()
+        val orders = com.stratum.core.domain.art.ForgePlanner.plan(
+            com.stratum.core.domain.art.StyleLexicon.interpret("painterly impasto").direction,
+            com.stratum.feature.play.TextureForgeViewModel.mergedPack(content),
+            includeActors = false,
+        )
+        var progress = com.stratum.engine.scene.forge.ForgeProgress(total = orders.size)
+        orders.take(9).forEachIndexed { i, order ->
+            val texture = if (i == 4) null else com.stratum.engine.scene.Texture(1, 1, IntArray(1))
+            progress = progress.recording(com.stratum.engine.scene.forge.ForgedAsset(order, texture, "rejected: flat colour".takeIf { texture == null }))
+        }
+        val swatches = listOf(0xFF6B8E4E, 0xFF8C6A48, 0xFF5A5F66, 0xFFB08D57, 0xFF3F6B5A, 0xFF7A4E3A, 0xFF9DA38F, 0xFF4E5B3A)
+        val gallery = progress.latest.mapIndexed { i, order ->
+            val image = androidx.compose.ui.graphics.ImageBitmap(32, 32)
+            androidx.compose.ui.graphics.Canvas(image).drawRect(0f, 0f, 32f, 32f, androidx.compose.ui.graphics.Paint().apply { color = androidx.compose.ui.graphics.Color(swatches[i % swatches.size]) })
+            com.stratum.feature.play.ForgedThumb(order.key, order.subject, image)
+        }
+        return com.stratum.feature.play.TextureForgeUiState(
+            prompt = "painterly impasto",
+            summary = "thick brushwork, warm light, soft shadows",
+            regions = content.biomes,
+            planned = orders.size,
+            planDescription = com.stratum.engine.scene.forge.ForgeProgress.describe(orders),
+            progress = progress,
+            gallery = gallery,
+            hasModel = true,
+        )
+    }
+
+    @Test
+    fun texture_forge_screen() {
+        val state = forgeInProgress()
+        composeTestRule.setContent {
+            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
+                com.stratum.feature.play.TextureForgeContent(state = state, actions = com.stratum.feature.play.TextureForgeActions())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/texture_forge.png")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun texture_forge_screen_landscape() {
+        val state = forgeInProgress()
+        composeTestRule.setContent {
+            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
+                com.stratum.feature.play.TextureForgeContent(state = state, actions = com.stratum.feature.play.TextureForgeActions())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/texture_forge_landscape.png")
+    }
+
+    @Test
     fun play_screen() {
         val content = GameSetup.assemble()
         val session = WorldSession(content, WorldConfig(seed = 99L, simulationRadius = 2))
@@ -350,6 +415,55 @@ class StratumScreenshotTest {
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/satchel.png")
     }
 
+    /** A live fight in the 2D view, which renders off-device, for layout checks. */
+    private fun fight(): Pair<com.stratum.core.domain.content.AssembledContent, WorldSession> {
+        val content = GameSetup.assemble()
+        val session = WorldSession(content, WorldConfig(seed = 99L, simulationRadius = 2))
+        repeat(40) { session.tick(0.25f) }
+        val sturdy = content.enemies.sortedByDescending { it.baseStats.maxHealth }
+        repeat(3) { i -> session.spawn(sturdy[i % sturdy.size], session.player.position.translated(1f + i * 0.5f, -0.6f + i * 0.6f, 0f)) }
+        session.attack()
+        session.tick(0.05f)
+        return content to session
+    }
+
+    private fun fightState(content: com.stratum.core.domain.content.AssembledContent, session: WorldSession) = PlayUiState(
+        player = session.player,
+        camera = session.player.position,
+        projection = IsometricProjection(zoom = 1f),
+        palette = content.palette,
+        biomeName = session.currentBiome.name,
+        enemies = session.enemies,
+        skills = session.skills,
+        feedback = session.feedback,
+        flashFor = session::flashFor,
+        use3D = false,
+    )
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun play_screen_landscape() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session), world = session.world, modifier = Modifier.fillMaxSize())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_landscape.png")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun build_mode_landscape() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session).copy(buildMode = true), world = session.world, modifier = Modifier.fillMaxSize())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/build_landscape.png")
+    }
+
     @Test
     fun hero_tree_screen() {
         val content = GameSetup.assemble()
@@ -391,6 +505,50 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_tree.png")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun hero_tree_screen_landscape() {
+        val content = GameSetup.assemble()
+        val classId = content.heroClasses.first().id
+        val session = WorldSession(
+            content, WorldConfig(seed = 99L, simulationRadius = 2),
+            hero = com.stratum.core.domain.session.HeroSave(id = classId, heroClassId = classId, level = 30),
+        )
+        val build = session.passiveBuild!!
+        val tree = build.tree
+        // Part of the way toward a notable, with another selected further out:
+        // what the panel has to read clearly is a build in progress.
+        val notables = tree.nodes.filter { it.kind == com.stratum.core.domain.passive.PassiveKind.NOTABLE }
+            .sortedBy { build.pathTo(it.id)?.size ?: Int.MAX_VALUE }
+        session.allocatePassive(notables.first().id)
+        val target = notables[2].id
+
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = PlayUiState(
+                        player = session.player,
+                        camera = session.player.position,
+                        projection = IsometricProjection(zoom = 1f),
+                        palette = content.palette,
+                        biomeName = session.currentBiome.name,
+                        skills = session.skills,
+                        hero = com.stratum.feature.play.HeroPanelState(
+                            open = true,
+                            tree = tree,
+                            startId = build.startId,
+                            selectedNode = target,
+                            path = session.passiveBuild!!.pathTo(target).orEmpty(),
+                        ),
+                    ),
+                    world = session.world,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_tree_landscape.png")
     }
 
     @Test

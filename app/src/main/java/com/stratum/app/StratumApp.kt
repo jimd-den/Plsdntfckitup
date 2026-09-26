@@ -11,8 +11,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import com.stratum.core.data.save.FileHeroSaveStore
+import com.stratum.core.data.settings.WorldStyleStore
+import com.stratum.core.domain.actor.Progression
+import com.stratum.feature.play.TextureForgeActions
+import com.stratum.feature.play.TextureForgeScreen
+import com.stratum.feature.play.TextureForgeViewModel
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -62,7 +68,7 @@ import com.stratum.feature.play.PlayViewModel
 import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY }
 
 /**
  * The app shell.
@@ -155,6 +161,10 @@ fun StratumApp(
     val graphics = remember(context) { GraphicsWiring(context) }
     // Each class keeps its own hero, carried from world to world.
     val heroes = remember(context) { FileHeroSaveStore(java.io.File(context.filesDir, "heroes")) }
+    // The look the world is worn in, and where painted textures live.
+    val styles = remember(context) { WorldStyleStore(context) }
+    var stylePrompt by remember { mutableStateOf(styles.load()) }
+    val forgeDirectory = remember(context) { java.io.File(context.filesDir, "forge") }
     val config = remember(seed) { GameSetup.worldConfig(seed, graphics.startingSettings().streamingRadius) }
 
     // The service is started by the run beginning, not by the forge opening:
@@ -286,7 +296,25 @@ fun StratumApp(
             val unpackedCharacters = remember(characters) {
                 characters.filter { !it.isPacked && it.posesDrawn.isNotEmpty() }
             }
+            val selectedClass = heroClassId ?: content.heroClasses.firstOrNull()?.id
+            // Read after home is shown rather than while it is composed: leaving
+            // play saves the hero as that screen is disposed, which happens
+            // after this composition, and reading first would show the old level.
+            val heroSummary by produceState<HeroSummary?>(null, selectedClass, destination) {
+                value = selectedClass?.let(heroes::load)?.let { hero ->
+                    HeroSummary(
+                        level = hero.level,
+                        tier = hero.highestTier,
+                        unspentPoints = (Progression.passivePointsFor(hero.level) - hero.passives.size).coerceAtLeast(0),
+                        waystones = hero.waystones.size,
+                    )
+                }
+            }
             HomeScreen(
+                heroSummary = heroSummary,
+                onTextures = { destination = Destination.TEXTURES },
+                paintedStyle = stylePrompt.ifBlank { null },
+                modelReady = remember(destination) { ai.isConfigured() },
                 packName = content.packs.joinToString(" + ") { it.name },
                 blockCount = content.registry.size,
                 biomeCount = content.biomes.size,
@@ -333,27 +361,59 @@ fun StratumApp(
         Destination.PLAY -> {
             // Keyed so forging a pack or starting a new run builds a fresh
             // session rather than reusing the previous world.
-            key(contentWithSprites, config, heroClassId) {
+            ScopedViewModels(listOf(contentWithSprites, config, heroClassId)) {
                 val viewModel: PlayViewModel = viewModel(
                     factory = PlayViewModel.factory(
                         contentWithSprites, config,
                         heroClassId = heroClassId,
                         spriteResolver = spriteResolver,
                         imageModel = ai.imageModel,
-                        kitDirectory = java.io.File(context.filesDir, "forge"),
+                        kitDirectory = forgeDirectory,
                         kitOverlays = plugins.textureDirectories(),
                         quality = graphics.chosen,
                         saveQuality = graphics::choose,
                         loadHero = { (heroClassId ?: contentWithSprites.heroClasses.firstOrNull()?.id)?.let(heroes::load) },
                         saveHero = heroes::save,
+                        stylePrompt = stylePrompt,
+                        saveStyle = { prompt ->
+                            styles.save(prompt)
+                            stylePrompt = prompt
+                        },
                     ),
                 )
+                ImmersiveMode()
                 PlayScreenRoute(
                     viewModel = viewModel,
                     modifier = modifier,
                     onOpenMenu = { destination = Destination.HOME },
                 )
             }
+        }
+
+        Destination.TEXTURES -> {
+            val forge: TextureForgeViewModel = viewModel(
+                key = "textures-${content.packs.size}",
+                factory = TextureForgeViewModel.factory(
+                    contentWithSprites,
+                    model = ai.imageModel.takeIf { ai.isConfigured() },
+                    root = forgeDirectory,
+                    initialPrompt = stylePrompt,
+                ),
+            )
+            TextureForgeScreen(
+                viewModel = forge,
+                actions = TextureForgeActions(
+                    onBack = { destination = Destination.HOME },
+                    onPlay = { prompt ->
+                        styles.save(prompt)
+                        stylePrompt = prompt
+                        seed = System.currentTimeMillis()
+                        destination = Destination.PLAY
+                    },
+                    onOpenSettings = { destination = Destination.SETTINGS },
+                ),
+                modifier = modifier,
+            )
         }
 
         Destination.CLASSES -> {

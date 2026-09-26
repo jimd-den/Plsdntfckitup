@@ -1,5 +1,8 @@
 package com.stratum.feature.play
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,6 +78,8 @@ fun AnvilOverlay(
             modifier = Modifier
                 .safeContent()
                 .fillMaxWidth(0.92f)
+                .widthIn(max = PANEL_MAX_WIDTH)
+                .verticalScroll(rememberScrollState())
                 .clickable(enabled = false, onClick = {}),
             shape = Cut.large,
             contentPadding = PaddingValues(Space.large),

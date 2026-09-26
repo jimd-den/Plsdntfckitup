@@ -32,6 +32,7 @@ import com.stratum.engine.world.AttackReport
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
 import com.stratum.engine.world.CheckAttempt
+import com.stratum.engine.scene.forge.ForgeProgress
 import com.stratum.engine.world.CombatEvent
 import com.stratum.engine.world.CraftResult
 import com.stratum.engine.world.Held
@@ -99,6 +100,8 @@ class PlayViewModel(
     quality: QualityTier? = null,
     /** Keeps a new graphics choice for next time. Supplied by the composition root. */
     private val saveQuality: (QualityTier?) -> Unit = {},
+    /** Keeps the world style for next time, so a painted style is still worn after a restart. */
+    private val saveStyle: (String) -> Unit = {},
     /** The character carried in from earlier play, or null for a new one. */
     hero: HeroSave? = null,
     /** Keeps the character for next time. Called off the main thread except when the screen closes. */
@@ -193,8 +196,9 @@ class PlayViewModel(
             artDirector = artDirector,
             stylePrompt = prompt,
             styleSummary = artDirector.direction.summary,
-            kit = ForgedKits.kitFor(artDirector.direction),
+            kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
         )
+        saveStyle(prompt)
     }
 
     /**
@@ -216,42 +220,33 @@ class PlayViewModel(
         saveQuality(tier)
     }
 
+    /**
+     * Paints this style's textures, the part of the world the lighting
+     * restyle cannot change. Runs in the background while the player plays;
+     * each finished texture is swapped in as it lands, and the Style panel
+     * shows how far along it is.
+     */
     fun forgeStyle() {
-        val model = imageModel ?: return publish(message = "Add an OpenRouter key in settings to forge art")
+        val model = imageModel ?: return publish(message = "Add an OpenRouter key in Model provider to paint textures")
         val root = kitDirectory ?: return publish(message = "No storage for forged art")
-        if (_state.value.forging != null) return
+        if (_state.value.forgeProgress?.isFinished == false) return
         val direction = artDirector.direction
-        val folder = File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_")).apply { mkdirs() }
         val biome = session.currentBiome.id
         val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
-        val orders = com.stratum.core.domain.art.ForgePlanner.plan(direction, pack, setOf(biome))
-            .filterNot { File(folder, ForgedKits.fileNameFor(it.key)).exists() }
-        if (orders.isEmpty()) {
-            _state.value = _state.value.copy(kit = ForgedKits.LOCAL + folder.absolutePath)
-            return publish(message = "This style is already forged")
+        val runner = TextureForgeRunner(model, root)
+        val plan = runner.plan(direction, pack, setOf(biome), includeActors = true)
+        if (plan.isEmpty) {
+            _state.value = _state.value.copy(kit = plan.kit)
+            return publish(message = "This style is already painted")
         }
-        val forge = com.stratum.engine.scene.forge.AssetForge(model, AndroidImageCodec)
-        _state.value = _state.value.copy(forging = "Forging 0/${orders.size}")
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var done = 0
-            var made = 0
-            forge.forge(orders, concurrency = 3) { asset ->
-                done++
-                asset.texture?.let { texture ->
-                    File(folder, ForgedKits.fileNameFor(asset.order.key))
-                        .writeBytes(AndroidImageCodec.encodePng(texture))
-                    made++
-                }
-                _state.value = _state.value.copy(
-                    forging = "Forging $done/${orders.size}",
-                    kit = ForgedKits.LOCAL + folder.absolutePath,
-                )
+            val finished = runner.run(plan) { progress ->
+                _state.value = _state.value.copy(forgeProgress = progress, kit = plan.kit)
             }
             // Back on the main thread: publishing reads the session, which the
             // game loop mutates there.
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                _state.value = _state.value.copy(forging = null)
-                publish(message = "Forged $made of ${orders.size}")
+                publish(message = "Painted ${finished.made.size} of ${plan.orders.size}")
             }
         }
     }
@@ -445,7 +440,7 @@ class PlayViewModel(
         artDirector = artDirector,
         stylePrompt = stylePrompt,
         styleSummary = artDirector.direction.summary,
-        kit = ForgedKits.kitFor(artDirector.direction),
+        kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
         kitOverlays = kitOverlays,
         quality = initialQuality,
         checks = content.checks,
@@ -833,12 +828,15 @@ class PlayViewModel(
             /** Read only when the view model is created, so a recomposition does not touch the disk. */
             loadHero: () -> HeroSave? = { null },
             saveHero: (HeroSave) -> Unit = {},
+            stylePrompt: String = "",
+            saveStyle: (String) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
                 quality = quality, saveQuality = saveQuality, hero = loadHero(), saveHero = saveHero,
+                stylePrompt = stylePrompt, saveStyle = saveStyle,
             ) as T
         }
     }
@@ -909,8 +907,8 @@ data class PlayUiState(
     val tableOpen: Boolean = false,
     /** The lit 3D view, or the flat 2D canvas it replaced. */
     val use3D: Boolean = true,
-    /** Progress of an art forge in flight, or null when none is running. */
-    val forging: String? = null,
+    /** The texture forge's latest progress, or null when it has not run. */
+    val forgeProgress: ForgeProgress? = null,
     /** Crafting currency held, for the anvil. */
     val heldCurrency: List<Held<CurrencyDefinition>> = emptyList(),
     /** The tree, skills and worlds panel. */

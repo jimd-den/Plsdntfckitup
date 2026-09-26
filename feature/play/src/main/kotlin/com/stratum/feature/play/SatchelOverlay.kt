@@ -1,5 +1,8 @@
 package com.stratum.feature.play
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +74,10 @@ fun SatchelOverlay(
             modifier = Modifier
                 .safeContent()
                 .fillMaxWidth(0.94f)
+                // Capped and scrolling, so a landscape phone gets a readable
+                // column rather than a stretched one cut off at the bottom.
+                .widthIn(max = PANEL_MAX_WIDTH)
+                .verticalScroll(rememberScrollState())
                 .clickable(enabled = false, onClick = {}),
             shape = Cut.large,
             contentPadding = PaddingValues(Space.large),

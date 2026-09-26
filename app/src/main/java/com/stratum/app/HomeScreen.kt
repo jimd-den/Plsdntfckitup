@@ -1,5 +1,10 @@
 package com.stratum.app
 
+import com.stratum.core.designsystem.component.GameTile
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -42,9 +47,14 @@ import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.feature.play.DrawableSprite
 
+/** What the home screen shows about the hero kept for the chosen class. */
+data class HeroSummary(val level: Int, val tier: Int, val unspentPoints: Int, val waystones: Int)
+
 /**
- * The landing screen. It reports what the loaded pack actually contains, so the
- * customization story is visible before the player ever enters a world.
+ * The landing screen, laid out like a game's title menu rather than a
+ * settings page: who you are playing and one big button to play, how the game
+ * is played, and every tool for making it your own as a tile that says what
+ * it does. Portrait stacks them; landscape puts the hero beside the tools.
  */
 @Composable
 internal fun HomeScreen(
@@ -73,255 +83,237 @@ internal fun HomeScreen(
     onLibrary: () -> Unit = {},
     importedCount: Int = 0,
     modifier: Modifier = Modifier,
+    /** The saved hero for the chosen class, or null for a new one. */
+    heroSummary: HeroSummary? = null,
+    onTextures: () -> Unit = {},
+    /** The style the world is painted in, when the player chose one. */
+    paintedStyle: String? = null,
+    /** Whether an image and language model is set up, which the AI tools need. */
+    modelReady: Boolean = false,
 ) {
     val colors = StratumTheme.colors
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.surface)
-            // Inset before the scroll, so the content scrolls under nothing and
-            // the first line is never behind the status bar on a tall phone.
-            .safeContent()
-            .verticalScroll(rememberScrollState())
-            .padding(Space.large),
-    ) {
-        Spacer(Modifier.height(Space.huge))
-
-        Text(
-            text = "STRATUM",
-            style = MaterialTheme.typography.displaySmall,
-            color = colors.ink,
+    val play: @Composable () -> Unit = {
+        PlayCard(
+            heroClasses, selectedClassId, onSelectClass, characterSheets, selectedSheetId, onSelectSheet,
+            idleFrameFor, unpackedCharacterCount, onPoseForge, onDescend, heroSummary,
         )
-        Text(
-            text = "An isometric world you dig apart and rebuild.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.inkMuted,
-        )
+    }
+    val tiles = listOf(
+        TileSpec("🎨", "Texture forge", "Describe a look and AI paints the ground, walls and props.", onTextures,
+            status = paintedStyle?.let { "Wearing: $it" } ?: if (modelReady) "Ready to paint" else "Needs a model key", badge = "NEW", highlighted = true),
+        TileSpec("🧍", "Pose forge", "Draw your hero once, then pose them for every move.", onPoseForge,
+            status = if (unpackedCharacterCount > 0) "$unpackedCharacterCount waiting to be packed" else null, badge = unpackedCharacterCount.takeIf { it > 0 }?.toString()),
+        TileSpec("🖼", "Sprite forge", "Generate animated sprite sheets for heroes and monsters.", onSprites,
+            status = if (spriteCount > 0) "$spriteCount sheets" else null),
+        TileSpec("⚔", "Build a class", "Choose stats, skills and a starting weapon for a new class.", onBuildClass,
+            status = "$classCount classes"),
+        TileSpec("🌍", "World generator", "Generate a whole world with AI: blocks, regions, monsters, lore.", onForge),
+        TileSpec("🧩", "Plugins and games", "Import Flame or Tiled games, install mods, share your own.", onLibrary,
+            status = if (importedCount > 0) "$importedCount loaded" else "Nothing imported yet"),
+        TileSpec("🛠", "Creator studio", "The full editor, for pack makers.", onStudio),
+        TileSpec("⚙", "Model provider", "Connect the AI that paints and writes for the forges.", onSettings,
+            status = if (modelReady) "Connected" else "Not set up"),
+    )
 
-        Spacer(Modifier.height(Space.wide))
-
-        StratumSection(
-            title = "Loaded pack",
-            subtitle = packName,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Space.small),
-            ) {
-                Stat("Blocks", blockCount, Modifier.weight(1f))
-                Stat("Regions", biomeCount, Modifier.weight(1f))
-                Stat("Classes", classCount, Modifier.weight(1f))
+    BoxWithConstraints(modifier.fillMaxSize().background(colors.surface).safeContent()) {
+        val landscape = maxWidth > maxHeight && maxWidth >= LANDSCAPE_MIN_WIDTH
+        if (landscape) {
+            Row(Modifier.fillMaxSize().padding(Space.large), horizontalArrangement = Arrangement.spacedBy(Space.large)) {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    Banner(packName, blockCount, biomeCount, classCount)
+                    Spacer(Modifier.height(Space.large))
+                    play()
+                }
+                Column(Modifier.weight(1.3f).verticalScroll(rememberScrollState())) {
+                    HowToPlay()
+                    Spacer(Modifier.height(Space.large))
+                    ToolGrid(tiles, columns = 3)
+                }
             }
-            Spacer(Modifier.height(Space.medium))
-            StratumDivider()
-            Spacer(Modifier.height(Space.medium))
-            Text(
-                text = "Every block, region, class and line of lore above comes from a content " +
-                    "pack. The engine ships with none of its own, so a generated pack sits beside " +
-                    "the built-in one as an equal.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.inkMuted,
-            )
+        } else {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.large)) {
+                Banner(packName, blockCount, biomeCount, classCount)
+                Spacer(Modifier.height(Space.large))
+                play()
+                Spacer(Modifier.height(Space.large))
+                HowToPlay()
+                Spacer(Modifier.height(Space.large))
+                ToolGrid(tiles, columns = 2)
+                Spacer(Modifier.height(Space.huge))
+            }
         }
-
-        Spacer(Modifier.height(Space.large))
-
-        StratumPanel(modifier = Modifier.fillMaxWidth()) {
-            SectionLabel("Begin")
-            Spacer(Modifier.height(Space.medium))
-
-            // The class is chosen before the run, not after: it decides the
-            // spawn, the starting weapon and the skill bar.
-            // The character itself, first and unconditionally.
-            //
-            // This used to live inside the hero-class block, which is why it
-            // never appeared: it rendered only when a class in the list
-            // matched the selected id, so art a person had drawn was hidden
-            // behind a lookup that had nothing to do with it. What you look
-            // like is not a property of what you are playing.
-            val drawn = remember(selectedSheetId, selectedClassId, idleFrameFor) {
-                idleFrameFor(selectedClassId.orEmpty())
-            }
-            if (drawn != null) {
-                IdlePortrait(drawn, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(Space.medium))
-            } else if (characterSheets.isEmpty()) {
-                // Said rather than left blank. An empty space where a
-                // character should be reads as the feature being broken;
-                // naming the reason turns it into the next thing to do.
-                Text(
-                    text = if (unpackedCharacterCount > 0) {
-                        "Character art has been drawn but not packed into a sprite sheet yet. " +
-                            "Pack it in the pose forge to wear it here."
-                    } else {
-                        "No character art yet — you will be drawn as a shape. " +
-                            "Make one in the pose forge and it appears here."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.inkMuted,
-                )
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            if (unpackedCharacterCount > 0) {
-                StratumPanel(
-                    raised = false,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = if (unpackedCharacterCount == 1) {
-                            "1 character drawn but not packed into a sprite sheet yet."
-                        } else {
-                            "$unpackedCharacterCount characters drawn but not packed into sprite sheets yet."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.accent,
-                    )
-                    Spacer(Modifier.height(Space.small))
-                    StratumAction(
-                        label = "Open pose forge to pack",
-                        onClick = onPoseForge,
-                        emphasis = ActionEmphasis.SECONDARY,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            // The look, before the class. Two separate choices: what you are
-            // playing and what you look like. They used to be one, so the only
-            // way to wear a character you had drawn was to go and bind it to a
-            // class somewhere else first.
-            if (characterSheets.isNotEmpty()) {
-                Text(
-                    text = "Character",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.inkMuted,
-                )
-                Spacer(Modifier.height(Space.small))
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.small),
-                ) {
-                    items(characterSheets, key = SpriteSheet::id) { sheet ->
-                        StratumChip(
-                            label = sheet.name,
-                            selected = sheet.id == selectedSheetId,
-                            // Tapping the chosen one again clears it, which is
-                            // how a player goes back to the class's own art
-                            // without hunting for a "none" entry.
-                            onClick = { onSelectSheet(sheet.id) },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            if (heroClasses.isNotEmpty()) {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.small),
-                ) {
-                    items(heroClasses, key = HeroClassDefinition::id) { hero ->
-                        StratumChip(
-                            label = hero.name,
-                            selected = hero.id == selectedClassId,
-                            onClick = { onSelectClass(hero.id) },
-                        )
-                    }
-                }
-                heroClasses.firstOrNull { it.id == selectedClassId }?.let { hero ->
-                    Spacer(Modifier.height(Space.small))
-                    Text(
-                        text = "${hero.resolvedStats.maxHealth} hp · " +
-                            "${hero.resolvedStats.attackPower} attack · " +
-                            "${hero.baseResource} ${hero.resourceName.lowercase()}" +
-                            if (hero.title.isNotBlank()) " · ${hero.title}" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.inkMuted,
-                    )
-                }
-                Spacer(Modifier.height(Space.medium))
-            }
-
-            StratumAction(
-                label = "Descend",
-                onClick = onDescend,
-                emphasis = ActionEmphasis.PRIMARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = if (unpackedCharacterCount > 0) "Pose forge ($unpackedCharacterCount unpacked)" else "Pose forge",
-                onClick = onPoseForge,
-                emphasis = if (unpackedCharacterCount > 0) ActionEmphasis.PRIMARY else ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Build a class",
-                onClick = onBuildClass,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Forge a pack with AI",
-                onClick = onForge,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = if (spriteCount > 0) "Sprite forge ($spriteCount)" else "Sprite forge",
-                onClick = onSprites,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = if (importedCount > 0) "Plugins and games ($importedCount loaded)" else "Plugins and games",
-                onClick = onLibrary,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Creator studio",
-                onClick = onStudio,
-                emphasis = ActionEmphasis.SECONDARY,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(Space.small))
-            StratumAction(
-                label = "Model provider",
-                onClick = onSettings,
-                emphasis = ActionEmphasis.QUIET,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        Spacer(Modifier.height(Space.huge))
     }
 }
 
 @Composable
-private fun Stat(label: String, value: Int, modifier: Modifier = Modifier) {
-    StratumWell(modifier = modifier) {
+private fun Banner(packName: String, blockCount: Int, biomeCount: Int, classCount: Int) {
+    val colors = StratumTheme.colors
+    Text("STRATUM", style = MaterialTheme.typography.displaySmall, color = colors.ink)
+    Text(
+        "Dig, build and fight through endless worlds. Import them, generate them, or make your own.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = colors.inkMuted,
+    )
+    Spacer(Modifier.height(Space.small))
+    Text(
+        "Playing $packName · $blockCount blocks · $biomeCount regions · $classCount classes",
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.accent,
+    )
+}
+
+/** Who you are, and the one button that matters. */
+@Composable
+private fun PlayCard(
+    heroClasses: List<HeroClassDefinition>,
+    selectedClassId: String?,
+    onSelectClass: (String) -> Unit,
+    characterSheets: List<SpriteSheet>,
+    selectedSheetId: String?,
+    onSelectSheet: (String) -> Unit,
+    idleFrameFor: (String) -> DrawableSprite?,
+    unpackedCharacterCount: Int,
+    onPoseForge: () -> Unit,
+    onDescend: () -> Unit,
+    heroSummary: HeroSummary?,
+) {
+    val colors = StratumTheme.colors
+    val chosen = heroClasses.firstOrNull { it.id == selectedClassId }
+    StratumPanel(modifier = Modifier.fillMaxWidth()) {
+        SectionLabel("Your hero")
+        Spacer(Modifier.height(Space.small))
+        val drawn = remember(selectedSheetId, selectedClassId, idleFrameFor) { idleFrameFor(selectedClassId.orEmpty()) }
+        if (drawn != null) {
+            IdlePortrait(drawn, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(Space.small))
+        }
+        if (chosen != null) {
+            Text(chosen.name, style = MaterialTheme.typography.headlineSmall, color = colors.ink)
+            Text(
+                listOfNotNull(chosen.title.takeIf { it.isNotBlank() }, "${chosen.resolvedStats.maxHealth} health", "${chosen.resolvedStats.attackPower} attack")
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+            )
+        }
+        Spacer(Modifier.height(Space.small))
         Text(
-            text = value.toString(),
-            style = MaterialTheme.typography.headlineMedium,
-            color = StratumTheme.colors.accent,
+            text = heroSummary?.let { hero ->
+                buildString {
+                    append("Level ${hero.level}")
+                    if (hero.tier > 0) append(" · world tier ${hero.tier} open")
+                    if (hero.unspentPoints > 0) append(" · ${hero.unspentPoints} points to spend")
+                    if (hero.waystones > 0) append(" · ${hero.waystones} waystones")
+                }
+            } ?: "A new hero, level 1. Everything you earn carries into every world you enter.",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (heroSummary != null) colors.accent else colors.inkMuted,
         )
-        Text(
-            text = label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = StratumTheme.colors.inkMuted,
+        Spacer(Modifier.height(Space.medium))
+        if (heroClasses.size > 1) {
+            Text("Class", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+            Spacer(Modifier.height(Space.tight))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                items(heroClasses, key = HeroClassDefinition::id) { hero ->
+                    StratumChip(label = hero.name, selected = hero.id == selectedClassId, onClick = { onSelectClass(hero.id) })
+                }
+            }
+            Spacer(Modifier.height(Space.small))
+        }
+        if (characterSheets.isNotEmpty()) {
+            Text("Look", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+            Spacer(Modifier.height(Space.tight))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                // Tapping the chosen one again clears it, back to the class's own art.
+                items(characterSheets, key = SpriteSheet::id) { sheet ->
+                    StratumChip(label = sheet.name, selected = sheet.id == selectedSheetId, onClick = { onSelectSheet(sheet.id) })
+                }
+            }
+            Spacer(Modifier.height(Space.small))
+        }
+        if (unpackedCharacterCount > 0) {
+            StratumAction(
+                label = "Pack $unpackedCharacterCount drawn character" + if (unpackedCharacterCount == 1) "" else "s",
+                onClick = onPoseForge,
+                emphasis = ActionEmphasis.SECONDARY,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.small))
+        }
+        StratumAction(
+            label = if (heroSummary != null && heroSummary.level > 1) "Continue" else "Start adventure",
+            onClick = onDescend,
+            emphasis = ActionEmphasis.PRIMARY,
+            modifier = Modifier.fillMaxWidth().height(PLAY_BUTTON_HEIGHT),
         )
     }
 }
+
+/**
+ * The whole game in seven lines, each led by the glyph its button wears in
+ * play, so the first time a player sees the HUD they already know it.
+ */
+@Composable
+private fun HowToPlay() {
+    val colors = StratumTheme.colors
+    StratumPanel(modifier = Modifier.fillMaxWidth()) {
+        SectionLabel("How to play")
+        Spacer(Modifier.height(Space.small))
+        HOW_TO_PLAY.forEach { (glyph, line) ->
+            Row(Modifier.padding(vertical = Space.tight), verticalAlignment = Alignment.CenterVertically) {
+                Text(glyph, fontSize = 20.sp, modifier = Modifier.width(36.dp), color = colors.accent)
+                Text(line, style = MaterialTheme.typography.bodySmall, color = colors.ink)
+            }
+        }
+    }
+}
+
+private val HOW_TO_PLAY = listOf(
+    "🕹" to "Move with the stick under your left thumb.",
+    "⚔" to "Strike with the big button; your skills and roll fan out around it.",
+    "⛏" to "Tap the ground to dig. Hold to place a block, or open Build for walls and rooms.",
+    "✦" to "Each level gives two points. Spend them on the Hero tree: tap a far node and the path lights up.",
+    "⚒" to "Currency drops straight into your pouch. Use it at the Anvil to reroll, upgrade and socket gear.",
+    "🗺" to "Fell a champion to open the next world tier. Waystones open harder worlds with bigger rewards.",
+    "🎨" to "Style changes the look instantly. The texture forge paints it for real.",
+)
+
+private data class TileSpec(
+    val glyph: String,
+    val title: String,
+    val description: String,
+    val onClick: () -> Unit,
+    val status: String? = null,
+    val badge: String? = null,
+    val highlighted: Boolean = false,
+)
+
+@Composable
+private fun ToolGrid(tiles: List<TileSpec>, columns: Int) {
+    SectionLabel("Make it yours")
+    Spacer(Modifier.height(Space.small))
+    tiles.chunked(columns).forEach { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+            row.forEach { tile ->
+                GameTile(
+                    glyph = tile.glyph,
+                    title = tile.title,
+                    description = tile.description,
+                    onClick = tile.onClick,
+                    status = tile.status,
+                    badge = tile.badge,
+                    highlighted = tile.highlighted,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+        Spacer(Modifier.height(Space.small))
+    }
+}
+
+private val LANDSCAPE_MIN_WIDTH = 600.dp
+private val PLAY_BUTTON_HEIGHT = 56.dp
 
 /**
  * One idle frame of a character, drawn the way the world draws it.

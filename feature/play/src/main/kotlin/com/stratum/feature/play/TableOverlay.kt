@@ -1,5 +1,8 @@
 package com.stratum.feature.play
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +35,7 @@ import com.stratum.core.domain.tabletop.SkillCheck
 @Composable
 fun TableOverlay(state: PlayUiState, onRoll: (String) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        StratumPanel(modifier = Modifier.fillMaxWidth().safeContent().padding(Space.medium)) {
+        StratumPanel(modifier = Modifier.fillMaxWidth().safeContent().padding(Space.medium).widthIn(max = PANEL_MAX_WIDTH).verticalScroll(rememberScrollState())) {
             SectionLabel(text = "The table")
             Spacer(Modifier.height(Space.small))
             state.checks.forEach { check -> CheckRow(check, state.checkCooldowns[check.id] ?: 0f, onRoll) }

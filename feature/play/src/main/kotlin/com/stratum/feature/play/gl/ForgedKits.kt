@@ -85,6 +85,21 @@ object ForgedKits {
         return key
     }
 
+    /** Where a style's forged textures are kept under [root], one folder per style. */
+    fun localFolder(root: File, direction: ArtDirection): File =
+        File(root, "style-" + direction.id.replace(Regex("[^a-zA-Z0-9+_-]"), "_"))
+
+    /**
+     * The kit to draw [direction] with: the one forged for it on this device
+     * when there is one, else the shipped kit that fits it best. A style the
+     * player painted in the texture forge is worn the next time they play it.
+     */
+    fun kitFor(direction: ArtDirection, root: File?): String {
+        val forged = root?.let { localFolder(it, direction) }
+        val hasArt = forged?.listFiles { f -> f.extension == "png" }?.isNotEmpty() == true
+        return if (hasArt) LOCAL + forged!!.absolutePath else kitFor(direction)
+    }
+
     fun fileNameFor(key: String): String = TextureKeys.fileNameFor(key)
 
     fun keyFor(fileName: String): String = TextureKeys.keyFor(fileName)

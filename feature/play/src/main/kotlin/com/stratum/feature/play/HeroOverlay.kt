@@ -1,5 +1,10 @@
 package com.stratum.feature.play
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,7 +83,43 @@ private fun TreePage(state: PlayUiState, actions: HeroActions, modifier: Modifie
         Muted("This world has no passive tree.", modifier)
         return
     }
-    Column(modifier) {
+    BoxWithConstraints(modifier) {
+        if (maxWidth > maxHeight) {
+            // Landscape: the tree gets the width, the card sits beside it.
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(Space.medium)) {
+                PassiveTreeView(
+                    tree = tree,
+                    startId = panel.startId,
+                    allocated = state.player.passives,
+                    selected = panel.selectedNode,
+                    path = panel.path,
+                    onSelect = actions.onSelectNode,
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                )
+                Column(Modifier.width(SIDE_CARD).verticalScroll(rememberScrollState())) {
+                    PointsLine(state)
+                    panel.selectedNode?.let(tree::node)?.let { node -> NodeCard(node, state, actions) } ?: Muted(TREE_HINT)
+                }
+            }
+        } else {
+            TreeColumn(state, actions, tree)
+        }
+    }
+}
+
+@Composable
+private fun PointsLine(state: PlayUiState) {
+    Text(
+        "${state.player.unspentPassivePoints} points to spend · ${state.player.passives.size} taken",
+        style = MaterialTheme.typography.labelMedium,
+        color = StratumTheme.colors.accent,
+    )
+}
+
+@Composable
+private fun TreeColumn(state: PlayUiState, actions: HeroActions, tree: com.stratum.core.domain.passive.PassiveTree) {
+    val panel = state.hero
+    Column(Modifier.fillMaxSize()) {
         Text(
             "${state.player.unspentPassivePoints} points to spend · ${state.player.passives.size} taken",
             style = MaterialTheme.typography.labelMedium,
@@ -94,7 +135,7 @@ private fun TreePage(state: PlayUiState, actions: HeroActions, modifier: Modifie
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
         panel.selectedNode?.let(tree::node)?.let { node -> NodeCard(node, state, actions) }
-            ?: Muted("Drag to look around, pinch to zoom, tap a node to see it. Tap a far one and the whole path lights up.")
+            ?: Muted(TREE_HINT)
     }
 }
 
@@ -225,6 +266,9 @@ private fun WaystoneRow(waystone: Waystone, actions: HeroActions) {
         }
     }
 }
+
+private const val TREE_HINT = "Drag to look around, pinch to zoom, tap a node to see it. Tap a far one and the whole path lights up."
+private val SIDE_CARD = 300.dp
 
 @Composable
 private fun Muted(text: String, modifier: Modifier = Modifier) {

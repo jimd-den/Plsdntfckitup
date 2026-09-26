@@ -315,6 +315,35 @@ Currency, supports and waystones go straight into the pouch when a monster
 dies. Gear still lands on the ground, because choosing gear is a decision
 and picking up a pebble in a crowd, with a thumb, is not.
 
+## A handheld's interface, not a toolbar's
+
+The play screen is the world, edge to edge, in portrait or landscape; the
+activity handles rotation itself, so turning the phone re-lays out the HUD
+without dropping the GL context or the fight. The HUD floats inside the safe
+area and uses the round `GameButton` from the design system: a glyph to find
+it by, a word to learn it by, a badge when something inside wants doing, a
+sweep for a cooldown.
+
+- **Left thumb:** the stick, with Build (showing the block in hand) above it.
+- **Right thumb:** one big button for what the current mode is for -- Strike,
+  or Done while building -- and the rest fanned around it on rings sized so no
+  two buttons or labels touch (`clusterOffsets`).
+- **Top:** vitals in the corner, and the dock -- Bag, Anvil, Hero, Table,
+  Style, View -- under it in portrait or beside it in landscape.
+- **Build mode** swaps the fan for a tray of shapes and blocks.
+
+Play view models are scoped to the play screen (`ScopedViewModels`), not the
+activity, so leaving play saves the hero and frees the world, and the next
+visit starts a fresh one. Home is laid out as a title menu: the hero and one
+button to play, a seven-line how-to-play whose glyphs match the HUD, and every
+creation tool as a tile that says what it does and what state it is in.
+
+The **texture forge** is its own screen: describe a look, choose regions,
+paint, and watch a progress bar and a gallery fill as textures arrive.
+`TextureForgeRunner` is shared with the Style panel in play, skips what an
+earlier run already painted, and writes to the per-style folder play reads,
+so a painted style is worn the next time it is played.
+
 ## Why the look is data
 
 The renderer used to decide what the world looked like. Ground eight levels
