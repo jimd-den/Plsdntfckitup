@@ -33,4 +33,19 @@ class ExamplePluginTest {
         val resolution = PluginResolver.resolve(listOf(manifest), listOf(manifest.id), builtIn = listOf(PluginManifest.of(IgboContentPack.pack)))
         assertEquals(listOf(manifest.id), resolution.loadOrder)
     }
+
+    @Test
+    fun `the lore pack example loads on the built-in pack with every world system it declares`() {
+        val result = PluginImporter().import(DirectoryImportSource(File("../examples/plugins/ashen-crusade")))
+        assertTrue(result.warnings.isEmpty(), "warnings: ${result.warnings}")
+
+        val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack, result.pack))
+        assertEquals(2, content.factions.count { it.id.startsWith("ash:") })
+        assertEquals(2, content.settlements.count { it.id.startsWith("ash:") })
+        assertEquals("ash:rot_cantor", content.enemyPacks.single { it.id == "ash:choir_warband" }.leaderId)
+        assertTrue(content.units.any { it.id == "ash:oathsworn" } && content.structures.isNotEmpty(), "its soldiers train in the standard barracks")
+        assertTrue(content.recipes.any { it.id == "ash:grub_stew" } && content.recipes.any { it.id == "stratum:cook_meat" })
+        assertEquals(com.stratum.core.domain.world.SurvivalMode.HARSH, content.suggestedRules.survival)
+        assertEquals(listOf("ash:chronicler"), content.agentRoles.map { it.id })
+    }
 }

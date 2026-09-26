@@ -20,8 +20,8 @@ wrapped in an ARPG shell, where the content is data rather than code.
         :core:designsystem            :core:domain ◄── :content:igbo
                 │                           ▲
                 └───────────────────────────┤
-                                     :engine:world
-                                            ▲
+                                     :engine:world ──► :engine:settlement, :engine:crowd
+                                            ▲                 (both -> :core:domain only)
                                      :engine:render ◄── :tools:artpreview
                                                                 │
                                      :engine:scene ◄────────────┘
@@ -34,6 +34,10 @@ wrapped in an ARPG shell, where the content is data rather than code.
         :app (registers them)          :core:data (keeps archives)
                                                    ▲
                                    :feature:library (-> :core:domain only)
+
+  The studio crew, beside the plugin format it writes:
+
+    :feature:forge ──► :agents ──► :plugins, :core:domain
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -45,6 +49,9 @@ Room, OkHttp or Compose exist.
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
 | `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
+| `:engine:settlement` | Pure Kotlin | Towns: site selection on a coarse grid, the layouts (grid, organic, fortress, camp), lot packing, and stamping buildings, roads and walls into any terrain source. |
+| `:engine:crowd` | Pure Kotlin | Crowd AI: flow fields over height steps, a spatial hash, attack tokens, roles, squads and morale. Never sees a block. |
+| `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
 | `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
 | `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
@@ -424,6 +431,60 @@ stroke.
 The offline path always works — no key, no network, no latency, no cost — and
 the model is an upgrade to it rather than a replacement, so the game is playable
 while the request is still in flight and stays playable if it fails.
+
+## Worlds with their own politics, bodies and holdings
+
+Four systems were added so a pack can be a *setting* rather than a
+reskin, and each is split the same way: the rules are pure data and pure
+functions in `:core:domain`, the work that touches the world lives in an
+engine module, and the session only orchestrates.
+
+- **Factions and reputation** (`core/domain/faction`). A `FactionBook`
+  answers one question -- is this body hostile to the player -- from
+  stances, relations and the player's standing. Everything else (towns,
+  guards, raids, followers) asks it rather than keeping its own opinion.
+- **Settlements** (`:engine:settlement`). `SettlementTerrain` wraps any
+  terrain source: towns are decided per site cell from the seed alone, so
+  a chunk stamped today and one stamped next week agree, and the order
+  chunks load in cannot move a wall. Layouts are a registry of small
+  strategies; a plugin picks one by id and supplies the blocks and
+  buildings.
+- **Crowds** (`:engine:crowd`). One flow field per target, rebuilt at most
+  four times a second, serves every chaser; a spatial hash keeps
+  separation linear; attack tokens cap how many swing at once, and the
+  rest circle by role. The brain takes agents and returns intents, and
+  `CrowdControl` in `:engine:world` is the only code that knows both
+  blocks and squads.
+- **Survival and strategy** (`core/domain/survival`, `core/domain/strategy`).
+  `Survival` and `Colony` are functions from state to state -- drain,
+  eat, produce, build, raid -- tested without a world. `SurvivalSystem`
+  and `RealmSystem` in `:engine:world` apply them to a session and report
+  events; followers are ordinary enemies of the player's faction, moved
+  by the same crowd brain under an order.
+
+`WorldRules` sets the pressure on all of it -- how harsh needs are, how
+many towns and monsters, whether raids come -- chosen per world on the
+home screen, starting from what the packs suggest.
+
+## The agent studio
+
+`:agents` writes a content pack with a crew of model-backed roles. A role
+is plugin data (`AgentRoleDefinition`): the pack sections it writes, the
+roles it waits for, a standing brief, whether a person must approve it.
+`CrewPlan` orders them; `PromptComposer` asks each for its sections,
+showing one entry of each from the loaded packs as the pattern -- so the
+examples are the live schema, never a stale copy -- and listing the ids it
+may reference. `DraftCheck` holds each reply to the plugin standard: it
+must decode as plugin JSON, stay inside its sections and namespace, and
+assemble on the loaded packs. A failure is retried with the problems
+quoted back; an approval gate suspends until the person approves, revises
+with a note, or skips (and whoever depended on it is skipped too).
+
+Nothing is off the record. `StudioJournal` keeps every prompt, reply,
+problem, review note and timing, streams to the screen as it changes, and
+renders as markdown. The finished pack installs as an ordinary plugin
+that names its dependency, so it can be shared, disabled or deleted like
+anything else.
 
 ## Why the renderer draws into a sink
 

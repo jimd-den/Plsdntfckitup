@@ -91,6 +91,10 @@ loaded, including the built-in pack's `igbo:` content.
 | `sheets` | Sprite sheet layouts: `id`, `columns`, `rows`, `frameWidth`, `frameHeight`, `clips` (`state`: idle, walk, attack, special, hurt, roll, die; `first`, `count`, `frameMs`, `loops`). The image goes in `art/sheets/`. |
 | `checks` | Tabletop rules; see below. |
 | `palette`, `rarities` | Interface colours, and what item rarities are called. |
+| `factions`, `enemyPacks`, `settlements` | Sides, warbands and towns; see *Worlds with their own lore*. |
+| `needs`, `consumables`, `recipes`, `forage` | Survival. |
+| `resources`, `structures`, `units` | Outposts and the soldiers they train. |
+| `rules`, `agents` | How its worlds should be played, and the studio crew that writes more of it. |
 
 `stats` blocks take `maxHealth`, `attackPower`, `armour`, `critChance`,
 `critMultiplier`, `attackSpeed`, `attackRange`, `resistances` (damage type
@@ -189,6 +193,93 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
 "waystoneMods": [{ "id": "yourname:eclipse", "name": "Eclipse",
   "monster": [{ "stat": "damage", "kind": "more", "value": 0.3 }],
   "reward": [{ "stat": "item_rarity", "value": 0.25 }] }]
+```
+
+## Worlds with their own lore
+
+Everything that makes a world a *setting* -- who lives there, where they
+live, how they fight, what keeps a body alive, what the player can build --
+is data. [`examples/plugins/ashen-crusade`](../examples/plugins/ashen-crusade)
+uses all of it to turn the built-in world grimdark without a line of code,
+and a test keeps it loading.
+
+**Factions** are the sides. `defaultStance` (`hostile`, `neutral`,
+`allied`) is how they regard a stranger; standing moves as the player kills
+their enemies (up) or their members (down), crossing into hostility below
+-100 and alliance from 100. `ranks` pay out modifiers at a standing.
+
+```json
+"factions": [{ "id": "yourname:order", "name": "The Order", "color": "#FFB0BEC5", "glyph": "✠",
+  "defaultStance": "neutral", "startingStanding": 110,
+  "relations": { "yourname:cult": "hostile" },
+  "ranks": [{ "name": "Sworn", "threshold": 300, "modifiers": [{ "stat": "armour", "kind": "flat", "value": 5 }] }] }]
+```
+
+An enemy joins one with `"faction"`, and fights as a `"role"`: `melee`
+(holds the line), `ranged` (keeps its distance), `support` (hangs back),
+`swarmer` (flanks) or `brute` (charges). Only so many attack the player at
+once; the rest circle, which is what makes a crowd readable on a phone.
+`spawnWeight: 0` keeps a town guard out of the wilds.
+
+**Enemy packs** spawn together and share an alarm: hit one and they all
+come, and when the leader falls the rest may break.
+
+```json
+"enemyPacks": [{ "id": "yourname:warband", "name": "Warband", "leader": "yourname:priest",
+  "members": [{ "enemy": "yourname:thrall", "count": 5 }], "spawnBiomes": ["yourname:ruins"], "weight": 60 }]
+```
+
+**Settlements** are recipes the world generator stamps into the terrain:
+a `layout` (`grid`, `organic`, `fortress`, `camp`), the blocks for its
+`road`, `foundation`, optional `wall`, and `buildings` it chooses from --
+each with a `role` (`house`, `shop`, `smithy`, `tavern`, `temple`,
+`barracks`, `tower`, `warehouse`, `hall`, `farm`), a size and its blocks.
+A town of a faction hostile to the player is a stronghold: kill its
+`garrison` and it is liberated, becoming the player's outpost.
+
+```json
+"settlements": [{ "id": "yourname:keep", "name": "Keep", "layout": "fortress", "faction": "yourname:order",
+  "biomes": ["yourname:ruins"], "road": "yourname:paving", "foundation": "yourname:paving", "wall": "yourname:plate",
+  "names": ["Vigil", "Last Bell"],
+  "buildings": [{ "id": "yourname:chapel", "name": "Chapel", "role": "hall", "width": 9, "depth": 11, "wall": "yourname:stone", "maxCount": 1 }],
+  "garrison": [{ "enemy": "yourname:knight", "count": 3 }] }]
+```
+
+**Survival** is the standard hunger, thirst and warmth unless a pack
+defines its own `needs`. `consumables` restore needs (by need id) and may
+heal or grant timed `modifiers`; `recipes` turn `inputs` into an `output`,
+at a `station` (a block id, or `stratum:fire` for any fire); `forage`
+yields an `item` at a `chance` when a `block` (or any block of a
+`material`) is broken. Regions carry a `temperature` from -1 to 1, which
+is what makes a night in the snow dangerous. A pack that defines no food
+adds its recipes and forage rules on top of the standard ones.
+
+**Strategy** is the standard economy (food, timber, stone, metal; hearths,
+farms, quarries, forges, barracks, watchtowers, palisades) unless a pack
+defines `resources` or `structures`. `units` are soldiers an outpost
+trains: an `actor` (an enemy id, the body that walks the world), a `cost`,
+the structure it `requires` and the `defense` it adds while garrisoned.
+
+```json
+"units": [{ "id": "yourname:oathsworn", "name": "Oathsworn", "actor": "yourname:knight",
+  "cost": { "stratum:food": 15, "stratum:metal": 6 }, "requires": "stratum:barracks", "defense": 9 }]
+```
+
+**Rules** are how the pack suggests its worlds be played; the player sees
+them as the starting point on the home screen and can change any of them:
+`survival` (`off`, `gentle`, `harsh`), `townDensity`, `monsterDensity`,
+`raids`, `dayLengthMinutes`, `startInTown`, `lootMultiplier`,
+`experienceMultiplier`, `deathPenalty`.
+
+**Agents** are the studio crew a pack brings. Each writes some `sections`
+of a new pack (by their names in this file), after the roles it
+`dependsOn`, following its `brief`; `requiresApproval` makes it wait for a
+person. A pack that brings none gets the standard crew: loremaster,
+cartographer, bestiary, architect, steward, warlord, arbiter.
+
+```json
+"agents": [{ "id": "yourname:chronicler", "name": "Chronicler", "sections": ["lore", "factions"],
+  "brief": "Write as the Order's chronicle: grim, liturgical, certain.", "requiresApproval": true }]
 ```
 
 ## Other formats

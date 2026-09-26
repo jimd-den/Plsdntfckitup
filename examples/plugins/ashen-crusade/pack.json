@@ -1,0 +1,147 @@
+{
+  "id": "ashen.crusade",
+  "name": "The Ashen Crusade",
+  "author": "Stratum",
+  "version": "1.0.0",
+  "description": "Faith, rust and rot.",
+
+  "damageTypes": [
+    { "id": "ash:rot", "name": "Rot", "color": "#FF8BC34A", "symbol": "☣" }
+  ],
+
+  "blocks": [
+    { "id": "ash:ferrocrete", "name": "Ferrocrete", "material": "stone", "hardness": 2.4, "topColor": "#FF6E6A66", "sideColor": "#FF4E4B48" },
+    { "id": "ash:rust_plate", "name": "Rust Plate", "material": "metal", "hardness": 3.0, "topColor": "#FF8D4A2B", "sideColor": "#FF5E2F1B" },
+    { "id": "ash:ash_drift", "name": "Ash Drift", "material": "soil", "hardness": 0.4, "topColor": "#FF9A958F", "sideColor": "#FF77726C" },
+    { "id": "ash:fungus_mat", "name": "Fungus Mat", "material": "foliage", "hardness": 0.3, "topColor": "#FF6B8E23", "sideColor": "#FF4B6618" },
+    { "id": "ash:votive_brazier", "name": "Votive Brazier", "material": "metal", "light": 12, "solid": false, "opaque": false, "glyph": "🕯", "topColor": "#FFFFB74D", "sideColor": "#FF8D5A1B" }
+  ],
+
+  "biomes": [
+    {
+      "id": "ash:hive_ruins",
+      "name": "Hive Ruins",
+      "description": "Collapsed habs under a sky of falling ash.",
+      "surface": "ash:ash_drift",
+      "subsurface": "ash:ferrocrete",
+      "filler": "igbo:granite",
+      "roughness": 0.6,
+      "temperature": -0.4,
+      "scatter": [ { "block": "ash:fungus_mat", "chance": 0.06, "height": 1 } ],
+      "deposits": [ { "block": "igbo:iron_ore", "minZ": 2, "maxZ": 10, "chance": 0.08 } ]
+    }
+  ],
+
+  "factions": [
+    {
+      "id": "ash:crusade",
+      "name": "The Ashen Crusade",
+      "description": "Knights of a dead god who still answer its bells.",
+      "color": "#FFB0BEC5",
+      "glyph": "✠",
+      "defaultStance": "neutral",
+      "startingStanding": 110,
+      "relations": { "ash:rot_choir": "hostile" },
+      "ranks": [
+        { "name": "Penitent", "threshold": 100 },
+        { "name": "Brother-Militant", "threshold": 300, "modifiers": [ { "stat": "armour", "kind": "flat", "value": 5 } ] }
+      ]
+    },
+    {
+      "id": "ash:rot_choir",
+      "name": "The Rot Choir",
+      "description": "They sing, and the hives decay.",
+      "color": "#FF8BC34A",
+      "glyph": "☣",
+      "defaultStance": "hostile",
+      "relations": { "ash:crusade": "hostile" }
+    }
+  ],
+
+  "enemies": [
+    {
+      "id": "ash:crusader", "name": "Crusader", "rank": "elite", "damageType": "igbo:physical",
+      "faction": "ash:crusade", "role": "melee", "spawnWeight": 0,
+      "stats": { "maxHealth": 180, "attackPower": 16, "armour": 8 }, "moveSpeed": 2.6, "bodyColor": "#FFB0BEC5"
+    },
+    {
+      "id": "ash:crossbow_sister", "name": "Crossbow Sister", "damageType": "igbo:physical",
+      "faction": "ash:crusade", "role": "ranged", "spawnWeight": 0,
+      "stats": { "maxHealth": 110, "attackPower": 13, "attackRange": 6 }, "bodyColor": "#FFCFD8DC"
+    },
+    {
+      "id": "ash:rot_thrall", "name": "Rot Thrall", "rank": "minion", "damageType": "ash:rot",
+      "faction": "ash:rot_choir", "role": "swarmer", "spawnBiomes": ["ash:hive_ruins"], "spawnWeight": 60,
+      "stats": { "maxHealth": 40, "attackPower": 6 }, "moveSpeed": 3.0, "bodyColor": "#FF7CB342"
+    },
+    {
+      "id": "ash:bloat_brute", "name": "Bloat Brute", "rank": "elite", "damageType": "ash:rot",
+      "faction": "ash:rot_choir", "role": "brute", "spawnBiomes": ["ash:hive_ruins"], "spawnWeight": 15,
+      "stats": { "maxHealth": 260, "attackPower": 20, "armour": 4 }, "moveSpeed": 1.6, "bodyColor": "#FF558B2F"
+    },
+    {
+      "id": "ash:rot_cantor", "name": "Rot Cantor", "damageType": "ash:rot",
+      "faction": "ash:rot_choir", "role": "support", "spawnBiomes": ["ash:hive_ruins"], "spawnWeight": 10,
+      "stats": { "maxHealth": 90, "attackPower": 9, "attackRange": 5 }, "bodyColor": "#FF9CCC65"
+    }
+  ],
+
+  "enemyPacks": [
+    {
+      "id": "ash:choir_warband", "name": "Choir Warband", "leader": "ash:rot_cantor",
+      "members": [ { "enemy": "ash:rot_thrall", "count": 5 }, { "enemy": "ash:bloat_brute", "count": 1 } ],
+      "spawnBiomes": ["ash:hive_ruins"], "weight": 60
+    }
+  ],
+
+  "settlements": [
+    {
+      "id": "ash:bastion", "name": "Crusade Bastion", "layout": "fortress", "faction": "ash:crusade",
+      "biomes": ["ash:hive_ruins"], "road": "ash:ferrocrete", "foundation": "ash:ferrocrete", "wall": "ash:rust_plate", "wallHeight": 4,
+      "names": ["Bastion Vigil", "Last Bell", "Ironhope"],
+      "buildings": [
+        { "id": "ash:chapel", "name": "Chapel", "role": "hall", "width": 9, "depth": 11, "height": 6, "wall": "ash:ferrocrete", "roof": "ash:rust_plate", "furniture": "ash:votive_brazier", "maxCount": 1 },
+        { "id": "ash:barrack_hab", "name": "Barrack Hab", "role": "barracks", "width": 7, "depth": 5, "wall": "ash:ferrocrete", "roof": "ash:rust_plate" },
+        { "id": "ash:hab", "name": "Hab", "role": "house", "wall": "ash:ferrocrete", "roof": "ash:rust_plate", "weight": 200 }
+      ],
+      "garrison": [ { "enemy": "ash:crusader", "count": 3 }, { "enemy": "ash:crossbow_sister", "count": 2 } ]
+    },
+    {
+      "id": "ash:rot_camp", "name": "Rot Camp", "layout": "camp", "faction": "ash:rot_choir",
+      "biomes": ["ash:hive_ruins"], "road": "ash:ash_drift", "foundation": "ash:fungus_mat",
+      "names": ["The Sour Nave", "Weeping Pit"],
+      "buildings": [
+        { "id": "ash:rot_tent", "name": "Rot Tent", "role": "house", "width": 5, "depth": 5, "height": 3, "wall": "ash:fungus_mat" }
+      ],
+      "garrison": [ { "enemy": "ash:rot_thrall", "count": 6 }, { "enemy": "ash:bloat_brute", "count": 1 }, { "enemy": "ash:rot_cantor", "count": 1 } ]
+    }
+  ],
+
+  "recipes": [
+    { "id": "ash:grub_stew", "name": "Grub stew", "inputs": { "stratum:raw_meat": 1, "stratum:berries": 1 }, "output": "stratum:cooked_meat", "count": 2, "station": "stratum:fire" }
+  ],
+  "forage": [
+    { "item": "stratum:berries", "chance": 0.3, "block": "ash:fungus_mat" }
+  ],
+
+  "units": [
+    { "id": "ash:oathsworn", "name": "Oathsworn", "actor": "ash:crusader", "cost": { "stratum:food": 15, "stratum:metal": 6 }, "requires": "stratum:barracks", "defense": 9 },
+    { "id": "ash:sister", "name": "Crossbow Sister", "actor": "ash:crossbow_sister", "cost": { "stratum:food": 12, "stratum:timber": 8 }, "requires": "stratum:barracks", "defense": 6 }
+  ],
+
+  "rules": { "survival": "harsh", "townDensity": 0.8, "monsterDensity": 1.4, "raids": true, "dayLengthMinutes": 30 },
+
+  "agents": [
+    {
+      "id": "ash:chronicler", "name": "Chronicler", "glyph": "✠",
+      "description": "Writes the Crusade's saints, relics and heresies in its own voice.",
+      "sections": ["lore", "factions"],
+      "brief": "Everything is written as a Crusade chronicle: grim, liturgical, and certain of its own righteousness. New factions are heresies or splinter orders.",
+      "requiresApproval": true
+    }
+  ],
+
+  "lore": [
+    { "id": "ash:lore_bells", "title": "The Bells of Ironhope", "body": "When the last bell rings, every Oathsworn in earshot turns toward it, and the Choir learns what faith sounds like.", "category": "history", "subject": "ash:bastion" }
+  ]
+}
