@@ -27,12 +27,19 @@ import com.stratum.core.domain.status.StatusSet
  */
 internal class PlayerProfile(
     private val content: AssembledContent,
-    /** The player's stats with [extra] modifiers folded into the build: gear, inserts, boons and survival included. */
-    private val statsWith: (PlayerState, List<StatModifier>) -> CombatStats,
-    /** Modifiers from outside the build, such as survival's, for the extended stats. */
+    /** Boons and banes from tabletop checks, which change the resolved stats for a while. */
+    private val table: TableState,
+    /** Modifiers from outside the build, such as survival's. */
     private val environment: (PlayerState) -> List<StatModifier>,
     private val supports: (PlayerState, String) -> List<SupportDefinition>,
 ) {
+    private val damageTypeIds = content.damageTypes.map { it.id }
+
+    /** The player's stats with [extra] modifiers folded into the build: gear, inserts, needs and boons included. */
+    fun statsWith(player: PlayerState, extra: List<StatModifier>): CombatStats {
+        val built = if (extra.isEmpty()) player else player.copy(build = player.build + extra)
+        return table.applyTo(StatSheet(environment(player)).applyTo(built.combatStatsWith(content::insert, damageTypeIds), damageTypeIds))
+    }
     private var cachedKey: Any? = null
     private var cachedTraits: CombatTraits = CombatTraits.NONE
 
