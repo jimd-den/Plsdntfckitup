@@ -1,6 +1,5 @@
 package com.stratum.engine.crowd
 
-import java.util.PriorityQueue
 import kotlin.math.sqrt
 
 /** A direction or offset on the ground plane. */
@@ -87,39 +86,49 @@ class FlowField private constructor(
             Triple(1, 1, DIAGONAL), Triple(1, -1, DIAGONAL), Triple(-1, 1, DIAGONAL), Triple(-1, -1, DIAGONAL),
         )
 
+        // The same eight, unboxed, for the search's inner loop.
+        private val NX = IntArray(NEIGHBOURS.size) { NEIGHBOURS[it].first }
+        private val NY = IntArray(NEIGHBOURS.size) { NEIGHBOURS[it].second }
+        private val NCOST = IntArray(NEIGHBOURS.size) { NEIGHBOURS[it].third }
+
         /** Searches outward from the goal (Dijkstra), [radius] cells each way. */
         fun build(goalX: Int, goalY: Int, goalZ: Int, radius: Int, grid: NavGrid): FlowField {
             val side = radius * 2 + 1
             val distances = IntArray(side * side) { UNREACHABLE }
             val heights = IntArray(side * side)
-            val queue = PriorityQueue<Long>(compareBy { it ushr 32 })
+            // A heap of (cost << 32 | cell) in a plain long array. The boxed
+            // queue it replaces allocated on every push and every comparison,
+            // and a chase rebuilds this field four times a second.
+            val queue = LongHeap(side * 4)
             fun key(lx: Int, ly: Int) = ly * side + lx
             val start = key(radius, radius)
             distances[start] = 0
             heights[start] = goalZ
-            queue.add(start.toLong())
-            while (queue.isNotEmpty()) {
-                val entry = queue.poll()
+            queue.push(start.toLong())
+            while (queue.isNotEmpty) {
+                val entry = queue.pop()
                 val cell = (entry and 0xFFFFFFFFL).toInt()
                 val cost = (entry ushr 32).toInt()
                 if (cost > distances[cell]) continue
                 val lx = cell % side
                 val ly = cell / side
-                NEIGHBOURS.forEach { (dx, dy, stepCost) ->
+                for (n in NX.indices) {
+                    val dx = NX[n]
+                    val dy = NY[n]
                     val nx = lx + dx
                     val ny = ly + dy
-                    if (nx !in 0 until side || ny !in 0 until side) return@forEach
+                    if (nx !in 0 until side || ny !in 0 until side) continue
                     // No cutting corners: a diagonal needs both sides open, or bodies clip walls.
-                    if (dx != 0 && dy != 0 && (blocked(grid, goalX, goalY, radius, lx + dx, ly, heights[cell]) || blocked(grid, goalX, goalY, radius, lx, ly + dy, heights[cell]))) return@forEach
-                    val z = grid.standingZ(goalX + nx - radius, goalY + ny - radius, heights[cell]) ?: return@forEach
+                    if (dx != 0 && dy != 0 && (blocked(grid, goalX, goalY, radius, lx + dx, ly, heights[cell]) || blocked(grid, goalX, goalY, radius, lx, ly + dy, heights[cell]))) continue
+                    val z = grid.standingZ(goalX + nx - radius, goalY + ny - radius, heights[cell]) ?: continue
                     // Searched from the goal outward, so the body walks the other way: it climbs what we descend.
-                    if (heights[cell] - z > STEP_UP || z - heights[cell] > STEP_DOWN) return@forEach
+                    if (heights[cell] - z > STEP_UP || z - heights[cell] > STEP_DOWN) continue
                     val next = key(nx, ny)
-                    val total = distances[cell] + stepCost
+                    val total = distances[cell] + NCOST[n]
                     if (total < distances[next]) {
                         distances[next] = total
                         heights[next] = z
-                        queue.add((total.toLong() shl 32) or next.toLong())
+                        queue.push((total.toLong() shl 32) or next.toLong())
                     }
                 }
             }
@@ -189,5 +198,42 @@ class FlowFieldCache(private val radius: Int = DEFAULT_RADIUS, private val minRe
     companion object {
         const val DEFAULT_RADIUS = 24
         const val REBUILD_SECONDS = 0.25f
+    }
+}
+
+/** A min-heap of longs, ordered by value, with no boxing. Enough for a Dijkstra frontier. */
+internal class LongHeap(capacity: Int) {
+    private var items = LongArray(capacity.coerceAtLeast(16))
+    private var size = 0
+
+    val isNotEmpty: Boolean get() = size > 0
+
+    fun push(value: Long) {
+        if (size == items.size) items = items.copyOf(size * 2)
+        var i = size++
+        while (i > 0) {
+            val parent = (i - 1) ushr 1
+            if (items[parent] <= value) break
+            items[i] = items[parent]
+            i = parent
+        }
+        items[i] = value
+    }
+
+    fun pop(): Long {
+        val top = items[0]
+        val last = items[--size]
+        var i = 0
+        while (true) {
+            val left = i * 2 + 1
+            if (left >= size) break
+            val right = left + 1
+            val child = if (right < size && items[right] < items[left]) right else left
+            if (items[child] >= last) break
+            items[i] = items[child]
+            i = child
+        }
+        items[i] = last
+        return top
     }
 }

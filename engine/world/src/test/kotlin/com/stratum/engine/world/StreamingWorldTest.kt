@@ -21,6 +21,33 @@ class StreamingWorldTest {
     )
 
     @Test
+    fun `crossing a border generates the ground near the player now and the far edge a few chunks at a time`() {
+        val cfg = WorldConfig(seed = 4242L, simulationRadius = 4)
+        val world = world(cfg)
+        world.focusOn(ChunkPos(0, 0))
+        assertEquals(81, world.loadedChunks.size, "a new world loads its whole window")
+
+        world.focusOn(ChunkPos(1, 0), urgentRadius = 2)
+        assertEquals(72, world.loadedChunks.size, "the far column waits; the near ones were already there")
+        assertEquals(9, world.pendingCount)
+
+        assertEquals(2, world.pump(2))
+        assertTrue(world.isLoaded(ChunkPos(5, 0)), "nearest first: the chunk level with the player")
+        while (world.pendingCount > 0) world.pump(2)
+        assertEquals(81, world.loadedChunks.size)
+    }
+
+    @Test
+    fun `a quick run that outpaces the queue still stands on generated ground`() {
+        val world = world(WorldConfig(seed = 4242L, simulationRadius = 4))
+        world.focusOn(ChunkPos(0, 0))
+        for (x in 1..6) {
+            world.focusOn(ChunkPos(x, 0), urgentRadius = 2)
+            for (dx in -2..2) for (dy in -2..2) assertTrue(world.isLoaded(ChunkPos(x + dx, dy)))
+        }
+    }
+
+    @Test
     fun `focusing loads exactly the configured window`() {
         val world = world()
         val delta = world.focusOn(ChunkPos(0, 0))

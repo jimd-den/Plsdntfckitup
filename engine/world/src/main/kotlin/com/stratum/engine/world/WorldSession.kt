@@ -154,7 +154,9 @@ class WorldSession private constructor(private val parts: SessionParts) :
         val hindered = if (combat.playerStunned(player)) 0f else 1f - combat.playerSlow(player)
         val pace = (player.sheet(content::insert) + parts.survival.modifiers()).multiplier(Stat.MOVE_SPEED) * hindered
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
-        streamingWorld.focusOn(player.blockPos)
+        // The ground around the player now; the rest of the window a couple of chunks a tick.
+        streamingWorld.focusOn(player.blockPos, URGENT_STREAM_RADIUS)
+        streamingWorld.pump(STREAM_BUDGET)
         encounters.populateMarkers()
 
         val news = parts.politics.advance(deltaSeconds)
@@ -241,7 +243,7 @@ class WorldSession private constructor(private val parts: SessionParts) :
     fun move(dx: Float, dy: Float): MoveOutcome {
         val outcome = motion.step(player, dx, dy)
         player = outcome.player
-        if (outcome.moved) streamingWorld.focusOn(player.blockPos)
+        if (outcome.moved) streamingWorld.focusOn(player.blockPos, URGENT_STREAM_RADIUS)
         return outcome
     }
 
@@ -316,6 +318,14 @@ class WorldSession private constructor(private val parts: SessionParts) :
     val sandbox: SandboxTools? = if (config.rules.sandbox) SandboxTools(this, combat) else null
 
     companion object {
+        /**
+         * Chunks each way from the player's that are generated the tick they
+         * are needed. Beyond it the window is filled [STREAM_BUDGET] a tick:
+         * the player is always at least this far from ungenerated ground, and
+         * crossing a chunk border no longer generates a whole row at once.
+         */
+        const val URGENT_STREAM_RADIUS = 2
+        const val STREAM_BUDGET = 2
         const val PICKUP_RADIUS = GroundItems.PICKUP_RADIUS
         const val BASE_DROP_CHANCE = LootDrops.BASE_DROP_CHANCE
         const val INSERT_DROP_CHANCE = LootDrops.INSERT_DROP_CHANCE

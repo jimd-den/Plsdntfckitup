@@ -90,7 +90,23 @@ internal class PlayerProfile(
     }
 
     /** Passives, gear and set bonuses, then the environment and what holds right now. */
-    fun sheet(player: PlayerState, extras: List<StatModifier>): StatSheet = player.sheet(content::insert) + environment(player) + extras
+    fun sheet(player: PlayerState, extras: List<StatModifier>): StatSheet = baseSheet(player) + environment(player) + extras
+
+    // Passives and gear change a few times a minute; recovery and every hit
+    // asked for them every tick, rebuilding the sheet from every item worn.
+    // Both are immutable, so a new object is the only way either changes.
+    private var sheetBuild: StatSheet? = null
+    private var sheetEquipment: Any? = null
+    private var cachedSheet: StatSheet = StatSheet.EMPTY
+
+    private fun baseSheet(player: PlayerState): StatSheet {
+        if (player.build !== sheetBuild || player.equipment !== sheetEquipment) {
+            cachedSheet = player.sheet(content::insert)
+            sheetBuild = player.build
+            sheetEquipment = player.equipment
+        }
+        return cachedSheet
+    }
 
     fun attacker(player: PlayerState, own: StatusSet, target: StatusSet?, skill: SkillDefinition): HitAttacker {
         val extras = extras(player, own, target, skill)
