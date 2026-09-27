@@ -121,6 +121,9 @@ class PlayViewModel(
 
     private val initialQuality = quality
 
+    /** The world's settings now: a sandbox that lifts its caps is rebuilt with different ones. */
+    private var worldConfig = config
+
     /**
      * Replaced wholesale by [newRun]. Every reader goes through this field
      * rather than capturing it, so starting a fresh world cannot leave a lambda
@@ -435,6 +438,7 @@ class PlayViewModel(
                 elapsed += delta
 
                 val events = session.tick(delta)
+                session.sandbox?.advance(delta)
                 autosave()
                 if (events.isEmpty()) {
                     publish()
@@ -490,7 +494,7 @@ class PlayViewModel(
     private fun newWorld(difficulty: Difficulty) {
         miningJob?.cancel()
         loopJob?.cancel()
-        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
+        session = WorldSession(content, worldConfig.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
         persist()
         // The panels belong to the run that just ended; a fresh world opens on
         // the world, not on someone else's bag.
@@ -507,9 +511,42 @@ class PlayViewModel(
         publish()
     }
 
+    /** Wears a bagged item: in the slot the gear panel is looking at when it fits there, or wherever it goes. */
     fun equip(instanceId: String) {
-        publish(message = describe(session.equip(instanceId)))
+        val slot = _state.value.gearSlot?.takeIf { slot -> session.player.itemById(instanceId)?.slot?.fits?.contains(slot) == true }
+        _state.value = _state.value.copy(gearInspected = null)
+        publish(message = describe(session.equip(instanceId, slot)))
     }
+
+    /** Looks at one place on the paper doll; the same one again looks at the whole bag. */
+    fun selectGearSlot(slot: com.stratum.core.domain.item.EquipmentSlot?) {
+        val current = _state.value.gearSlot
+        _state.value = _state.value.copy(gearSlot = if (slot == current) null else slot, gearInspected = null)
+        publish()
+    }
+
+    /** Reads one item in full; null puts it down. */
+    fun inspectItem(instanceId: String?) {
+        _state.value = _state.value.copy(gearInspected = instanceId.takeIf { it != _state.value.gearInspected })
+        publish()
+    }
+
+    /** What the satchel draws, worked out only while it is open. */
+    private fun gearPanel(): GearPanelState {
+        if (!_state.value.satchelOpen) return GearPanelState()
+        val catalogue = session.content.itemCatalogue
+        return GearPanelBuilder.build(
+            player = session.player,
+            selectedSlot = _state.value.gearSlot,
+            inspectedId = _state.value.gearInspected,
+            inserts = insertFor,
+            setInfo = { id -> catalogue.set(id)?.let { SetInfo(it.name, catalogue.piecesOf(id).size) } },
+            statsOf = session::statsFor,
+            damageTypeNames = damageTypeNames,
+        )
+    }
+
+    private val damageTypeNames: Map<String, String> = content.damageTypes.associate { it.id to it.name }
 
     fun unequip(slot: com.stratum.core.domain.item.EquipmentSlot) {
         publish(message = describe(session.unequip(slot)))
@@ -813,6 +850,9 @@ class PlayViewModel(
             telegraphs = snapshot.telegraphs,
             flasks = snapshot.flasks,
             hero = heroPanel(),
+            gear = gearPanel(),
+            sandbox = sandboxPanel(),
+            lifePaysCosts = com.stratum.core.domain.combat.Keystone.LIFE_PAYS_COSTS in session.keystones,
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
         )
@@ -829,8 +869,18 @@ class PlayViewModel(
             heldSupports = session.heldSupports,
             tier = session.difficulty.tier,
             worldMods = session.difficulty.mods,
+            breakdown = if (panel.tab == HeroTab.STATS) session.explain(panel.query) else null,
+            damageTypes = damageTypeChoices,
         )
     }
+
+    /** Explains another number on the stats page. */
+    fun explainHeroStat(query: com.stratum.core.domain.sandbox.StatQuery) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(query = query))
+        publish()
+    }
+
+    private val damageTypeChoices = content.damageTypes.map { NamedChoice(it.id, it.name, color = it.color) }
 
     private fun displayName(blockId: String): String =
         session.content.registry.indexOrNull(blockId)
@@ -863,6 +913,7 @@ class PlayViewModel(
 
     fun selectHeroTab(tab: HeroTab) {
         _state.value = _state.value.copy(hero = _state.value.hero.copy(tab = tab))
+        publish()
     }
 
     /** Selects a node and lights the path to it, so the player sees the cost before paying it. */
@@ -957,6 +1008,8 @@ class PlayViewModel(
     }
 
     private fun persist() {
+        // A sandbox hero is conjured, not earned: it never writes over the real one.
+        if (session.rules.sandbox) return
         savedAtElapsed = elapsed
         savedLevel = session.player.level
         val save = session.heroSave(savedAt = System.currentTimeMillis())
@@ -965,10 +1018,151 @@ class PlayViewModel(
 
     override fun onCleared() {
         // Straight away rather than launched: the scope is about to be cancelled.
-        saveHero(session.heroSave(savedAt = System.currentTimeMillis()))
+        if (!session.rules.sandbox) saveHero(session.heroSave(savedAt = System.currentTimeMillis()))
         miningJob?.cancel()
         loopJob?.cancel()
         super.onCleared()
+    }
+
+    // ---- the build sandbox ----------------------------------------------------
+
+    fun toggleSandbox() {
+        val panel = _state.value.sandbox
+        _state.value = _state.value.copy(sandbox = panel.copy(open = !panel.open))
+        publish()
+    }
+
+    fun selectSandboxTab(tab: SandboxTab) = updateSandbox { it.copy(tab = tab) }
+
+    fun filterSandboxSlot(slot: com.stratum.core.domain.item.ItemSlot?) = updateSandbox { it.copy(slotFilter = slot) }
+
+    fun setSandboxItemLevel(level: Int) = updateSandbox { it.copy(itemLevel = level.coerceIn(1, com.stratum.engine.world.SandboxTools.MAX_ITEM_LEVEL)) }
+
+    fun setSandboxRarity(rarity: ItemRarity) = updateSandbox { it.copy(rarity = rarity) }
+
+    fun setDummy(spec: com.stratum.core.domain.sandbox.DummySpec) = updateSandbox { it.copy(dummy = spec) }
+
+    fun explainSandboxStat(query: com.stratum.core.domain.sandbox.StatQuery) = updateSandbox { it.copy(query = query) }
+
+    fun spawnBase(baseId: String) = sandboxDo {
+        val panel = _state.value.sandbox
+        it.spawnItem(com.stratum.engine.world.ItemRequest(baseId = baseId, itemLevel = panel.itemLevel, rarity = panel.rarity))
+    }
+
+    fun spawnUnique(uniqueId: String) = sandboxDo { it.spawnItem(com.stratum.engine.world.ItemRequest(uniqueId = uniqueId, itemLevel = _state.value.sandbox.itemLevel)) }
+
+    fun rerollItem(instanceId: String) = sandboxDo { it.reroll(instanceId) }
+
+    fun setHeroLevel(level: Int) = sandboxDo { it.setLevel(level) }
+
+    fun respec() = sandboxDo { it.respec() }
+
+    fun grantCurrency(currencyId: String) = sandboxDo { it.grantCurrency(currencyId) }
+
+    fun grantSupport(supportId: String) = sandboxDo { it.grantSupport(supportId) }
+
+    fun grantEverything() = sandboxDo { it.grantEverything() }
+
+    fun spawnDummy() = sandboxDo { it.spawnDummy(_state.value.sandbox.dummy) }
+
+    fun healDummies() = sandboxDo { it.healDummies() }
+
+    fun clearDummies() = sandboxDo { it.clearDummies() }
+
+    fun spawnMonster(definitionId: String) = sandboxDo { it.spawnMonster(definitionId) }
+
+    fun resetMeter() {
+        session.sandbox?.meter?.reset()
+        publish(message = "Meter reset")
+    }
+
+    /** Writes the build down as a one-line code, shown in the panel to copy. */
+    fun exportBuild(): String? {
+        val tools = session.sandbox ?: return null
+        val code = com.stratum.core.domain.sandbox.BuildCode.toCode(tools.exportBuild())
+        _state.value = _state.value.copy(sandbox = _state.value.sandbox.copy(exported = code))
+        publish(message = "Build code ready to copy")
+        return code
+    }
+
+    /**
+     * Takes on a shared build. A class is chosen when a world is made, so the
+     * build arrives in a new sandbox world rather than on this body.
+     */
+    fun importBuild(text: String) {
+        val tools = session.sandbox ?: return publish(message = "Builds are tried on in a sandbox world")
+        tools.importBuild(text).fold(
+            onSuccess = { imported ->
+                val skipped = imported.skipped.takeIf { it.isNotEmpty() }?.let { " (${it.size} pieces left out: ${it.joinToString("; ")})" }.orEmpty()
+                replaceWorld(worldConfig, imported.hero, "Build imported$skipped")
+            },
+            onFailure = { publish(message = it.message ?: "That is not a build") },
+        )
+    }
+
+    /** Lifts every cap or puts them back. Caps are a rule of the world, so the world is made again around the same hero. */
+    fun toggleCaps() {
+        if (session.sandbox == null) return
+        val lifted = worldConfig.rules.combat == com.stratum.core.domain.combat.CombatRules.UNBOUND
+        val combat = if (lifted) com.stratum.core.domain.combat.CombatRules() else com.stratum.core.domain.combat.CombatRules.UNBOUND
+        replaceWorld(worldConfig.copy(rules = worldConfig.rules.copy(combat = combat)), session.heroSave(), if (lifted) "Caps restored" else "Every cap lifted")
+    }
+
+    /** The same world again, with [config] and [hero]: the seed is kept, so it is the same ground under their feet. */
+    private fun replaceWorld(config: WorldConfig, hero: HeroSave, message: String) {
+        miningJob?.cancel()
+        loopJob?.cancel()
+        worldConfig = config
+        session = WorldSession(content, config, heroClassId, difficulty = session.difficulty, hero = hero)
+        val panel = _state.value.sandbox
+        _state.value = initialState(content).copy(sandbox = panel.copy(exported = null))
+        publish(message = message)
+        startLoop()
+    }
+
+    private fun updateSandbox(change: (SandboxPanelState) -> SandboxPanelState) {
+        _state.value = _state.value.copy(sandbox = change(_state.value.sandbox))
+        publish()
+    }
+
+    private fun sandboxDo(action: (com.stratum.engine.world.SandboxTools) -> com.stratum.engine.world.SandboxResult) {
+        val tools = session.sandbox ?: return
+        publish(message = describe(action(tools)))
+    }
+
+    private fun describe(result: com.stratum.engine.world.SandboxResult): String = when (result) {
+        is com.stratum.engine.world.SandboxResult.ItemMade -> "Made ${result.item.name}"
+        is com.stratum.engine.world.SandboxResult.Rerolled -> "Rerolled into ${result.after.name}"
+        is com.stratum.engine.world.SandboxResult.Granted -> "Granted ${result.name}" + if (result.count > 1) " ×${result.count}" else ""
+        is com.stratum.engine.world.SandboxResult.LevelSet -> "Level ${result.level}"
+        is com.stratum.engine.world.SandboxResult.Respecced -> "Gave back ${result.nodes} passives"
+        is com.stratum.engine.world.SandboxResult.Spawned -> result.enemies.singleOrNull()?.let { "${it.name} stands ready" } ?: "${result.enemies.size} stand ready"
+        is com.stratum.engine.world.SandboxResult.Cleared -> "${result.count} dummies"
+        com.stratum.engine.world.SandboxResult.NotFound -> "The loaded packs have no such thing"
+        is com.stratum.engine.world.SandboxResult.Refused -> result.reason
+    }
+
+    /** What the sandbox panel and the meter chip draw; lists only for the page that is open. */
+    private fun sandboxPanel(): SandboxPanelState {
+        val tools = session.sandbox ?: return SandboxPanelState()
+        val panel = _state.value.sandbox
+        val open = panel.open
+        val catalogue = session.content.itemCatalogue
+        return panel.copy(
+            active = true,
+            capsLifted = tools.capsLifted,
+            meter = tools.meter.report(),
+            damageTypes = damageTypeChoices,
+            dummies = tools.dummies.size,
+            bases = if (open && panel.tab == SandboxTab.ITEMS) tools.bases.filter { panel.slotFilter == null || it.slot == panel.slotFilter }
+                .map { NamedChoice(it.id, it.name, "${it.slot.name.lowercase()} · level ${it.requiredLevel}") } else emptyList(),
+            uniques = if (open && panel.tab == SandboxTab.ITEMS) tools.uniques.filter { unique -> panel.slotFilter == null || catalogue.base(unique.baseId)?.slot == panel.slotFilter }
+                .map { NamedChoice(it.id, it.name, it.setId?.let { id -> "set: ${catalogue.set(id)?.name ?: id}" } ?: "unique", color = session.content.rarityColor(if (it.setId != null) ItemRarity.SET else ItemRarity.UNIQUE)) } else emptyList(),
+            currencies = if (open && panel.tab == SandboxTab.HERO) session.content.currencies.map { NamedChoice(it.id, it.name, "×${session.player.currencyCount(it.id)}", it.color) } else emptyList(),
+            supports = if (open && panel.tab == SandboxTab.HERO) session.content.supports.map { NamedChoice(it.id, it.name, "×${session.player.supportCount(it.id)}", it.color) } else emptyList(),
+            monsters = if (open && panel.tab == SandboxTab.TARGETS) tools.monsters.map { NamedChoice(it.id, it.name, if (tools.isBoss(it)) "boss" else it.rank.name.lowercase(), it.bodyColor) } else emptyList(),
+            breakdown = if (open && panel.tab == SandboxTab.BREAKDOWN) session.explain(panel.query) else null,
+        )
     }
 
     companion object {
@@ -1103,12 +1297,33 @@ data class PlayUiState(
     /** Blueprints the build tray offers to raise. */
     val blueprints: List<BlueprintChoice> = emptyList(),
     val onRaiseBlueprint: (String) -> Unit = {},
+    /** Skills cost life rather than resource: a keystone or a piece of gear says so. */
+    val lifePaysCosts: Boolean = false,
+    /** The paper doll and the bag, compared against the whole character. */
+    val gear: GearPanelState = GearPanelState(),
+    /** The place on the doll the satchel is looking at; null looks at the whole bag. */
+    val gearSlot: com.stratum.core.domain.item.EquipmentSlot? = null,
+    val gearInspected: String? = null,
+    /** The build sandbox, in a world that has one. */
+    val sandbox: SandboxPanelState = SandboxPanelState(),
 ) {
     val isDead: Boolean get() = !player.isAlive
 
     fun cooldownFraction(skill: SkillDefinition): Float = player.cooldowns.fractionRemaining(skill)
 
-    fun canAfford(skill: SkillDefinition): Boolean = player.resource >= skill.resourceCost
+    /** What one use of [skill] costs now: in life, when a keystone says skills are paid for in blood. */
+    fun costOf(skill: SkillDefinition): com.stratum.core.domain.actor.SkillCost =
+        com.stratum.core.domain.actor.SkillCost.of(skill, lifePaysCosts)
+
+    /** Whether the cast would be paid for: the same rule the cast itself applies, so a lit button is a castable skill. */
+    fun canAfford(skill: SkillDefinition): Boolean = costOf(skill).affordable(player.resource, player.health)
+
+    /** Charges ready now, for a skill that stores more than one. */
+    fun chargesLeft(skill: SkillDefinition): Int = player.cooldowns.chargesLeft(skill)
+
+    /** Whether the player is winding [skill] up this moment. */
+    fun isWindingUp(skill: SkillDefinition): Boolean =
+        telegraphs.any { !it.hostile && it.casterId == com.stratum.engine.world.WorldSession.PLAYER_ACTOR_ID && it.skillId == skill.id }
 
     /** Everything the player could craft on or socket, worn gear first. */
     val anvilItems: List<ItemInstance>

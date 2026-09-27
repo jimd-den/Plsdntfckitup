@@ -60,6 +60,36 @@ fun PlayScreen(
             onUnlinkSupport = viewModel::unlinkSupport,
             onEnterTier = viewModel::enterTier,
             onOpenWaystone = viewModel::openWaystone,
+            onExplain = viewModel::explainHeroStat,
+        )
+    }
+    val gearActions = remember(viewModel) {
+        GearActions(onSelectSlot = viewModel::selectGearSlot, onInspect = viewModel::inspectItem, onReroll = viewModel::rerollItem)
+    }
+    val sandboxActions = remember(viewModel) {
+        SandboxActions(
+            onToggle = viewModel::toggleSandbox,
+            onSelectTab = viewModel::selectSandboxTab,
+            onFilterSlot = viewModel::filterSandboxSlot,
+            onItemLevel = viewModel::setSandboxItemLevel,
+            onRarity = viewModel::setSandboxRarity,
+            onSpawnBase = viewModel::spawnBase,
+            onSpawnUnique = viewModel::spawnUnique,
+            onLevel = viewModel::setHeroLevel,
+            onRespec = viewModel::respec,
+            onGrantCurrency = viewModel::grantCurrency,
+            onGrantSupport = viewModel::grantSupport,
+            onGrantEverything = viewModel::grantEverything,
+            onToggleCaps = viewModel::toggleCaps,
+            onDummy = viewModel::setDummy,
+            onSpawnDummy = viewModel::spawnDummy,
+            onHealDummies = viewModel::healDummies,
+            onClearDummies = viewModel::clearDummies,
+            onSpawnMonster = viewModel::spawnMonster,
+            onResetMeter = viewModel::resetMeter,
+            onExplain = viewModel::explainSandboxStat,
+            onExport = { viewModel.exportBuild() },
+            onImport = viewModel::importBuild,
         )
     }
     val survivalActions = remember(viewModel) {
@@ -117,6 +147,8 @@ fun PlayScreen(
         heroActions = heroActions,
         survivalActions = survivalActions,
         realmActions = realmActions,
+        gearActions = gearActions,
+        sandboxActions = sandboxActions,
     )
 }
 
@@ -163,6 +195,8 @@ fun PlayScreenContent(
     heroActions: HeroActions = HeroActions(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
+    gearActions: GearActions = GearActions(),
+    sandboxActions: SandboxActions = SandboxActions(),
 ) {
     val colors = StratumTheme.colors
 
@@ -205,6 +239,9 @@ fun PlayScreenContent(
                     playerAnimation = state.playerAnimation,
                     animationFor = state.animationFor,
                     propModels = state.propModels,
+                    projectiles = state.projectiles,
+                    zones = state.zones,
+                    telegraphs = state.telegraphs,
                 ),
                 modifier = Modifier.fillMaxSize(),
                 onTapBlock = onTapBlock,
@@ -270,8 +307,10 @@ fun PlayScreenContent(
                 onSelectSlot = onSelectSlot,
                 onZoom = onZoom,
                 onOpenMenu = onOpenMenu,
-                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle),
+                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle) +
+                    listOfNotNull(DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active }),
                 onDrink = survivalActions.onDrink,
+                onOpenSandbox = sandboxActions.onToggle,
             )
         }
 
@@ -305,6 +344,7 @@ fun PlayScreenContent(
                 },
                 onClose = onToggleSatchel,
                 modifier = Modifier.fillMaxSize(),
+                actions = gearActions,
             )
         }
 
@@ -336,6 +376,10 @@ fun PlayScreenContent(
 
         if (state.hero.open && !state.isDead) {
             HeroOverlay(state = state, actions = heroActions)
+        }
+
+        if (state.sandbox.open && !state.isDead) {
+            SandboxOverlay(state = state, actions = sandboxActions)
         }
 
         if (state.isDead) {
@@ -424,10 +468,15 @@ private fun Hud(
     onOpenMenu: () -> Unit,
     dock: List<DockEntry>,
     onDrink: () -> Unit,
+    onOpenSandbox: () -> Unit = {},
 ) {
     Box(Modifier.fillMaxSize().safeContent().padding(Space.medium)) {
         Row(Modifier.align(Alignment.TopStart).fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            VitalsCard(state)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.tight)) {
+                VitalsCard(state)
+                // A sandbox shows its meter under the vitals: the one number a build is being tuned for.
+                if (state.sandbox.active) MeterChip(state.sandbox.meter, onOpenSandbox)
+            }
             Spacer(Modifier.weight(1f))
             if (landscape) {
                 ZoomPair(onZoom, horizontal = true)
@@ -526,9 +575,12 @@ private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (
             tint = Color(skill.color),
             cooldown = state.cooldownFraction(skill),
             enabled = state.canAfford(skill),
+            // Lit while it winds up, so a cast time reads as the skill working rather than the button ignoring the thumb.
+            active = state.isWindingUp(skill),
+            badge = skillBadge(state, skill),
         )
     }
-    // A flask's ring drains as its charges do, so the thumb can see it is empty before pressing.
+    // A flask's ring drains as its charges do, and its badge counts the drinks left.
     val flasks = state.flasks.mapIndexed { slot, flask ->
         ArcButton(
             glyph = flask.definition.glyph,
@@ -537,9 +589,21 @@ private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (
             tint = Color(flask.definition.color),
             cooldown = 1f - flask.fill,
             enabled = flask.canDrink,
+            badge = flask.uses.toString(),
         )
     }
     return listOf(roll) + skills + flasks
+}
+
+/**
+ * A skill button's corner: charges ready for a skill that stores several,
+ * otherwise the life a cast takes when life pays for it -- the one number
+ * that decides whether to press now.
+ */
+internal fun skillBadge(state: PlayUiState, skill: com.stratum.core.domain.actor.SkillDefinition): String? {
+    if (skill.charges > 1) return state.chargesLeft(skill).toString()
+    val life = state.costOf(skill).life
+    return if (life > 0) "♥$life" else null
 }
 
 /** The dock's entries, each shown only when the loaded packs give it something to do. */
