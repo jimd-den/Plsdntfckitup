@@ -3,6 +3,7 @@ package com.stratum.engine.world
 import com.stratum.core.domain.actor.EffectTarget
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.PendingCast
+import com.stratum.core.domain.actor.SkillCost
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.actor.SkillDelivery
 import com.stratum.core.domain.actor.SkillEffect
@@ -98,15 +99,12 @@ internal class CombatSystem(
         if (playerStunned(player)) return AttackReport.Stunned
         if (pendingPlayer != null) return AttackReport.NotReady
         if (!player.cooldowns.isReady(skill)) return AttackReport.OnCooldown
-        val lifePays = profile.traits(player).has(Keystone.LIFE_PAYS_COSTS)
-        val resourceCost = if (lifePays) 0 else skill.resourceCost
-        val lifeCost = skill.lifeCost + if (lifePays) skill.resourceCost else 0
-        if (player.resource < resourceCost) return AttackReport.NotEnoughResource
-        if (lifeCost > 0 && player.health <= lifeCost) return AttackReport.NotEnoughResource
+        val cost = SkillCost.of(skill, profile.traits(player).has(Keystone.LIFE_PAYS_COSTS))
+        if (!cost.affordable(player.resource, player.health)) return AttackReport.NotEnoughResource
         // Paid whether or not anything is standing there, so a skill cannot be spammed to scout for free.
         battle.player = player.copy(
-            resource = player.resource - resourceCost,
-            health = player.health - lifeCost,
+            resource = player.resource - cost.resource,
+            health = player.health - cost.life,
             cooldowns = player.cooldowns.started(skill),
         )
         triggers.beginAction()
