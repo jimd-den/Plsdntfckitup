@@ -148,3 +148,13 @@ class StreamingWorldTest {
         assertEquals(ChunkPos(-1, -1), world.focus)
     }
 }
+
+class StreamingRevisionTest {
+    @Test
+    fun `walking into new ground changes the world revision, so a painted layer repaints`() {
+        val session = WorldSession(TestContent.assembled, com.stratum.core.domain.world.WorldConfig(seed = 3L, simulationRadius = 1))
+        val before = session.snapshot().worldRevision
+        repeat(40) { session.move(1f, 0f); session.tick(0.1f) }
+        assertTrue(session.snapshot().worldRevision != before, "new chunks streamed in without the revision noticing")
+    }
+}

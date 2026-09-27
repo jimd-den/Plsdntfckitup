@@ -264,7 +264,9 @@ class WorldSession private constructor(private val parts: SessionParts) :
         playerAnimation = animationFor(PLAYER_ACTOR_ID),
         buildPreview = buildPreview,
         buildTool = buildTool,
-        worldRevision = streamingWorld.loadedChunks.sumOf { it.revision },
+        // Edits and streaming both: a chunk that streams in starts at revision
+        // zero, so the edit sum alone never changed when new ground arrived.
+        worldRevision = 31 * streamingWorld.loadedChunks.sumOf { it.revision } + streamingWorld.residency,
         enemies = enemies,
         groundLoot = groundLoot,
         groundInserts = groundInserts,
