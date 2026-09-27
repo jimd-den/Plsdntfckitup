@@ -59,7 +59,11 @@ class SceneGlRenderer(
     private var textures: List<Texture> = emptyList()
     private var maps: List<Texture> = emptyList()
 
-    @Volatile private var pending: SceneFrame? = null
+    /** The newest frame not yet taken by the GL thread. */
+    private val pending = java.util.concurrent.atomic.AtomicReference<SceneFrame?>(null)
+
+    /** The frame the GL thread is drawing, redrawn until a newer one arrives. GL thread only. */
+    private var current: SceneFrame? = null
     @Volatile private var pendingTextures: List<Texture>? = null
     @Volatile private var pendingMaps: List<Texture>? = null
 
@@ -104,7 +108,9 @@ class SceneGlRenderer(
 
     /** Hands a new frame to the GL thread. Cheap; call as often as the world changes. */
     fun submit(frame: SceneFrame) {
-        pending = frame
+        // A frame replaced before the GL thread took it was never read, so its
+        // arrays can go straight back for the next one.
+        pending.getAndSet(frame)?.release()
     }
 
     /** Switches quality tier; null goes back to the device's own. Takes effect on the next frame. */
@@ -150,7 +156,13 @@ class SceneGlRenderer(
         pace()
         pendingTextures?.let { textures = it; uploadTextures(it); pendingTextures = null }
         pendingMaps?.let { maps = it; uploadMaps(it); pendingMaps = null }
-        val frame = pending ?: run {
+        pending.getAndSet(null)?.let { newer ->
+            // The last frame's per-frame batches were uploaded when it was
+            // first drawn and nothing reads their arrays again; recycle them.
+            current?.release()
+            current = newer
+        }
+        val frame = current ?: run {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
             return
@@ -321,14 +333,14 @@ class SceneGlRenderer(
     }
 
     private fun draw(batch: MeshBatch, static: Boolean) {
-        if (batch.indices.isEmpty()) return
+        if (batch.isEmpty) return
         check(static) { "per-frame batches go through drawStreamed" }
         drawMesh(staticMeshes.getOrPut(batch) { GpuMesh().also { upload(it, batch, GLES30.GL_STATIC_DRAW) } })
     }
 
     /** A batch rebuilt every frame, uploaded the first time this frame draws it. */
     private fun drawStreamed(batch: MeshBatch, mesh: GpuMesh) {
-        if (batch.indices.isEmpty()) return
+        if (batch.isEmpty) return
         if (mesh.source !== batch) {
             upload(mesh, batch, GLES30.GL_STREAM_DRAW)
             mesh.source = batch
@@ -351,9 +363,9 @@ class SceneGlRenderer(
         }
         GLES30.glBindVertexArray(mesh.vao)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, mesh.vbo)
-        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, batch.vertices.size * 4, floats(batch.vertices), usage)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, batch.vertexFloats * 4, floats(batch.vertices, batch.vertexFloats), usage)
         GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, mesh.ibo)
-        GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, batch.indices.size * 4, ints(batch.indices), usage)
+        GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, batch.indexCount * 4, ints(batch.indices, batch.indexCount), usage)
         val stride = Vertex.STRIDE * 4
         attribute(0, 3, Vertex.PX, stride)
         attribute(1, 3, Vertex.NX, stride)
@@ -364,7 +376,7 @@ class SceneGlRenderer(
         attribute(6, 1, Vertex.EMISSIVE, stride)
         attribute(7, 2, Vertex.VARIANT_A, stride)
         GLES30.glBindVertexArray(0)
-        mesh.count = batch.indices.size
+        mesh.count = batch.indexCount
     }
 
     private fun attribute(index: Int, size: Int, offsetFloats: Int, stride: Int) {
@@ -575,18 +587,18 @@ class SceneGlRenderer(
     private fun vec3(program: Int, name: String, v: FloatArray) =
         GLES30.glUniform3f(loc(program, name), v[0], v[1], v[2])
 
-    private fun floats(data: FloatArray): FloatBuffer {
-        if (floatStaging.capacity() < data.size) {
-            floatStaging = ByteBuffer.allocateDirect(grown(data.size) * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private fun floats(data: FloatArray, count: Int): FloatBuffer {
+        if (floatStaging.capacity() < count) {
+            floatStaging = ByteBuffer.allocateDirect(grown(count) * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         }
-        return floatStaging.apply { clear(); put(data); flip() }
+        return floatStaging.apply { clear(); put(data, 0, count); flip() }
     }
 
-    private fun ints(data: IntArray): IntBuffer {
-        if (intStaging.capacity() < data.size) {
-            intStaging = ByteBuffer.allocateDirect(grown(data.size) * 4).order(ByteOrder.nativeOrder()).asIntBuffer()
+    private fun ints(data: IntArray, count: Int): IntBuffer {
+        if (intStaging.capacity() < count) {
+            intStaging = ByteBuffer.allocateDirect(grown(count) * 4).order(ByteOrder.nativeOrder()).asIntBuffer()
         }
-        return intStaging.apply { clear(); put(data); flip() }
+        return intStaging.apply { clear(); put(data, 0, count); flip() }
     }
 
     /** Room for this and a little more, so a batch growing by a few quads a frame does not reallocate each time. */

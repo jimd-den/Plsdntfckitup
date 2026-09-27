@@ -66,7 +66,7 @@ class ChunkMeshCacheTest {
     }
 
     @Test
-    fun `digging one block remeshes its chunk and the neighbours that border it, not the view`() {
+    fun `digging inside a chunk remeshes only that chunk`() {
         val world = ChunkWorld(span = 3, grass)
         val cache = cache()
         val before = cache.around(world, 0, 0, radius = 40, worldRevision = 0)
@@ -74,7 +74,7 @@ class ChunkMeshCacheTest {
         world.set(BlockPos(20, 20, 3), BlockRegistry.AIR_INDEX)
         val after = cache.around(world, 0, 0, radius = 40, worldRevision = 1)
 
-        assertEquals(9, cache.meshedLastCall, "the chunk and its eight neighbours, of thirty-six")
+        assertEquals(1, cache.meshedLastCall, "a neighbour reads one cell past its edge, and this edit is four cells in")
         val far = ChunkMeshCache.chunksCovering(0, 0, 40).indexOf(ChunkPos(-3, -3))
         assertSame(before[far].mesh, after[far].mesh, "a chunk far from the edit keeps its mesh")
         val edited = ChunkMeshCache.chunksCovering(0, 0, 40).indexOf(ChunkPos(1, 1))
@@ -90,5 +90,41 @@ class ChunkMeshCacheTest {
         cache.around(world, 48, 0, radius = 20, worldRevision = 0)
 
         assertEquals(12, cache.meshedLastCall, "three new columns of four chunks; the shared column is kept")
+    }
+
+    @Test
+    fun `digging on a border remeshes the neighbours that share it`() {
+        val world = ChunkWorld(span = 3, grass)
+        val cache = cache()
+        cache.around(world, 0, 0, radius = 40, worldRevision = 0)
+
+        // The corner of chunk (1, 1): its edge and corner neighbours all read this cell.
+        world.set(BlockPos(16, 16, 3), BlockRegistry.AIR_INDEX)
+        cache.around(world, 0, 0, radius = 40, worldRevision = 1)
+
+        assertEquals(9, cache.meshedLastCall)
+    }
+
+    @Test
+    fun `chunks off screen are meshed a few at a time, nearest first, and on screen ones at once`() {
+        val world = ChunkWorld(span = 6, grass)
+        val cache = cache()
+        val onScreen = ChunkPos(0, 0)
+        // A cold start meshes the whole square at once; then the player walks east.
+        cache.around(world, -48, 0, radius = 40, worldRevision = 0)
+        assertEquals(0, cache.deferredLastCall)
+        val first = cache.around(world, 0, 0, radius = 40, worldRevision = 0, urgent = { it == onScreen }, offscreenBudget = 2)
+        // Chunks -6..-1 were meshed from the first position; 0..2 are new, six rows of them.
+        assertEquals(3, cache.meshedLastCall, "the chunk on screen, and two more")
+        assertEquals(15, cache.deferredLastCall)
+        assertEquals(36 - 18 + 3, first.size, "chunks never meshed are left out rather than drawn empty")
+
+        var calls = 1
+        while (cache.deferredLastCall > 0) {
+            cache.around(world, 0, 0, radius = 40, worldRevision = 0, urgent = { it == onScreen }, offscreenBudget = 2)
+            calls++
+        }
+        assertEquals(9, calls, "eighteen new chunks at two a call, less the one meshed on sight")
+        assertEquals(36, cache.around(world, 0, 0, radius = 40, worldRevision = 0).size)
     }
 }

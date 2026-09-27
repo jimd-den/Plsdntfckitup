@@ -14,6 +14,7 @@ import com.stratum.core.domain.art.Tint
 import com.stratum.core.domain.art.WorldArtDirector
 import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.World
 import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.scene.quality.RenderSettings
@@ -84,6 +85,17 @@ class SceneFrame(
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
 
+    /**
+     * Returns this frame's per-frame batches to be reused. Call once, when
+     * nothing will read this frame again; terrain and models are kept.
+     */
+    fun release() {
+        actors?.release()
+        cutout.release()
+        decals.release()
+        glows.release()
+    }
+
     companion object {
         const val MAX_LIGHTS = 8
     }
@@ -128,10 +140,27 @@ class SceneBuilder(
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
     private var terrainGeneration = Long.MIN_VALUE
 
+    /** Each mesh's box, measured once per mesh rather than whenever any chunk changes. */
+    private var meshBounds = java.util.IdentityHashMap<MeshBatch, FloatArray>()
+
+    /**
+     * Each prop's style, asked of the director once per eye level; see [prop].
+     * Keyed by the prop itself, which a chunk keeps until it is remeshed, so
+     * the styles outlive the terrain lists being gathered again.
+     */
+    private var propStyles = java.util.IdentityHashMap<PropInstance, PropStyle?>()
+    private var styledAtEye = Int.MIN_VALUE
+
+    /** A prop block's paintings, by block id; the library does not change under a builder. */
+    private val paintingsByBlock = HashMap<String, IntArray>()
+
     private val cutout = MeshBuilder(MaterialKind.CUTOUT)
     private val decals = MeshBuilder(MaterialKind.DECAL)
     private val glows = MeshBuilder(MaterialKind.GLOW)
     private val actorMesh = MeshBuilder(MaterialKind.OPAQUE)
+
+    /** Arrays for the per-frame batches; the backend returns them through [SceneFrame.release]. */
+    private val recycler = MeshRecycler()
 
     // This frame's sun on the ground: which way shadows fall, how long they
     // are per unit of height, and how dark. Set at the start of build().
@@ -171,8 +200,13 @@ class SceneBuilder(
         // The view is centred on a region-quantised position, so walking a few
         // blocks keeps the same chunks in view; within it, only chunks that
         // changed are meshed again.
+        // Only what the lens can see, or can reach into it, is built. The
+        // meshed square is many times the screen, and every prop in it used
+        // to be turned to the camera, shadowed and uploaded every frame.
+        val volume = ViewVolume.of(camera)
         val terrain = terrainAround(
             world, Math.floorDiv(cx, REGION_STEP) * REGION_STEP, Math.floorDiv(cy, REGION_STEP) * REGION_STEP, radius, worldRevision,
+            volume, camera.target.z,
         )
 
         val biome = biomeAt(cx, cy)
@@ -207,19 +241,21 @@ class SceneBuilder(
             shadowOpacity = SPRITE_SHADOW_OPACITY * lighting.shadowStrength
         }
         val eyeLevel = floor(camera.target.z).toInt()
+        frameNormal = billboardNormal(camera)
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
-        // Only what the lens can see, or can reach into it, is built. The
-        // meshed square is many times the screen, and every prop in it used
-        // to be turned to the camera, shadowed and uploaded every frame.
-        val volume = ViewVolume.of(camera)
         if (settings.groundLitter) terrain.details.forEach { if (volume.mayShow(it.x, it.y, it.z, it.size, it.size)) litter(it) }
-        terrain.props.forEach { prop ->
-            if (propModels(prop.block.id) != null) return@forEach
+        if (eyeLevel != styledAtEye) {
+            // A prop's look depends on how far below the eye it stands, so a step up or down restyles.
+            propStyles.clear()
+            styledAtEye = eyeLevel
+        }
+        terrain.props.forEachIndexed { index, prop ->
+            if (propModels(prop.block.id) != null) return@forEachIndexed
             val height = SPRITE_HEIGHT * prop.block.glyphScale * (1f + PROP_SIZE_SPREAD)
             // A shadow falls up to its caster's height times the reach away, so a tree off screen can still darken it.
-            if (!volume.mayShow(prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), height, height * MAX_SHADOW_REACH + 1f)) return@forEach
-            prop(prop, camera, eyeLevel, occlusionFade(prop, actors, forward))
+            if (!volume.mayShow(prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), height, height * MAX_SHADOW_REACH + 1f)) return@forEachIndexed
+            prop(index, prop, camera, eyeLevel, occlusionFade(prop, actors, forward))
         }
         terrain.lights.forEach { light ->
             if (!volume.mayShow(light.x, light.y, light.z, BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength))) return@forEach
@@ -267,19 +303,30 @@ class SceneBuilder(
             shadowViewProjection = shadowMatrix(camera.target, lighting),
             terrain = visibleTerrain(terrain, volume),
             residentTerrain = terrain.meshes,
-            actors = actorMesh.takeUnless { it.isEmpty }?.build(),
-            cutout = cutout.build(),
-            decals = decals.build(),
-            glows = glows.build(),
+            actors = actorMesh.takeUnless { it.isEmpty }?.build(recycler),
+            cutout = cutout.build(recycler),
+            decals = decals.build(recycler),
+            glows = glows.build(recycler),
             models = listOfNotNull(terrain.models),
         )
     }
 
-    private fun terrainAround(world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int): Terrain {
-        val results = chunks.around(world, centreX, centreY, radius, worldRevision)
+    private fun terrainAround(
+        world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int, volume: ViewVolume, eyeZ: Float,
+    ): Terrain {
+        val results = chunks.around(
+            world, centreX, centreY, radius, worldRevision,
+            urgent = { pos ->
+                volume.intersects(
+                    pos.originX - TERRAIN_SHADOW_MARGIN, pos.originY - TERRAIN_SHADOW_MARGIN, eyeZ - URGENT_DEPTH,
+                    pos.originX + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, pos.originY + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, eyeZ + URGENT_HEIGHT,
+                )
+            },
+            offscreenBudget = OFFSCREEN_MESH_BUDGET,
+        )
         if (chunks.generation != terrainGeneration) {
             val props = results.flatMap { it.props }
-            val meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() }
+            val meshes = results.map { it.mesh }.filterNot { it.isEmpty }
             terrain = Terrain(
                 meshes = meshes,
                 props = props,
@@ -288,6 +335,10 @@ class SceneBuilder(
                 models = modelProps(props),
                 bounds = boundsOf(meshes),
             )
+            // Styles of props still in the square are kept; the rest are let go.
+            val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)
+            props.forEach { if (propStyles.containsKey(it)) kept[it] = propStyles[it] }
+            propStyles = kept
             terrainGeneration = chunks.generation
         }
         return terrain
@@ -314,12 +365,19 @@ class SceneBuilder(
     /** Each mesh's box, measured once when the terrain changes rather than every frame. */
     private fun boundsOf(meshes: List<MeshBatch>): FloatArray {
         val out = FloatArray(meshes.size * 6)
+        val kept = java.util.IdentityHashMap<MeshBatch, FloatArray>(meshes.size)
         meshes.forEachIndexed { i, mesh ->
+            val known = meshBounds[mesh]
+            if (known != null) {
+                known.copyInto(out, i * 6)
+                kept[mesh] = known
+                return@forEachIndexed
+            }
             var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
             var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
             val v = mesh.vertices
             var at = 0
-            while (at < v.size) {
+            while (at < mesh.vertexFloats) {
                 val x = v[at + Vertex.PX]; val y = v[at + Vertex.PX + 1]; val z = v[at + Vertex.PX + 2]
                 if (x < minX) minX = x; if (x > maxX) maxX = x
                 if (y < minY) minY = y; if (y > maxY) maxY = y
@@ -328,7 +386,10 @@ class SceneBuilder(
             }
             val o = i * 6
             out[o] = minX; out[o + 1] = minY; out[o + 2] = minZ; out[o + 3] = maxX; out[o + 4] = maxY; out[o + 5] = maxZ
+            kept[mesh] = out.copyOfRange(o, o + 6)
         }
+        // Only meshes still in the square are remembered, so this never outgrows it.
+        meshBounds = kept
         return out
     }
 
@@ -382,11 +443,17 @@ class SceneBuilder(
         return fade
     }
 
-    private fun prop(prop: PropInstance, camera: SceneCamera, eyeLevel: Int, opacity: Float = 1f) {
+    private fun prop(index: Int, prop: PropInstance, camera: SceneCamera, eyeLevel: Int, opacity: Float = 1f) {
         val variant = hash(prop.x, prop.y)
-        val style = director.propStyleFor(
-            PropCue(prop.block, prop.biomeId, variant, depthBelowEye = (eyeLevel - prop.z).coerceAtLeast(0)),
-        ) ?: return
+        // Asked of the director once per prop per eye level rather than every
+        // frame: it was the most expensive single call in a frame, for an
+        // answer that had not changed.
+        val style = (
+            if (propStyles.containsKey(prop)) propStyles[prop]
+            else director.propStyleFor(
+                PropCue(prop.block, prop.biomeId, variant, depthBelowEye = (eyeLevel - prop.z).coerceAtLeast(0)),
+            ).also { propStyles[prop] = it }
+            ) ?: return
         val baseX = prop.x + 0.5f
         val baseY = prop.y + 0.5f
         val baseZ = prop.z.toFloat()
@@ -395,7 +462,7 @@ class SceneBuilder(
 
         // One of the forged individuals, picked by place: neighbours differ,
         // and the same tree is the same tree every time you walk past it.
-        val paintings = textures.variantsOf("prop:${prop.block.id}")
+        val paintings = paintingsByBlock.getOrPut(prop.block.id) { textures.variantsOf("prop:${prop.block.id}") }
         if (paintings.isNotEmpty()) {
             val sprite = paintings[(variant ushr 3) % paintings.size]
             val texture = textures.textureAt(sprite)!!
@@ -433,7 +500,7 @@ class SceneBuilder(
         val u1 = 1f - u0
         val right = camera.right
         val up = camera.up
-        val n = billboardNormal(camera)
+        val n = frameNormal
         val hw = width / 2f
         val tx = up.x * height; val ty = up.y * height; val tz = up.z * height
         // For cut-outs the occlusion slot carries opacity: below one, the
@@ -453,7 +520,7 @@ class SceneBuilder(
     private fun silhouette(camera: SceneCamera, x: Float, y: Float, z: Float, style: PropStyle, opacity: Float = 1f) {
         val right = camera.right
         val up = camera.up
-        val n = billboardNormal(camera)
+        val n = frameNormal
         val unit = style.scale * SILHOUETTE_UNIT
         PropSilhouettes.parts(style.silhouette, style.variant).forEach { part ->
             val color = when (part.role) {
@@ -896,6 +963,9 @@ class SceneBuilder(
     }
 
     /** Sprites face the camera but are lit mostly as if they faced up. */
+    /** The billboard normal for the frame being built; the camera cannot turn mid-frame. */
+    private var frameNormal: Vec3 = Vec3.UP
+
     private fun billboardNormal(camera: SceneCamera): Vec3 {
         val toCamera = (camera.eye - camera.target).let { Vec3(it.x, it.y, 0f).normalized() }
         return (toCamera * 0.55f + Vec3.UP * 0.85f).normalized()
@@ -920,6 +990,11 @@ class SceneBuilder(
         const val REGION_STEP = 6
         /** How far past a chunk's edge its shadow may reach into view, in blocks. */
         const val TERRAIN_SHADOW_MARGIN = 8f
+        /** Off-screen chunks meshed per frame; see [ChunkMeshCache]. */
+        const val OFFSCREEN_MESH_BUDGET = 1
+        /** The slab of a chunk tested for being on screen, below and above the eye. */
+        const val URGENT_DEPTH = 24f
+        const val URGENT_HEIGHT = 16f
         const val FOG_FLOOR_DEPTH = 4f
         /** Share of the meshed radius past the focus where fog becomes total. */
         const val EDGE_FOG_SHARE = 0.8f
