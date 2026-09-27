@@ -26,6 +26,7 @@ val pureModules = listOf(
   ":agents",
   ":engine:render",
   ":engine:scene",
+  ":engine:model",
   ":content:igbo",
   ":importer:common",
   ":importer:tiled",

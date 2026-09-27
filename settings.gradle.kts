@@ -29,6 +29,7 @@ rootProject.name = "Stratum"
 // Dependency rule: :app -> :feature:* -> :core:designsystem -> :core:domain
 //                                     -> :core:data      -> :core:domain
 //                                        :engine:scene   -> :core:domain
+//                                        :engine:model   -> :engine:scene
 //                                        :engine:render  -> :engine:world
 //                                        :engine:world   -> :engine:settlement, :engine:crowd
 //                                        :engine:settlement -> :core:domain
@@ -47,6 +48,8 @@ include(":engine:settlement")
 include(":engine:crowd")
 include(":engine:render")
 include(":engine:scene")
+// Generated 3D models: GLB/OBJ parsing, voxelising and sprite baking. Pure Kotlin.
+include(":engine:model")
 include(":feature:play")
 include(":feature:forge")
 include(":feature:hero")
