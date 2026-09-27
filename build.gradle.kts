@@ -22,6 +22,7 @@ val pureModules = listOf(
   ":core:domain",
   ":engine:world",
   ":engine:settlement",
+  ":engine:worldgen",
   ":engine:crowd",
   ":agents",
   ":engine:render",

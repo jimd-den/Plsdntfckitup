@@ -30,7 +30,8 @@ rootProject.name = "Stratum"
 //                                     -> :core:data      -> :core:domain
 //                                        :engine:scene   -> :core:domain
 //                                        :engine:render  -> :engine:world
-//                                        :engine:world   -> :engine:settlement, :engine:crowd
+//                                        :engine:world   -> :engine:worldgen, :engine:settlement, :engine:crowd
+//                                        :engine:worldgen -> :engine:settlement, :core:domain
 //                                        :engine:settlement -> :core:domain
 //                                        :engine:crowd   -> :core:domain
 //                                        :content:igbo   -> :core:domain
@@ -44,6 +45,7 @@ include(":core:data")
 include(":core:designsystem")
 include(":engine:world")
 include(":engine:settlement")
+include(":engine:worldgen")
 include(":engine:crowd")
 include(":engine:render")
 include(":engine:scene")

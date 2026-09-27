@@ -55,6 +55,7 @@ internal data class PackSchema(
     val structures: List<StructureSchema> = emptyList(),
     val units: List<UnitSchema> = emptyList(),
     val agents: List<AgentRoleSchema> = emptyList(),
+    val structureTemplates: List<StructureTemplateSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -69,7 +70,7 @@ internal data class PackSchema(
         rules = rules?.toDomain(), needs = needs.map { it.toDomain() }, consumables = consumables.map { it.toDomain() },
         forageRules = forage.map { it.toDomain() }, recipes = recipes.map { it.toDomain() },
         resources = resources.map { it.toDomain() }, structures = structures.map { it.toDomain() }, units = units.map { it.toDomain() },
-        agentRoles = agents.map { it.toDomain() },
+        agentRoles = agents.map { it.toDomain() }, structureTemplates = structureTemplates.map { it.toDomain() },
     )
 
     companion object {
@@ -85,7 +86,7 @@ internal data class PackSchema(
             p.rules?.let(RulesSchema::of), p.needs.map(NeedSchema::of), p.consumables.map(ConsumableSchema::of),
             p.forageRules.map(ForageSchema::of), p.recipes.map(RecipeSchema::of),
             p.resources.map(ResourceSchema::of), p.structures.map(StructureSchema::of), p.units.map(UnitSchema::of),
-            p.agentRoles.map(AgentRoleSchema::of),
+            p.agentRoles.map(AgentRoleSchema::of), p.structureTemplates.map(StructureTemplateSchema::of),
         )
     }
 }

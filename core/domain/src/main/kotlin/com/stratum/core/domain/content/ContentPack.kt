@@ -101,6 +101,12 @@ data class ContentPack(
     val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
     /** The studio crew this pack brings: agents that write content in its lore. */
     val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
+    /**
+     * Dungeons, ruins and shrines the world generator builds. Layered by id
+     * like everything else, so a plugin that ships only a dungeon adds it to
+     * whatever world it is loaded into.
+     */
+    val structureTemplates: List<com.stratum.core.domain.world.StructureTemplate> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 
