@@ -24,6 +24,7 @@ import com.stratum.core.designsystem.component.StratumChip
 import com.stratum.core.designsystem.component.StratumPanel
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
+import com.stratum.core.domain.combat.CombatRules
 import com.stratum.core.domain.world.RulesPresets
 import com.stratum.core.domain.world.SurvivalMode
 import com.stratum.core.domain.world.WorldRules
@@ -84,8 +85,15 @@ internal object WorldDials {
     )
     val raids = Dial("Raids", listOf(Step("Off", false), Step("On", true)), { it.raids }, { r, v -> r.copy(raids = v) })
     val start = Dial("Start", listOf(Step("In a town", true), Step("In the wilds", false)), { it.startInTown }, { r, v -> r.copy(startInTown = v) })
+    val sandbox = Dial("Build sandbox", listOf(Step("Off", false), Step("On", true)), { it.sandbox }, { r, v -> r.copy(sandbox = v) })
+    val caps = Dial(
+        "Combat caps",
+        listOf(Step("Bounded", false), Step("Unbound", true)),
+        { it.combat == CombatRules.UNBOUND },
+        { r, v -> r.copy(combat = if (v) CombatRules.UNBOUND else CombatRules()) },
+    )
 
-    val all: List<Dial<*>> = listOf(survival, towns, monsters, raids, day, start, death)
+    val all: List<Dial<*>> = listOf(survival, towns, monsters, raids, day, start, death, sandbox, caps)
 }
 
 /** The preset these rules are exactly, or null when the player has turned the dials. */
@@ -94,7 +102,9 @@ internal fun presetOf(rules: WorldRules) = RulesPresets.all.firstOrNull { it.rul
 /** A one-line reading of the rules, for the collapsed card. */
 internal fun summaryOf(rules: WorldRules): String =
     listOf(WorldDials.survival, WorldDials.towns, WorldDials.monsters).joinToString(" · ") { "${it.name} ${it.selected(rules).label.lowercase()}" } +
-        if (rules.raids) " · raids" else ""
+        (if (rules.raids) " · raids" else "") +
+        (if (rules.sandbox) " · sandbox" else "") +
+        (if (rules.combat == CombatRules.UNBOUND) " · caps lifted" else "")
 
 /**
  * How the next world plays: a preset in one tap, or every dial for the

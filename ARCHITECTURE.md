@@ -374,6 +374,39 @@ Currency, supports and waystones go straight into the pouch when a monster
 dies. Gear still lands on the ground, because choosing gear is a decision
 and picking up a pebble in a crowd, with a thumb, is not.
 
+## A sandbox for breaking builds
+
+The engine allows broken builds; the sandbox is where a player makes one
+and sees what it does. It is a world rule (`WorldRules.sandbox`), so a pack
+can suggest it and the home screen offers it as a preset, and its tools
+(`SandboxTools`) exist only in a world that has it. They work on the
+session's player through the same seams persistence does and roll from
+their own seeded dice, so conjuring an item never shifts the world's drops.
+
+- **The damage meter** (`core.domain.sandbox.DamageMeter`) counts what
+  combat reports -- `CombatSystem.onDealt` names each hit and each tick of
+  damage over time with its source: the swing, a skill, a triggered cast,
+  an ailment, a minion. It keeps its own clock, advanced by the caller, so a
+  replayed fight reads the same, and running totals, so a build landing
+  hundreds of hits a second costs it only its rolling window.
+- **The breakdown** (`BuildBreakdown`, fed by `BuildInspector`) explains a
+  number by computing it: every modifier by source, in the order and
+  stages combat resolves them -- the build sheet, then survival's, then a
+  boon for the fought-with stats; the one combined sheet for evasion, block
+  and resistance caps; supports for a skill's power -- with the sheet's own
+  filter, sums and bounds. A test holds each explained number to the one
+  combat uses, so the explanation cannot drift from the fight.
+- **Caps** are a rule of the world, read by every combat system when it is
+  made, so lifting them rebuilds the world on the same seed around the same
+  hero rather than threading a mutable rule through the fight.
+- **Builds are shared** (`BuildCode`) as recipes against the loaded packs,
+  and a shared build arrives in a new world, because a class is chosen when
+  a world is made. A sandbox never writes its hero back to the save.
+
+Dummies are the sandbox's own target, not content: they have no attack and
+no skills, and the sandbox stands them back where they were put after each
+tick, so knockback and the crowd cannot turn a measurement into a chase.
+
 ## A handheld's interface, not a toolbar's
 
 The play screen is the world, edge to edge, in portrait or landscape; the
