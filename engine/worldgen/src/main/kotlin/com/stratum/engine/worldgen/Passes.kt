@@ -83,6 +83,9 @@ class PassRegistry {
 
     fun has(id: String): Boolean = id in factories
 
+    /** A registry with every pass this one has, to extend without changing the shared one. */
+    fun copy(): PassRegistry = PassRegistry().also { it.factories.putAll(factories) }
+
     /** An unknown pass is an error, for the same reason an unknown generator is: say so, do not guess. */
     fun create(spec: PassSpec, context: TerrainContext, services: WorldServices): WorldgenPass {
         val factory = factories[spec.id] ?: throw IllegalArgumentException(
