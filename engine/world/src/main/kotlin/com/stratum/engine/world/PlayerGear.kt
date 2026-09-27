@@ -1,5 +1,6 @@
 package com.stratum.engine.world
 
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.session.PlayerState
 
@@ -17,15 +18,24 @@ internal class PlayerGear(private val insertOf: (String) -> InsertDefinition?) {
      * Equips something from the bag. What was held goes back into the bag
      * rather than being destroyed, so a swap is always reversible.
      */
-    fun equip(player: PlayerState, instanceId: String): Changed<EquipResult> {
+    fun equip(player: PlayerState, instanceId: String, slot: EquipmentSlot? = null): Changed<EquipResult> {
         val item = player.bag.firstOrNull { it.instanceId == instanceId } ?: return Changed(player, EquipResult.NotInBag)
-        return Changed(clampHealth(player.equipping(item)), EquipResult.Equipped(item, player.equippedWeapon))
+        if (!player.canWear(item)) return Changed(player, EquipResult.TooLowLevel(item, item.requiredLevel))
+        val change = player.equipment.equipping(item, slot)
+            ?: return Changed(player, EquipResult.WrongSlot(item, slot ?: player.equipment.targetFor(item)))
+        return Changed(clampHealth(player.equipping(item, slot)), EquipResult.Equipped(item, change.removed))
+    }
+
+    /** Takes off whatever is worn in [slot] and puts it in the bag. */
+    fun unequip(player: PlayerState, slot: EquipmentSlot): Changed<EquipResult> {
+        val item = player.equipment[slot] ?: return Changed(player, EquipResult.NothingWorn)
+        return Changed(clampHealth(player.unequipping(slot)), EquipResult.Unequipped(item))
     }
 
     /**
      * Slots one of the player's inserts into an item they are holding. Spends
      * the insert from the pouch and writes the item back wherever it lives, so
-     * an equipped weapon changes under the player's hand and a bagged one
+     * an equipped item changes under the player's hand and a bagged one
      * stays bagged.
      */
     fun slot(player: PlayerState, instanceId: String, insertId: String): Changed<SocketResult> {

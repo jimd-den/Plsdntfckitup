@@ -4,6 +4,7 @@ import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.combat.DamageResult
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.session.PlayerState
@@ -98,9 +99,23 @@ sealed interface ReviveResult {
 
 /** What changing gear did. */
 sealed interface EquipResult {
-    data class Equipped(val item: ItemInstance, val replaced: ItemInstance?) : EquipResult
+    /** [removed] is everything that came off to make room: both hands' worth when a two-handed weapon went on. */
+    data class Equipped(val item: ItemInstance, val removed: List<ItemInstance>) : EquipResult {
+        val replaced: ItemInstance? get() = removed.firstOrNull()
+    }
+
+    data class Unequipped(val item: ItemInstance) : EquipResult
     data class Discarded(val item: ItemInstance) : EquipResult
     data object NotInBag : EquipResult
+
+    /** The character is not experienced enough to wear it yet. */
+    data class TooLowLevel(val item: ItemInstance, val requiredLevel: Int) : EquipResult
+
+    /** It does not go there: a ring on the head, a helm in the off hand. */
+    data class WrongSlot(val item: ItemInstance, val slot: EquipmentSlot) : EquipResult
+
+    /** Nothing is worn in the slot asked to be emptied. */
+    data object NothingWorn : EquipResult
 }
 
 /** What a trip to the anvil did. */
