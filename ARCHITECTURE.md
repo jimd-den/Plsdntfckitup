@@ -6,85 +6,73 @@ wrapped in an ARPG shell, where the content is data rather than code.
 ## The module graph
 
 ```
-                       :app  (Activity, navigation, composition root)
-                        │
-        ┌───────────────┼───────────────┬──────────────────┐
-        │               │               │                  │
-  :feature:play   :feature:forge  :feature:studio    :core:data
-        │               │               │                  │
-        │               │       ┌───────┴──────┐           │
-        │               │  :legacy:data   :legacy:domain    │
-        │               │       │                           │
-        └───────┬───────┴───────┴───────────┬───────────────┘
-                │                           │
-        :core:designsystem            :core:domain ◄── :content:igbo
-                │                           ▲
-                └───────────────────────────┤
-                                     :engine:world ──► :engine:worldgen ──► :engine:settlement
-                                            │                 (-> :core:domain)
-                                            └──► :engine:settlement, :engine:crowd
-                                            ▲                 (both -> :core:domain only)
-                                     :engine:render ◄── :tools:artpreview
-                                                                │
-                                     :engine:scene ◄────────────┘
-                                   (3D: -> :core:domain only)
-                                            ▲
-                                     :engine:model  (GLB/OBJ, voxels, sprite bake)
-                                            ▲
-                                  :feature:forge, :app
+                          :app  (Activity, navigation, composition root)
+                           │
+     ┌──────────────┬──────┴───────┬───────────────┬───────────────┬──────────────┐
+     │              │              │               │               │              │
+ :feature:play  :feature:forge  :feature:hero  :feature:library  :core:data   :agents, :plugins
+     │              │              │               │               │          :engine:model
+     │              │              └───────┬───────┘               │
+     │              │                      │                       │
+     │              ├──► :agents ──► :plugins ──► :importer:flame ──► :importer:tiled
+     │              │                                                   │
+     │              └──► :engine:model ──► :engine:scene                │
+     │                                                          :importer:common
+     ├──► :engine:render ──► :engine:world ──► :engine:worldgen ──► :engine:settlement
+     │                            │
+     ├──► :engine:scene           ├──► :engine:settlement, :engine:crowd
+     │                            │
+     └──► :core:designsystem      ▼
+                            :core:domain  ◄── every module above; :content:igbo
 
-  Importers, beside the engine rather than in it:
+  Tools, never shipped:  :tools:artpreview ──► :engine:render, :engine:scene, :engine:world, :plugins, :content:igbo
 
-    :plugins ──► :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
-          ▲                                        ▲
-        :app (registers them)          :core:data (keeps archives)
-                                                   ▲
-                                   :feature:library (-> :core:domain only)
-
-  The studio crew, beside the plugin format it writes:
-
-    :feature:forge ──► :agents ──► :plugins, :core:domain
+  Frozen, built but reached by nothing:  :feature:studio ──► :legacy:data ──► :legacy:domain
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
-Room, OkHttp or Compose exist.
+Room, OkHttp or Compose exist. Every `:engine:*` module depends on
+`:core:domain` and on no Android module; `:engine:world` builds on the
+world generator, towns and the crowd brain, and `:engine:render` and
+`:engine:scene` read a world without being able to change it.
 
 ## The modules
 
 | Module | Kind | Holds |
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
-| `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
+| `:engine:world` | Pure Kotlin | Chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, dungeon population, and the play session: `WorldSession` and the systems it orchestrates (see [The session is an orchestrator](#the-session-is-an-orchestrator)). |
 | `:engine:worldgen` | Pure Kotlin | The staged world generator: passes over a chunk (climate, shape, surface, carvers, liquids, ores, decoration, trees, structures, towns, spawn markers), their registries, the presets built from them, and the noise they share. |
 | `:engine:settlement` | Pure Kotlin | Towns: site selection on a coarse grid, the layouts (grid, organic, fortress, camp), lot packing, and stamping buildings, roads and walls into any terrain source. |
 | `:engine:crowd` | Pure Kotlin | Crowd AI: flow fields over height steps, a spatial hash, attack tokens, roles, squads and morale. Never sees a block. |
-| `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
-| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
+| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, combat effects, and the asset forge that turns image-model output into usable textures. |
 | `:engine:model` | Pure Kotlin | Generated 3D models: a guarded GLB and OBJ reader, normalising to blocks, decimation for phones, voxelising into pack blocks, and a software rasteriser that bakes eight-direction sprites. |
-| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:agents` | Pure Kotlin | The agent studio and the content forge: crew ordering, prompts, fragment checks, repair, retries, approval gates, the power budget's use and the journal. |
+| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
 | `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
 | `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
 | `:importer:flame` | Pure Kotlin | Flame games: their Tiled levels, and characters from Aseprite, TexturePacker and Dart. |
-| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
-| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
-| `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
+| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style, and imports projects on the JVM. Never shipped in the app. |
+| `:core:data` | Android library | Adapters: the OpenAI-compatible model client, image, video and 3D model providers, provider settings, hero saves and stores. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
-| `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
-| `:feature:forge` | Android library | AI pack generation and its preview. |
+| `:feature:play` | Android library | The play screen, the build sandbox's panels, and the GL and Compose backends that draw the renderer's output. |
+| `:feature:forge` | Android library | The AI forges: textures, sprites, poses, models, the agent studio and the content forge. |
+| `:feature:hero` | Android library | The class builder and the character screens. |
 | `:feature:library` | Android library | The Plugins screen: install, order, switch, remove and share plugins. |
-| `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
-| `:legacy:data` | Android library | The original engine's Room and network layer. |
-| `:feature:studio` | Android library | The original creator studio screens. |
 | `:app` | Android app | The Activity, navigation between destinations, and the wiring that connects ports to adapters. |
+| `:legacy:domain` | Pure Kotlin | **Frozen.** The original engine's rules. Still compiles; nothing depends on it but the frozen modules below. |
+| `:legacy:data` | Android library | **Frozen.** The original engine's Room and network layer. |
+| `:feature:studio` | Android library | **Frozen.** The original creator studio. Disconnected from `:app`: no tile, no destination, no Gemini wiring. Whether to delete the three frozen modules is an open decision; until then they stay in `settings.gradle.kts` so they keep compiling. |
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:engine:worldgen`, `:engine:render`, `:engine:scene`, `:engine:model`,
-`:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
-`:legacy:domain` apply only the Kotlin
-JVM plugin, so the Android SDK is not on
-their compile classpath and `import android.*` fails to compile.
+Not by review. `:core:domain`, every `:engine:*` module, `:content:igbo`,
+the three `:importer:*` modules, `:plugins`, `:agents`, `:tools:artpreview`
+and the frozen `:legacy:domain` apply only the Kotlin JVM plugin, so the
+Android SDK is not on their compile classpath and `import android.*` fails
+to compile.
 
 `./gradlew architectureCheck` closes the loophole around that: it fails the
 build if one of those modules picks up an Android plugin or an Android artifact.
@@ -170,8 +158,9 @@ other in climate, so a border is a slope as wide as the climate takes to
 cross, not a wall. Structures are pack data too: room-and-corridor dungeons
 entered by a stair, and small jigsaw pieces joined at connectors, placed by
 biome, depth, spacing and rarity. What they mark — monster spawns, the boss
-room, loot, the entrance — comes out through `MarkedWorld`, by chunk, for
-the action RPG layer to people.
+room, loot, the entrance — comes out through `MarkedWorld`, by chunk, and
+the session peoples it as the player arrives (see
+[The session is an orchestrator](#the-session-is-an-orchestrator)).
 
 Chunks must stay cheap on a phone, so cave noise is sampled on a coarse
 lattice and interpolated, as Minecraft does, and a test counts noise
@@ -324,15 +313,54 @@ where the GPU's limits can be read, and reports them back.
 
 ## The session is an orchestrator
 
-`WorldSession` owns the player and decides the order things happen in a
-tick. It does not hold the rules. Each concern keeps its own state and rules
-in its own part: `PlayerMotion` (movement, the roll), `MiningProgress`,
-`BuildSession` (tool, ghost preview, commit), `GroundItems` and `LootDrops`,
-`PlayerGear` (equip and sockets, as pure functions over `PlayerState`),
-`ActorAnimator`, and `SessionCues` (every floating number, named for what
-happened). The player is passed through them and handed back, because it is
-the one thing they all touch. Adding a system means adding a part and one
-line to the tick, not another two hundred lines to the session.
+`WorldSession` decides the order things happen in a tick, starts and
+revives the run, and takes snapshots. It does not hold the rules. Those live
+in systems that share the player and the bodies through one `SessionState`
+(the player is the one thing they all touch, and two copies of it would be
+two players), built and joined once by `SessionParts`, the session's own
+composition root:
+
+| System | Owns |
+| --- | --- |
+| `BuildingSystem` | Digging, placing, the drag-to-build tools, raising blueprints, room scans. |
+| `GearSystem` | Equip and unequip, the bag, sockets, currency crafting, support links, pickups. |
+| `SurvivalFacade` | Needs, eating, drinking, recipes. With survival off it is one flag check. |
+| `ProgressionSystem` | Experience and levels, the passive tree, world tiers, waystones, what a kill pays. |
+| `PoliticsSystem` | Factions and standing, towns and garrisons, outposts, followers and raids. Without outposts the realm clock does not run. |
+| `EncounterSystem` | The director, placed and marker spawns, the crowd, and the spoils of the dead. |
+| `FightSystem` | The player's swings, casts and flasks, and the monsters' turn, each resolved by `CombatSystem` on one `Battlefield`. |
+
+Each system's verbs are a small public interface (`SessionBuilding`,
+`SessionGear`, `SessionSurvival`, `SessionProgression`, `SessionPolitics`,
+`SessionFight`) that `WorldSession` implements by delegation, so feature code
+calls one object and the session file stays a page of orchestration. Below
+the systems are the parts they were already made of: `PlayerMotion`,
+`MiningProgress`, `BuildSession`, `GroundItems`, `LootDrops`, `PlayerGear`,
+`Workbench`, `ActorAnimator` and `SessionCues`. Adding a system means a part,
+a line in `SessionParts` and, if it runs every frame, a line in the tick.
+
+**One set of ceilings.** How much life and resource the player can have is
+answered in one place, `PlayerProfile`, counting gear, inserts, passives,
+traits, needs and boons exactly as a hit counts them. Regeneration, flasks,
+a level's refill, revival, the snapshot and the HUD all ask it, and a change
+of gear or of the tree holds the bars under the new ceilings. The player's
+own `maxHealthWithGear` cannot see traits or boons and is not used for play.
+
+**Followers fight like everyone else.** Followers, summons and defenders
+are bodies of the player's faction and act through `CombatSystem` on the
+player's side, with the skills their definitions give them. Monsters' skills
+go for the nearest of the player's side; a monster swings at a follower when
+the player is out of reach. A fallen follower is nobody's kill.
+
+**Dungeons are peopled.** `MarkerPopulation` learns a generated world's
+markers as chunks stream in and wakes them as the player comes near, in
+height too, so a crypt fills as the player descends. `MarkerEncounters`
+decides who stands at each: the marker's own monster, else its structure's
+list or boss, else the region's. A boss marker's monster fights at boss rank
+with its phases; placed monsters take their definition's rank rather than
+the director's dice; chests roll through the item generator with a rarity
+floor. Each marker is peopled once a session, with dice from the seed and
+the marker, so a cleared room stays cleared when its chunk reloads.
 
 ## Progression: one modifier formula for everything
 

@@ -16,6 +16,61 @@ The target this review measures against is the one stated for the project:
 
 Every recommendation below is judged by whether it serves that loop.
 
+## Status
+
+The review below is kept as written at `7933b65`. Since then, much of its
+roadmap has landed:
+
+**Done**
+
+- **Gear.** Ten equipment slots, items that roll `StatModifier`s, uniques
+  and item sets with set bonuses, and gear that can break combat's rules
+  (build flags and keystones).
+- **Composable skills.** Delivery × area × effect, with projectiles
+  (pierce, chain, fork), zones and traps, dashes, summons and supports;
+  status effects and damage over time keyed off damage types; life and
+  resource regeneration and flasks.
+- **Monsters that fight back.** Monster skills with telegraphed wind-ups
+  through the same cast path as the player's; ranged monsters shoot, support
+  monsters heal and buff; bosses with phases, adds and enrage as data.
+- **Staged world generation with dungeons** (`:engine:worldgen`): passes,
+  presets and registries, climate-blended biomes, carvers, ores, trees,
+  towns, and room-and-corridor dungeons and jigsaw structures that mark
+  their monsters, boss and loot. The session now peoples those markers as
+  the player arrives, boss at boss rank, chests with a rarity floor.
+- **3D models** (`:engine:model`): providers behind a port, a guarded GLB and
+  OBJ reader, props, voxelised blueprints and baked sprites.
+- **Sprite pipeline fixes** and the pose forge.
+- **The content forge**: short prompts for lore, bases, affixes, uniques
+  and sets, with lenient repair and a power budget that labels rather than
+  forbids broken gear, all kept in one growing `user.creations` plugin.
+- **The world generator folded into the crew** as a preset, its result an
+  installed plugin.
+- **A build sandbox**: a sandbox world rule, a damage meter, stat
+  breakdowns, training dummies and shareable build codes.
+- **`WorldSession` split** into systems it orchestrates (building, gear,
+  survival, progression, politics, encounters, the fight), with optional
+  systems costing nothing when a world's rules turn them off; max life and
+  resource answered in one place; followers fighting through the combat
+  system with their skills.
+- **Phase 1, item 5**: the Creator studio tile is gone, `:app` no longer
+  depends on `:feature:studio`, and the Gemini wiring is removed. The
+  legacy modules are frozen, still compiling, reached by nothing.
+
+**Still to do**
+
+- **Projects** (§3.1, §7): one unit of pack, art, rules and enabled
+  systems, and exporting a whole game as that unit.
+- **Structure**: quests as data, NPCs, vendors, a stash and a hub.
+- **World-state saves**: the hero persists; the world does not.
+- **Audio** hooks in the pack schema.
+- **Standalone APK export** of a project.
+- **The legacy modules**: whether to delete `:legacy:*` and
+  `:feature:studio` is still an open decision.
+- **Identity**: `metadata.json` now describes Stratum, but the
+  `applicationId` is still `com.aistudio.igboarpg.omagvd`, kept because
+  changing it would stop installed builds from upgrading in place.
+
 ---
 
 ## 1. The short version
