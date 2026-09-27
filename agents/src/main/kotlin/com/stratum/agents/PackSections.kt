@@ -22,7 +22,7 @@ object PackSections {
         "palette", "blocks", "biomes", "terrain", "classes", "lore", "damageTypes", "affixes", "inserts",
         "weapons", "enemies", "skills", "rarities", "checks", "passiveTrees", "currencies", "supports",
         "waystoneMods", "factions", "enemyPacks", "settlements", "rules", "needs", "consumables", "forage",
-        "recipes", "resources", "structures", "units", "agents", "itemBases", "uniques", "itemSets", "itemNames", "baseTiers",
+        "recipes", "resources", "structures", "units", "agents", "itemBases", "uniques", "itemSets", "itemNames", "baseTiers", "structureTemplates",
     )
 
     internal val json = Json {

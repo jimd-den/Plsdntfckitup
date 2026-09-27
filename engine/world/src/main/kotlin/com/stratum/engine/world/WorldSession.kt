@@ -84,7 +84,7 @@ class WorldSession(
     /** A character carried in from an earlier world; null starts fresh at level one. */
     hero: HeroSave? = null,
 ) {
-    private val generator: TerrainGenerator = terrainGenerator ?: withTowns(StratumTerrain.create(content.terrainContext(config)))
+    private val generator: TerrainGenerator = terrainGenerator ?: withTowns(StratumTerrain.create(content.terrainContext(config).copy(welcoming = ::welcoming)))
 
     /** The towns in this world, when the generator builds any. */
     private val atlas: SettlementAtlas? = generator as? SettlementAtlas
@@ -217,11 +217,12 @@ class WorldSession(
     fun settlementsNear(radius: Int): List<SettlementPlan> = atlas?.settlementsNear(player.blockPos.x, player.blockPos.y, radius).orEmpty()
 
     /**
-     * Hand-authored maps are left as their author drew them; every other
-     * world gets the towns its packs describe, laid over its terrain.
+     * Hand-authored maps are left as their author drew them, and a pipeline
+     * that builds its own towns keeps them; every other world gets the towns
+     * its packs describe, laid over its terrain.
      */
     private fun withTowns(base: TerrainGenerator): TerrainGenerator =
-        if (content.terrain.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP) base
+        if (content.terrain.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP || base is SettlementAtlas) base
         else SettlementTerrain.over(
             base, content.registry, config.seed, content.settlements,
             startingTown = config.rules.startInTown, density = config.rules.townDensity, welcoming = ::welcoming,

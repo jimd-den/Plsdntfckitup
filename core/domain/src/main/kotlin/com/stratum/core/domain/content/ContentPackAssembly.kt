@@ -100,6 +100,7 @@ class ContentPackAssembler {
             itemSets = merger.merge(ContentPack::itemSets, ItemSetDefinition::id),
             itemNames = merger.merge(ContentPack::itemNames, ItemNamePool::id),
             baseTiers = packs.lastOrNull { it.baseTiers.isNotEmpty() }?.baseTiers.orEmpty(),
+            structureTemplates = merger.merge(ContentPack::structureTemplates, com.stratum.core.domain.world.StructureTemplate::id),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
         ContentValidation.requireValid(content)
@@ -177,6 +178,10 @@ internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
         val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content) +
+            com.stratum.core.domain.world.WorldgenValidation.problems(
+                content.terrain, content.structureTemplates, content.registry::contains,
+                content.biomes.mapTo(HashSet()) { it.id }, content.enemies.mapTo(HashSet()) { it.id },
+            ) +
             content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) +
             ItemValidation.problems(content.itemCatalogue, content.inserts, content.damageTypes.mapTo(HashSet()) { it.id })
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
@@ -330,6 +335,8 @@ data class AssembledContent(
     val itemSets: List<ItemSetDefinition> = emptyList(),
     val itemNames: List<ItemNamePool> = emptyList(),
     val baseTiers: List<BaseTier> = emptyList(),
+    /** Dungeons, ruins and shrines for the world generator. */
+    val structureTemplates: List<com.stratum.core.domain.world.StructureTemplate> = emptyList(),
 ) {
     /**
      * Everything items are made from: every base, short-form weapons
@@ -373,7 +380,7 @@ data class AssembledContent(
     fun recipe(id: String): RecipeDefinition? = recipes.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
-    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps, settlements)
+    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps, settlements, structureTemplates)
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 

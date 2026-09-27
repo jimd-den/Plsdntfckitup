@@ -79,6 +79,22 @@ data class TerrainRecipe(
     val scatterClusterScale: Float = 0.06f,
     /** Anything a third-party generator wants; the built-in one ignores it. */
     val options: Map<String, String> = emptyMap(),
+    /**
+     * The stages of a pipeline generator, in order. Empty keeps the preset's
+     * own list; anything else replaces it outright, so a pack can reorder,
+     * drop, add and configure passes. Ignored by [LAYERED] and [TILE_MAP].
+     */
+    val passes: List<PassSpec> = emptyList(),
+    /** How biomes are placed by heat and wet. Null derives it from the biomes themselves. */
+    val climate: ClimateSpec? = null,
+    /** What cuts the underground. Empty uses the preset's own carvers. */
+    val carvers: List<CarverRule> = emptyList(),
+    /** Ore veins, on top of each biome's own deposits. */
+    val ores: List<OreRule> = emptyList(),
+    /** Trees whose canopies spill across columns and chunks. */
+    val trees: List<TreeRule> = emptyList(),
+    /** Seas, lakes, and flooded caves. */
+    val liquids: List<LiquidRule> = emptyList(),
 ) {
     init {
         require(terraceStep >= 1) { "terraceStep of $terraceStep would divide by zero" }
@@ -121,6 +137,24 @@ data class TerrainRecipe(
 
         /** Builds the world from a pack's [TileMap], named by [MAP_OPTION]. */
         const val TILE_MAP = "stratum:tilemap"
+
+        /**
+         * The staged generator's presets. Each is a list of passes; see
+         * [passes] for how a pack changes one.
+         */
+        const val OVERWORLD = "stratum:overworld"
+
+        /** An archipelago: land where the island field rises above the sea. */
+        const val ISLANDS = "stratum:islands"
+
+        /** A deep world of stacked cavern layers under a thin crust. */
+        const val CAVERNS = "stratum:caverns"
+
+        /** The same deep world as [CAVERNS], by the name Terraria players look for. */
+        const val UNDERWORLD = "stratum:underworld"
+
+        /** Level ground at sea level, for sandboxes and tests. */
+        const val FLAT_GENERATOR = "stratum:flat"
 
         /** The [options] key naming which map a [TILE_MAP] recipe plays on. */
         const val MAP_OPTION = "map"
@@ -173,6 +207,13 @@ data class TerrainContext(
     val maps: List<TileMap> = emptyList(),
     /** Kinds of town a generator may build; see the settlement layer. */
     val settlements: List<com.stratum.core.domain.settlement.SettlementRecipe> = emptyList(),
+    /** Dungeons, ruins and shrines a pipeline generator may build. */
+    val structures: List<StructureTemplate> = emptyList(),
+    /**
+     * Which towns the player may safely begin in. The session knows the
+     * factions and passes its own; a generator that builds towns itself asks this.
+     */
+    val welcoming: (com.stratum.core.domain.settlement.SettlementRecipe) -> Boolean = { it.garrison.isEmpty() },
 )
 
 /** Builds a generator from a recipe. This is the seam a new algorithm plugs into. */

@@ -60,6 +60,7 @@ internal data class PackSchema(
     val itemSets: List<ItemSetSchema> = emptyList(),
     val itemNames: List<NamePoolSchema> = emptyList(),
     val baseTiers: List<BaseTierSchema> = emptyList(),
+    val structureTemplates: List<StructureTemplateSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -77,6 +78,7 @@ internal data class PackSchema(
         agentRoles = agents.map { it.toDomain() },
         itemBases = itemBases.map { it.toDomain() }, uniques = uniques.map { it.toDomain() }, itemSets = itemSets.map { it.toDomain() },
         itemNames = itemNames.map { it.toDomain() }, baseTiers = baseTiers.map { it.toDomain() },
+        structureTemplates = structureTemplates.map { it.toDomain() },
     )
 
     companion object {
@@ -95,6 +97,7 @@ internal data class PackSchema(
             p.agentRoles.map(AgentRoleSchema::of),
             p.itemBases.map(ItemBaseSchema::of), p.uniques.map(UniqueSchema::of), p.itemSets.map(ItemSetSchema::of),
             p.itemNames.map(NamePoolSchema::of), p.baseTiers.map(BaseTierSchema::of),
+            p.structureTemplates.map(StructureTemplateSchema::of),
         )
     }
 }

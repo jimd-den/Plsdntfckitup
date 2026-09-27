@@ -1,4 +1,4 @@
-package com.stratum.engine.world
+package com.stratum.engine.worldgen
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

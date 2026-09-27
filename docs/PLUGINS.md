@@ -79,7 +79,8 @@ loaded, including the built-in pack's `igbo:` content.
 | --- | --- |
 | `blocks` | `id`, `name`, `material` (soil, stone, ore, wood, foliage, liquid, cloth, metal, ritual), `hardness`, `requiredTier`, `solid`, `opaque`, `gravity`, `light` (0-15), `drop`, `glyph` (set it to make the block scenery drawn as a sprite), `topColor`, `sideColor`, `shape` (cube, wall, floor). |
 | `biomes` | `id`, `name`, `surface`, `subsurface`, `filler` block ids, `heightBias`, `roughness`, `scatter` (`block`, `chance`, `height`, `cap`), `deposits` (`block`, `minZ`, `maxZ`, `chance`), `path`, `landmark`. |
-| `terrain` | How the world is shaped: `generator` (`stratum:layered`, or `stratum:tilemap` with `options.map` naming a map), `elevation` noise layers, `terraceStep`, `strata`. |
+| `terrain` | How the world is shaped: `generator` (`stratum:overworld`, `stratum:islands`, `stratum:caverns`/`stratum:underworld`, `stratum:flat`, `stratum:layered`, or `stratum:tilemap` with `options.map` naming a map), `elevation` noise layers, `terraceStep`, `strata`, and for the staged generators `passes`, `climate`, `carvers`, `ores`, `trees`, `liquids`; see *World generation*. |
+| `structureTemplates` | Dungeons, ruins and shrines the world generator builds; see *World generation*. |
 | `maps` | Hand-made levels: `width`, `height`, `ground`, `groundLevel`, `layers` (`palette` of block ids and one `cells` index per cell, `-1` empty; `elevation`, `thickness`), `markers` (`kind`: player_spawn, enemy_spawn, point_of_interest; `x`, `y`, `ref`). |
 | `classes` | `id`, `name`, `title`, `strength`, `agility`, `insight`, `abilities` (skill ids), `startingWeapon`, `resourceName`, `spriteSet`, `stats`. |
 | `damageTypes` | `id`, `name`, `color`, `symbol`. Every weapon, skill and monster must use a damage type some loaded pack defines. |
@@ -99,6 +100,121 @@ loaded, including the built-in pack's `igbo:` content.
 `stats` blocks take `maxHealth`, `attackPower`, `armour`, `critChance`,
 `critMultiplier`, `attackSpeed`, `attackRange`, `resistances` (damage type
 id to a share, e.g. `0.5`) and `lifeSteal`.
+
+## World generation
+
+The staged generators -- `stratum:overworld` (hills, climate-placed
+biomes, caves, tunnels, ores, dungeons), `stratum:islands` (an
+archipelago), `stratum:caverns` or `stratum:underworld` (a thin crust over
+stacked cavern layers, Terraria-style) and `stratum:flat` -- build each
+chunk in **passes**, in order. `stratum:layered` and `stratum:tilemap`
+work exactly as they always have, and ignore everything in this section.
+
+| Pass | What it does | Options |
+| --- | --- | --- |
+| `stratum:climate` | Picks every column's biome by heat and wet, and blends heights across borders. | `scale`, `blend` |
+| `stratum:hills` | Rolling ground from `elevation`, biome `heightBias` and `roughness`. | `base`, `variation`, `topMargin` |
+| `stratum:island_shape` | Islands and sea floor. | `landShare`, `islandScale`, `oceanDepth`, `shoreSlope`, `variation` |
+| `stratum:flat_shape` | Level ground. | `level` |
+| `stratum:surface` | Bedrock, filler, `strata`, subsurface and surface blocks; underground biomes. | |
+| `stratum:carvers` | Runs `carvers`, or the preset's own when there are none. | `defaults` (`overworld`, `caverns`, `none`) |
+| `stratum:liquids` | Fills air with `liquids`. | |
+| `stratum:ores` | Each biome's `deposits`, then `ores` veins. | `biomeDeposits` |
+| `stratum:decoration` | Paths, landmarks and scatter, as the layered generator draws them. | `paths`, `landmarks`, `scatter` |
+| `stratum:trees` | `trees`, whose canopies spill across chunks. | |
+| `stratum:structures` | `structureTemplates`. | `only` (comma-separated ids) |
+| `stratum:settlements` | Towns, as a pass, so they can be ordered among the others. Left out of the presets: towns are otherwise laid over the finished world. | |
+| `stratum:spawns` | Marks cave floors where monsters wait. | `perChunk`, `refId` |
+
+A recipe that lists `passes` replaces its preset's list outright, which is
+how a pack reorders, drops, adds or configures a stage. Each entry is an
+`id` and string `options`. A pass reads only what passes before it
+published, so put climate before shape and shape before everything else.
+A pass or carver this build does not know is an error naming the ones it
+does. Passes are also registered in code:
+`StratumWorldgen.passes.register("mypack:lava_lakes") { setup -> ... }`.
+
+```json
+"terrain": {
+  "generator": "stratum:overworld",
+  "climate": { "points": [
+    { "biome": "yourname:tundra", "temperature": 0.1, "moisture": 0.4 },
+    { "biome": "yourname:jungle", "temperature": 0.9, "moisture": 0.9 },
+    { "biome": "yourname:crystal_deep", "temperature": 0.5, "moisture": 0.5, "minDepth": 12, "maxDepth": 30 } ],
+    "scale": 0.005, "blend": 0.15 },
+  "carvers": [
+    { "kind": "caves", "minZ": 2, "maxZ": 40, "amount": 0.66, "size": 2.4, "headroom": 4 },
+    { "kind": "tunnels", "minZ": 3, "maxZ": 18, "amount": 0.8, "size": 1.6 },
+    { "kind": "ravines", "minZ": 6, "maxZ": 30, "amount": 0.1, "size": 1.5, "options": { "depth": "8" } } ],
+  "ores": [{ "block": "yourname:silver", "minZ": 2, "maxZ": 10, "veinsPerChunk": 2, "veinSize": 8, "biomes": ["yourname:tundra"] }],
+  "trees": [{ "trunk": "yourname:log", "leaves": "yourname:leaves", "chance": 0.02, "minHeight": 3, "maxHeight": 5, "canopyRadius": 2 }],
+  "liquids": [{ "block": "yourname:water", "maxZ": 12, "target": "open" },
+              { "block": "yourname:lava", "maxZ": 4, "target": "caves", "share": 0.6 }]
+}
+```
+
+**Climate.** Each biome sits at a `temperature` and `moisture` (0 to 1),
+and each column is the biome nearest the climate there. Neighbours in
+climate are neighbours on the map, and heights blend between biomes within
+`blend` of each other, so a border is a slope and not a wall. A biome with
+no point keeps its own `temperature` and gets an even share of moisture.
+A point with `minDepth` and `maxDepth` is an underground biome: its
+`filler` replaces the rock in that band below the surface.
+
+**Carvers** are `caves` (3D noise; `amount` is the threshold, higher is
+less cave), `caverns` (the same, fading out at the band's edges so layers
+stack with rock between them), `tunnels` and `ravines` (winding paths;
+`amount` is how many start per 64-block region, `size` the radius, options
+`length`, `depth`, `open`). `headroom` keeps that many blocks of ground
+under the surface. **Liquids** fill air up to `maxZ`: `open` above the
+ground (a sea, which is what the islands generator expects), `caves` below
+it by region (`share` of regions flooded), or `all`.
+
+**Structures** are dungeons or sets of pieces. `placement` says where:
+`biomes`, `spacing` (one per cell that many blocks across), `chance` (the
+rarity), `anchor` (`surface`, or `underground` between `minZ` and `maxZ`).
+Structures keep out of towns, landmark clearings, the sea and each other.
+
+A `dungeon` is rooms joined by corridors under the ground, with a stair
+down from the surface: `floor`, `wall`, `ceiling`, `stair`, `light`
+blocks; `minRooms`, `maxRooms`, `minRoomSize`, `maxRoomSize`,
+`roomHeight`, `depth` below the entrance, `extent`, `corridorWidth`;
+`spawnsPerRoom`, `lootChance`, `bossRoom`; `enemies` and `boss` (enemy
+ids named on its markers) and `loot` (a name for the loot layer).
+
+`pieces` are small block templates joined at `connectors`, up to
+`maxPieces`. `layers` are rows of characters, bottom layer first; layer 0
+replaces the ground. Each character is a `palette` entry -- a block id,
+or a marker: `@enemy`, `@boss`, `@loot`, `@poi`, `@entrance`, optionally
+with a reference (`@boss:yourname:lord`). A space leaves the world alone
+and `.` is air. A connector is a `side` (north is up the rows) and an
+`offset` along it; a piece joins another where their connectors face.
+Pieces are never rotated. `foundation` fills under a surface structure
+where the ground falls away.
+
+```json
+"structureTemplates": [{
+  "id": "yourname:crypt", "name": "Crypt",
+  "placement": { "biomes": ["yourname:tundra"], "spacing": 160, "chance": 0.5 },
+  "dungeon": { "floor": "yourname:tile", "wall": "yourname:brick", "light": "yourname:torch",
+    "enemies": ["yourname:ghoul"], "boss": "yourname:lich", "loot": "yourname:crypt_hoard" }
+}, {
+  "id": "yourname:shrine", "name": "Shrine", "maxPieces": 3, "foundation": "yourname:stone",
+  "pieces": [
+    { "id": "yourname:shrine_core", "start": true,
+      "palette": { "#": "yourname:brick", "_": "yourname:tile", "L": "@loot" },
+      "layers": [["#####", "#___#", "#____", "#___#", "#####"], ["#   #", "     ", "  L  ", "     ", "#   #"]],
+      "connectors": [{ "side": "east", "offset": 2 }] },
+    { "id": "yourname:shrine_wing",
+      "palette": { "#": "yourname:brick", "_": "yourname:tile", "E": "@enemy" },
+      "layers": [["###", "__#", "###"], ["   ", " E ", "   "]],
+      "connectors": [{ "side": "west", "offset": 1 }] } ]
+}]
+```
+
+The markers a structure and the spawns pass leave -- enemy spawns, the
+boss, loot, the entrance -- are read by the game through `MarkedWorld`,
+by chunk, and come out the same whether or not the chunk was generated.
 
 ## Tabletop rules
 
