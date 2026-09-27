@@ -112,6 +112,10 @@ class PlayViewModel(
     hero: HeroSave? = null,
     /** Keeps the character for next time. Called off the main thread except when the screen closes. */
     private val saveHero: (HeroSave) -> Unit = {},
+    /** Prop blocks drawn as generated 3D models, by block id. */
+    private val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Structures made from generated models, which the build tray can raise. */
+    private val blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
 ) : ViewModel() {
 
     private val initialQuality = quality
@@ -564,6 +568,9 @@ class PlayViewModel(
         styleSummary = artDirector.direction.summary,
         kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
         kitOverlays = kitOverlays,
+        propModels = propModels,
+        blueprints = blueprints.map { BlueprintChoice(it.id, it.name, it.filledCount) },
+        onRaiseBlueprint = ::raiseBlueprint,
         quality = initialQuality,
         checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
@@ -720,6 +727,13 @@ class PlayViewModel(
             BuildResult.NothingToBuild -> publish()
             is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
         }
+    }
+
+    /** Raises a model's blueprint in front of the player; see [WorldSession.raise]. */
+    fun raiseBlueprint(id: String) {
+        val blueprint = blueprints.firstOrNull { it.id == id } ?: return
+        val placed = session.raise(blueprint)
+        publish(message = if (placed > 0) "Raised ${blueprint.name}: $placed blocks" else "No room to raise ${blueprint.name} here")
     }
 
     fun place(target: BlockPos) {
@@ -957,6 +971,8 @@ class PlayViewModel(
             saveHero: (HeroSave) -> Unit = {},
             stylePrompt: String = "",
             saveStyle: (String) -> Unit = {},
+            propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+            blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
@@ -964,6 +980,7 @@ class PlayViewModel(
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
                 quality = quality, saveQuality = saveQuality, hero = loadHero(), saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
+                propModels = propModels, blueprints = blueprints,
             ) as T
         }
     }
@@ -1051,6 +1068,11 @@ data class PlayUiState(
     /** The tree, skills and worlds panel. */
     val hero: HeroPanelState = HeroPanelState(),
     val message: String? = null,
+    /** Prop blocks drawn as generated 3D models, by block id. */
+    val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Blueprints the build tray offers to raise. */
+    val blueprints: List<BlueprintChoice> = emptyList(),
+    val onRaiseBlueprint: (String) -> Unit = {},
 ) {
     val isDead: Boolean get() = !player.isAlive
 
@@ -1077,3 +1099,6 @@ data class PlayUiState(
 
 /** Used before a pack is resolved, and by previews. */
 private const val DEFAULT_RARITY_TINT = 0xFFB0BEC5L
+
+/** A blueprint as the build tray lists it. */
+data class BlueprintChoice(val id: String, val name: String, val blocks: Int)
