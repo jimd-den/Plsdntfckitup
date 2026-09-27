@@ -30,6 +30,8 @@ data class PassiveNode(
     val classIds: List<String> = emptyList(),
     /** Flavour, for a keystone's tooltip. */
     val description: String = "",
+    /** Traits taking this node grants: how a keystone changes a rule rather than a number. */
+    val traitIds: List<String> = emptyList(),
 )
 
 /** An undirected edge: either end can be allocated from the other. */

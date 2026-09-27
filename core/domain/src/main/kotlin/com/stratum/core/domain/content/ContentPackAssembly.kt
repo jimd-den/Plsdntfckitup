@@ -87,6 +87,9 @@ class ContentPackAssembler {
             structures = merger.merge(ContentPack::structures, StructureDefinition::id),
             units = merger.merge(ContentPack::units, UnitDefinition::id),
             agentRoles = merger.merge(ContentPack::agentRoles, com.stratum.core.domain.ai.AgentRoleDefinition::id),
+            statuses = merger.merge(ContentPack::statuses, com.stratum.core.domain.status.StatusDefinition::id),
+            traits = merger.merge(ContentPack::traits, com.stratum.core.domain.combat.TraitDefinition::id),
+            flasks = merger.merge(ContentPack::flasks, com.stratum.core.domain.combat.FlaskDefinition::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
@@ -165,7 +168,7 @@ internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
         val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content) +
-            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content)
+            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) + CombatValidation.problems(content)
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -316,7 +319,26 @@ data class AssembledContent(
     val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
     /** The rules the loaded packs suggest, before the player changes them. */
     val suggestedRules: com.stratum.core.domain.world.WorldRules = com.stratum.core.domain.world.WorldRules(),
+    val statuses: List<com.stratum.core.domain.status.StatusDefinition> = emptyList(),
+    val traits: List<com.stratum.core.domain.combat.TraitDefinition> = emptyList(),
+    val flasks: List<com.stratum.core.domain.combat.FlaskDefinition> = emptyList(),
 ) {
+    /** The loaded statuses, for the questions combat asks of them. */
+    val statusBook: com.stratum.core.domain.status.StatusBook by lazy { com.stratum.core.domain.status.StatusBook(statuses) }
+
+    private val skillsById by lazy { skills.associateBy { it.id } }
+    private val damageTypesById by lazy { damageTypes.associateBy { it.id } }
+    private val traitsById by lazy { traits.associateBy { it.id } }
+
+    fun status(id: String): com.stratum.core.domain.status.StatusDefinition? = statusBook[id]
+
+    fun trait(id: String): com.stratum.core.domain.combat.TraitDefinition? = traitsById[id]
+
+    fun flask(id: String): com.stratum.core.domain.combat.FlaskDefinition? = flasks.firstOrNull { it.id == id }
+
+    /** A damage type only if a pack defined it; [damageType] makes one up for display. */
+    fun damageTypeOrNull(id: String): DamageTypeDefinition? = damageTypesById[id]
+
     /** Outposts' resources, structures and units, for the questions the engine asks of them. */
     val strategyBook: StrategyBook by lazy { StrategyBook(resources, structures, units) }
 
@@ -350,7 +372,7 @@ data class AssembledContent(
         damageTypes.firstOrNull { it.id == id }
             ?: DamageTypeDefinition(id = id, name = id.substringAfter(':'))
 
-    fun skill(id: String): SkillDefinition? = skills.firstOrNull { it.id == id }
+    fun skill(id: String): SkillDefinition? = skillsById[id]
 
     fun weapon(id: String): WeaponBase? = weapons.firstOrNull { it.id == id }
 

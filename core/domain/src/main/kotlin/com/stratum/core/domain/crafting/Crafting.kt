@@ -1,5 +1,8 @@
 package com.stratum.core.domain.crafting
 
+import com.stratum.core.domain.actor.SkillTags
+import com.stratum.core.domain.combat.TriggerDefinition
+import com.stratum.core.domain.combat.TriggerEvent
 import com.stratum.core.domain.stats.ModifierKind
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.StatModifier
@@ -64,7 +67,25 @@ data class SupportDefinition(
     val color: Long = 0xFF7FB8E0,
     val weight: Int = 100,
     val minItemLevel: Int = 1,
-)
+    /** Only links to a skill carrying one of these tags; empty links to anything. */
+    val requiresTags: Set<String> = emptySet(),
+    /** Tags the linked skill gains, so a support can make a skill count as something it was not. */
+    val addsTags: Set<String> = emptySet(),
+    /** Effects added to the linked skill: "chance to poison", "knocks back". */
+    val effects: List<com.stratum.core.domain.actor.SkillEffect> = emptyList(),
+    /** Partial conversions of the linked skill's damage; [convertsToDamageTypeId] is the whole-skill shorthand. */
+    val conversions: List<com.stratum.core.domain.combat.DamageConversion> = emptyList(),
+    /**
+     * Makes the linked skill cast itself when this fires -- "cast on
+     * critical strike" -- for free, bounded by the trigger's cooldown and the
+     * world's trigger depth.
+     */
+    val trigger: com.stratum.core.domain.combat.TriggerDefinition? = null,
+) {
+    /** Whether it may be linked to [skill]. */
+    fun fits(skill: com.stratum.core.domain.actor.SkillDefinition): Boolean =
+        requiresTags.isEmpty() || requiresTags.any(skill::hasTag)
+}
 
 /**
  * The currency and supports the engine drops when no pack brings its own, so
@@ -107,6 +128,21 @@ object StandardCrafting {
         SupportDefinition(
             "stratum:support/concentrate", "Concentrate", "A narrower blow that hits far harder.",
             listOf(more(Stat.SKILL_DAMAGE, 0.3f), more(Stat.AREA, -0.3f)), color = 0xFFB070D0, minItemLevel = 8,
+        ),
+        SupportDefinition(
+            "stratum:support/volley", "Volley", "Two more projectiles, each a little weaker.",
+            listOf(StatModifier(Stat.PROJECTILES, ModifierKind.FLAT, 2f), more(Stat.SKILL_DAMAGE, -0.25f)),
+            color = 0xFFE0A050, minItemLevel = 4, requiresTags = setOf(SkillTags.PROJECTILE),
+        ),
+        SupportDefinition(
+            "stratum:support/ricochet", "Ricochet", "Projectiles leap on to two more targets.",
+            listOf(StatModifier(Stat.CHAIN, ModifierKind.FLAT, 2f), more(Stat.SKILL_DAMAGE, -0.15f)),
+            color = 0xFF80C0F0, minItemLevel = 6, requiresTags = setOf(SkillTags.PROJECTILE, SkillTags.CHAIN),
+        ),
+        SupportDefinition(
+            "stratum:support/answer", "The Answer", "A spell that casts itself when your attacks strike critically.",
+            listOf(more(Stat.SKILL_DAMAGE, -0.2f)), color = 0xFFF06080, minItemLevel = 10, requiresTags = setOf(SkillTags.SPELL),
+            trigger = TriggerDefinition(TriggerEvent.ON_CRIT, cooldownSeconds = 0.3f, requiresTags = setOf(SkillTags.ATTACK)),
         ),
     )
 
