@@ -1,6 +1,7 @@
 package com.stratum.core.data.sprite
 
 import android.content.Context
+import com.stratum.core.domain.ai.PoseRunRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,14 +59,22 @@ class PoseLibrary(context: Context) {
     private fun writableDir(setId: String): File = setDir(setId).apply { mkdirs() }
 
     fun saveReference(setId: String, bytes: ByteArray) {
-        File(writableDir(setId), REFERENCE).writeBytes(bytes)
+        AtomicFiles.write(File(writableDir(setId), REFERENCE), bytes)
         refresh()
     }
 
     fun reference(setId: String): ByteArray? = read(File(setDir(setId), REFERENCE))
 
+    /**
+     * Written whole or not at all.
+     *
+     * A pose's presence on disk is what marks it drawn, so a half-written file
+     * is worse than none: a process killed mid-write left a truncated PNG
+     * that counted as done, was skipped by every later run, and surfaced only
+     * as a hole in the packed sheet.
+     */
     fun savePose(setId: String, key: String, bytes: ByteArray) {
-        File(writableDir(setId), "${key.replace(NON_FILE_SAFE, "_")}$SUFFIX").writeBytes(bytes)
+        AtomicFiles.write(File(writableDir(setId), "${key.replace(NON_FILE_SAFE, "_")}$SUFFIX"), bytes)
         refresh()
     }
 
@@ -97,7 +106,7 @@ class PoseLibrary(context: Context) {
      * anything at all.
      */
     fun saveClip(setId: String, key: String, bytes: ByteArray) {
-        File(writableDir(setId), clipName(key)).writeBytes(bytes)
+        AtomicFiles.write(File(writableDir(setId), clipName(key)), bytes)
         refresh()
     }
 
@@ -145,6 +154,27 @@ class PoseLibrary(context: Context) {
         refresh()
     }
 
+    /**
+     * Keeps what a character's run was for, beside its poses.
+     *
+     * In the set's own folder so it is deleted with the character, and named
+     * so that neither [keysIn] nor [clipKeysIn] can mistake it for art.
+     */
+    fun saveRunRecord(record: PoseRunRecord) {
+        AtomicFiles.write(
+            File(writableDir(record.setId), RUN_RECORD),
+            PoseRunRecord.encode(record).toByteArray(Charsets.UTF_8),
+        )
+    }
+
+    fun runRecord(setId: String): PoseRunRecord? =
+        read(File(setDir(setId), RUN_RECORD))?.let { PoseRunRecord.decode(it.toString(Charsets.UTF_8)) }
+
+    /** Every set's record, most recently worked on first. */
+    fun runRecords(): List<PoseRunRecord> = listSetsFromDisk().mapNotNull { dir ->
+        read(File(File(root, dir), RUN_RECORD))?.let { PoseRunRecord.decode(it.toString(Charsets.UTF_8)) }
+    }
+
     private fun read(file: File): ByteArray? =
         if (file.isFile) runCatching { file.readBytes() }.getOrNull() else null
 
@@ -160,6 +190,7 @@ class PoseLibrary(context: Context) {
          */
         const val CLIP_SUFFIX = ".mp4"
         const val REFERENCE = "reference.png"
+        const val RUN_RECORD = "run.json"
         val NON_FILE_SAFE = Regex("[^A-Za-z0-9._-]")
     }
 }

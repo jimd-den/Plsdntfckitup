@@ -55,6 +55,16 @@ data class ImageRequest(
      * the pose to change, and it is the same one.
      */
     val references: List<ImageReference> = emptyList(),
+    /**
+     * Which attempt at this exact request this is, counting from zero.
+     *
+     * The provider never sees it. It exists for [CachingImageModel]: an
+     * identical request is answered from what was already paid for, and a
+     * deliberate second attempt — a frame redrawn because the first came back
+     * cropped — has to be told apart from an accidental repeat, or it would be
+     * handed the same cropped frame again.
+     */
+    val take: Int = 0,
 )
 
 /** An image sent to the model, rather than one it sent back. */

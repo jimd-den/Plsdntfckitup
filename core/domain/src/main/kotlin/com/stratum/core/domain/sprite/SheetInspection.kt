@@ -66,7 +66,57 @@ data class SheetPreparation(
      * generation from a broken game.
      */
     val looksEmpty: Boolean = false,
-)
+    /**
+     * Neighbouring frames of one clip that are the same drawing, as frame
+     * indices. A model asked for six poses sometimes draws three, twice each,
+     * and a walk with a repeated frame plays as a hitch nobody can explain.
+     */
+    val repeatedFrames: List<Pair<Int, Int>> = emptyList(),
+) {
+    /**
+     * The one thing worth telling a person about this sheet, or null.
+     *
+     * An empty sheet first, because it makes every other observation beside
+     * the point; then a grid that was not the one asked for; then repeats.
+     */
+    val note: String?
+        get() = when {
+            looksEmpty ->
+                "The model returned an all but blank image — there is nothing to draw, so the " +
+                    "world will keep showing the fallback shape. Try again, or a different model."
+            grid.outcome != GridOutcome.AS_ASKED -> grid.summary
+            repeatedFrames.isNotEmpty() ->
+                "${repeatedFrames.size} frame${if (repeatedFrames.size == 1) " is" else "s are"} the same " +
+                    "drawing as the one before (frames " +
+                    repeatedFrames.joinToString { "${it.first + 1}–${it.second + 1}" } +
+                    "). Remove the repeats in the frame mapper, or generate again."
+            else -> null
+        }
+}
+
+/** Frames of a sheet that repeat the frame before them within the same clip. */
+object SheetRepeats {
+
+    fun find(pixels: IntArray, width: Int, height: Int, sheet: SpriteSheet): List<Pair<Int, Int>> {
+        if (width <= 0 || height <= 0 || pixels.size < width * height) return emptyList()
+        val analyses = HashMap<Int, FrameAnalysis?>()
+        fun analysis(frame: Int): FrameAnalysis? = analyses.getOrPut(frame) { analyseCell(pixels, width, height, sheet, frame) }
+        return sheet.clips.flatMap { clip ->
+            val frames = (clip.firstFrame until clip.firstFrame + clip.frameCount).toList()
+            FrameQuality.repeatedNeighbours(frames.map(::analysis)).map { (a, b) -> frames[a] to frames[b] }
+        }.distinct()
+    }
+
+    private fun analyseCell(pixels: IntArray, width: Int, height: Int, sheet: SpriteSheet, frame: Int): FrameAnalysis? {
+        val rect = sheet.frameRect(frame)
+        val clamped = SourceRect(rect.left, rect.top, rect.width, rect.height).clampedTo(width, height) ?: return null
+        val cell = IntArray(clamped.width * clamped.height)
+        for (y in 0 until clamped.height) {
+            pixels.copyInto(cell, y * clamped.width, (clamped.top + y) * width + clamped.left, (clamped.top + y) * width + clamped.left + clamped.width)
+        }
+        return FrameAnalyser.analyse(cell, clamped.width, clamped.height).takeIf { !it.isEmpty }
+    }
+}
 
 /**
  * Checks whether a returned image is really laid out on the grid we asked for.

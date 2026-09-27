@@ -56,10 +56,10 @@ class SpriteLibrary(context: Context) {
 
     fun save(sheet: SpriteSheet, imageBytes: ByteArray) {
         val slug = slugFor(sheet.id)
-        File(root, "$slug$IMAGE_SUFFIX").writeBytes(imageBytes)
+        AtomicFiles.write(File(root, "$slug$IMAGE_SUFFIX"), imageBytes)
         // Metadata last: an image without it is ignored, which is recoverable.
         // Metadata without an image would be a sheet that cannot be drawn.
-        File(root, "$slug$METADATA_SUFFIX").writeText(json.encodeToString(sheet.toDto()))
+        AtomicFiles.write(File(root, "$slug$METADATA_SUFFIX"), json.encodeToString(sheet.toDto()).toByteArray(Charsets.UTF_8))
         bitmaps.remove(sheet.id)
         drawn.remove(sheet.id)
         refresh()
