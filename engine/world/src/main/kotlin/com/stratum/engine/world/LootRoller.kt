@@ -42,7 +42,9 @@ class LootRoller(
         /** Improves the rarity roll: elites and bosses pass a bonus here. */
         rarityBonus: Float = 0f,
         slot: ItemSlot? = null,
-    ): ItemInstance? = generator.roll(itemLevel, random, rarityBonus, slot)
+        /** The least a rolled item may be; see [ItemGenerator.roll]. */
+        floor: ItemRarity = ItemRarity.COMMON,
+    ): ItemInstance? = generator.roll(itemLevel, random, rarityBonus, slot, floor)
 
     /** A specific item from a named base, for starting gear and for drops that should be a particular thing. */
     fun craft(base: ItemBase, itemLevel: Int, rarity: ItemRarity, random: Random): ItemInstance =

@@ -50,6 +50,7 @@ import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.TerrainGenerator
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
+import com.stratum.core.domain.world.MarkedWorld
 import com.stratum.core.domain.world.WorldPoint
 import kotlin.math.abs
 import kotlin.math.floor
@@ -85,7 +86,9 @@ class WorldSession(
     /** A character carried in from an earlier world; null starts fresh at level one. */
     hero: HeroSave? = null,
 ) {
-    private val generator: TerrainGenerator = terrainGenerator ?: withTowns(StratumTerrain.create(content.terrainContext(config).copy(welcoming = ::welcoming)))
+    /** The terrain as its generator made it, before towns are laid over it: what can say where it marked things. */
+    private val landscape: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(content.terrainContext(config).copy(welcoming = ::welcoming))
+    private val generator: TerrainGenerator = if (terrainGenerator != null) terrainGenerator else withTowns(landscape)
 
     /** The towns in this world, when the generator builds any. */
     private val atlas: SettlementAtlas? = generator as? SettlementAtlas
@@ -116,11 +119,12 @@ class WorldSession(
     /** How this world plays; see [WorldRules]. */
     val rules: WorldRules get() = config.rules
 
-    private val director = EnemyDirector(
-        streamingWorld, content.enemies,
-        config = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1)),
-        difficulty = difficulty, packs = content.enemyPacks,
-    )
+    private val directorConfig = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1))
+    private val director = EnemyDirector(streamingWorld, content.enemies, config = directorConfig, difficulty = difficulty, packs = content.enemyPacks)
+
+    /** A generated world's dungeon markers, peopled as the player comes near; null when the generator marks nothing. */
+    private val markers = (landscape as? MarkedWorld)?.let(::MarkerPopulation)
+    private val markerEncounters = MarkerEncounters(content) { x, y -> biomeSource?.biomeAt(x, y)?.id }
 
     /** Dawn to dawn; night is colder and busier. */
     val clock = WorldClock(config.rules.dayLengthMinutes * 60f)
@@ -411,6 +415,7 @@ class WorldSession(
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
         streamingWorld.focusOn(player.blockPos)
 
+        populateMarkers()
         val news = realm.advance(deltaSeconds, player.position, random).onEach(::onRealm).map(CombatEvent::Realm)
         val produced = pending.toList().also { pending.clear() } + news + monstersAct(deltaSeconds) + collectLoot() + collectInserts() + endRaids()
         animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { hitFlashes.intensity(it) > 0f }
@@ -465,7 +470,7 @@ class WorldSession(
      * when the world should contain something specific.
      */
     fun spawn(definition: EnemyDefinition, position: WorldPoint): EnemyInstance =
-        director.instantiate(definition, position, player.level, random).also { enemies = enemies + it }
+        director.instantiate(definition, position, player.level, random, rank = definition.rank).also { enemies = enemies + it }
 
     /** Puts an item on the ground, for a chest or a quest reward. */
     fun dropLoot(item: ItemInstance, position: WorldPoint) = ground.drop(GroundLoot(item, position))
@@ -1041,6 +1046,27 @@ class WorldSession(
         }
     }
 
+    /**
+     * Wakes the generated world's markers the player has come near: its
+     * monsters at the rank the data gave them, its bosses as bosses, and its
+     * chests as a drop on the floor. Each marker is peopled once a session;
+     * its dice come from the seed and the marker, not the session's stream.
+     */
+    private fun populateMarkers() {
+        val population = markers ?: return
+        population.follow(streamingWorld.residency) { streamingWorld.loadedChunks.map { it.pos } }
+        val room = (directorConfig.maxAlive * MARKER_CROWD - enemies.size).coerceAtLeast(0)
+        population.wake(player.position, room).forEach { marker ->
+            val dice = MarkerEncounters.diceFor(config.seed, marker)
+            when (val encounter = markerEncounters.resolve(marker, dice)) {
+                is MarkerEncounter.Monster ->
+                    enemies = enemies + director.instantiate(encounter.definition, marker.centre, player.level, dice, rank = encounter.rank)
+                is MarkerEncounter.Chest -> drops.chestAt(marker.centre, player.level, dice, earnings.lootFind)?.let(ground::drop)
+                null -> Unit
+            }
+        }
+    }
+
     /** A mined block goes in the bag, and onto the hotbar if it is something that can be placed. */
     private fun pocketed(player: PlayerState, drop: String): PlayerState {
         val holding = player.withItem(drop)
@@ -1093,6 +1119,9 @@ class WorldSession(
 
     companion object {
         const val SPAWN_SEARCH_RADIUS = 12
+
+        /** Marker monsters fill up to this many times the director's own cap, so a dungeon is fuller than the wilds but never a flood. */
+        const val MARKER_CROWD = 2
 
         /** Blocks of open ground left between the player and a raised blueprint. */
         const val BLUEPRINT_CLEARANCE = 2

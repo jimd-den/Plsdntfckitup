@@ -143,14 +143,22 @@ class EnemyDirector(
     /**
      * Builds a live monster, scaled to the player's level so a world stays
      * dangerous as they grow rather than becoming a walk.
+     *
+     * A wandering monster's rank is rolled. One placed on purpose -- a
+     * dungeon's boss, a level author's marker, a scripted encounter -- passes
+     * its [rank], so a boss is a boss by what the data says rather than by
+     * luck. The roll is drawn either way, so placing one does not shift the
+     * dice of everything after it.
      */
     fun instantiate(
         definition: EnemyDefinition,
         position: WorldPoint,
         playerLevel: Int,
         random: Random,
+        rank: EnemyRank? = null,
     ): EnemyInstance {
-        val rank = rollRank(random)
+        val rolled = rollRank(random)
+        val rank = rank ?: rolled
         val levelScale = 1f + (playerLevel + difficulty.monsterLevelBonus - 1) * config.scalingPerLevel
 
         val stats = definition.baseStats.let { base ->

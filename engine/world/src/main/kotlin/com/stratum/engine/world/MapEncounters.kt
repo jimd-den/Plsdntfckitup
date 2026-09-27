@@ -33,7 +33,7 @@ internal object MapEncounters {
             Encounter(definition, placed)
         }
 
-    private fun named(ref: String?, enemies: List<EnemyDefinition>): EnemyDefinition? {
+    fun named(ref: String?, enemies: List<EnemyDefinition>): EnemyDefinition? {
         val wanted = ref?.let(::simplified)?.takeIf(String::isNotEmpty) ?: return null
         return enemies.firstOrNull { simplified(it.id) == wanted || simplified(it.id.substringAfter(':')) == wanted || simplified(it.name) == wanted }
     }

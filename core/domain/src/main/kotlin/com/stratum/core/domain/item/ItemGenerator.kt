@@ -26,6 +26,8 @@ class ItemGenerator(val catalogue: ItemCatalogue) {
         rarityBonus: Float = 0f,
         /** Keeps the roll to one kind of item, for a drop that should be a ring. */
         slot: ItemSlot? = null,
+        /** The least a rolled item may be: a chest is never a common. Uniques are unaffected. */
+        floor: ItemRarity = ItemRarity.COMMON,
     ): ItemInstance? {
         val bases = eligibleBases(itemLevel, slot)
         if (bases.isEmpty()) return null
@@ -40,7 +42,7 @@ class ItemGenerator(val catalogue: ItemCatalogue) {
         }
 
         val base = pickWeighted(bases, random) { it.weight } ?: return null
-        return craft(base, itemLevel, rollRarity(random, rarityBonus), random)
+        return craft(base, itemLevel, rollRarity(random, rarityBonus, floor), random)
     }
 
     /**
@@ -183,15 +185,17 @@ class ItemGenerator(val catalogue: ItemCatalogue) {
     /**
      * Picks a tier by weight. Common is overwhelmingly likely by design: the
      * loop only works if a relic is rare enough to be worth stopping for.
+     * Tiers below [floor] are struck from the table, so the tiers above keep
+     * their proportions to each other.
      */
-    fun rollRarity(random: Random, rarityBonus: Float = 0f): ItemRarity {
+    fun rollRarity(random: Random, rarityBonus: Float = 0f, floor: ItemRarity = ItemRarity.COMMON): ItemRarity {
         val boosted = ItemRarity.ordered.associateWith { rarity ->
-            if (rarity == ItemRarity.COMMON) {
+            when {
+                rarity < floor -> 0
                 // The bonus takes weight away from common rather than inflating
                 // every tier, so a bonus of 1 guarantees something better.
-                (rarity.weight * (1f - rarityBonus.coerceIn(0f, 1f))).roundToInt()
-            } else {
-                rarity.weight
+                rarity == ItemRarity.COMMON -> (rarity.weight * (1f - rarityBonus.coerceIn(0f, 1f))).roundToInt()
+                else -> rarity.weight
             }
         }
         val total = boosted.values.sum().coerceAtLeast(1)
@@ -200,7 +204,7 @@ class ItemGenerator(val catalogue: ItemCatalogue) {
             roll -= boosted.getValue(rarity)
             if (roll < 0) return rarity
         }
-        return ItemRarity.COMMON
+        return ItemRarity.ordered.firstOrNull { it >= floor } ?: ItemRarity.ordered.last()
     }
 
     companion object {

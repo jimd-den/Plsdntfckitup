@@ -30,6 +30,14 @@ class StreamingWorld(
 
     override val loadedChunks: Collection<Chunk> get() = chunks.values
 
+    /**
+     * Counts every chunk arriving or leaving, so something that follows the
+     * resident set -- markers waiting to be peopled -- can tell in one
+     * comparison that nothing changed since it last looked.
+     */
+    var residency: Int = 0
+        private set
+
     /** Chunk the streaming window is currently centred on. */
     var focus: ChunkPos = ChunkPos(0, 0)
         private set
@@ -79,11 +87,13 @@ class StreamingWorld(
     }
 
     override fun loadChunk(pos: ChunkPos): Chunk = chunks.getOrPut(pos) {
+        residency++
         modifiedChunks.remove(pos) ?: generator.generate(pos, registry)
     }
 
     override fun unloadChunk(pos: ChunkPos) {
         val chunk = chunks.remove(pos) ?: return
+        residency++
         if (pos in editedPositions) {
             modifiedChunks[pos] = chunk
         }
@@ -121,6 +131,7 @@ class StreamingWorld(
     /** Drops an existing chunk in, bypassing generation. Used when loading a save. */
     fun installChunk(chunk: Chunk, markEdited: Boolean = true) {
         chunks[chunk.pos] = chunk
+        residency++
         if (markEdited) editedPositions += chunk.pos
     }
 }

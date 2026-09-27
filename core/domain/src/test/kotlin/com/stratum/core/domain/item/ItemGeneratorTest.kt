@@ -148,4 +148,17 @@ class ItemGeneratorTest {
         val range = catalogue.unique("t:bloodring")!!.modifiers.single()
         assertTrue(range.admits(tempered.modifiers.single()))
     }
+
+    @Test
+    fun `a rarity floor strikes the tiers below it and keeps the rest in proportion`() {
+        val rolls = (1..400).map { generator.rollRarity(Random(it.toLong()), floor = ItemRarity.RARE) }
+        assertTrue(rolls.all { it >= ItemRarity.RARE }, rolls.toString())
+        assertTrue(rolls.count { it == ItemRarity.RARE } > rolls.count { it == ItemRarity.EPIC }, "rare stays commoner than epic")
+    }
+
+    @Test
+    fun `a floored roll never rolls a lesser item`() {
+        val items = (1..100).mapNotNull { generator.roll(20, Random(it.toLong()), floor = ItemRarity.EPIC) }
+        assertTrue(items.all { it.rarity >= ItemRarity.EPIC || !it.rarity.isRolled })
+    }
 }
