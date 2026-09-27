@@ -58,9 +58,9 @@ internal fun VitalsCard(state: PlayUiState, modifier: Modifier = Modifier) {
         shape = Cut.small,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Space.small),
     ) {
-        StratumMeter(label = "♥ Vitality", value = state.player.health, max = state.player.maxHealthWithGear, tint = colors.danger)
+        StratumMeter(label = "♥ Vitality", value = state.player.health, max = state.maxHealth, tint = colors.danger)
         Spacer(Modifier.height(Space.hair))
-        StratumMeter(label = "✦ ${state.player.resourceName}", value = state.player.resource, max = state.player.resourceCeiling, tint = colors.accentAlt)
+        StratumMeter(label = "✦ ${state.player.resourceName}", value = state.player.resource, max = state.maxResource, tint = colors.accentAlt)
         Spacer(Modifier.height(Space.tight))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("LV ${state.player.level}" + if (state.hero.tier > 0) " · T${state.hero.tier}" else "", style = MaterialTheme.typography.labelSmall, color = colors.accent)

@@ -851,6 +851,8 @@ class PlayViewModel(
             zones = snapshot.zones,
             telegraphs = snapshot.telegraphs,
             flasks = snapshot.flasks,
+            maxHealth = snapshot.maxHealth,
+            maxResource = snapshot.maxResource,
             hero = heroPanel(),
             gear = gearPanel(),
             sandbox = sandboxPanel(),
@@ -1236,6 +1238,9 @@ data class PlayUiState(
     val zones: List<com.stratum.engine.world.Zone> = emptyList(),
     val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
     val flasks: List<com.stratum.engine.world.FlaskView> = emptyList(),
+    /** The bars' ceilings with traits and boons counted, from the session; the player's own fields cannot see those. */
+    val maxHealth: Int = player.maxHealthWithGear,
+    val maxResource: Int = player.resourceCeiling,
     val playerFlash: Float = 0f,
     /** Per-actor hit flash, read by the renderer for each visible monster. */
     val flashFor: (String) -> Float = { 0f },
