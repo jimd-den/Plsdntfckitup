@@ -83,7 +83,6 @@ internal fun HomeScreen(
     onSprites: () -> Unit,
     spriteCount: Int,
     onSettings: () -> Unit,
-    onStudio: () -> Unit,
     onLibrary: () -> Unit = {},
     importedCount: Int = 0,
     modifier: Modifier = Modifier,
@@ -128,7 +127,6 @@ internal fun HomeScreen(
         TileSpec("🌍", "World generator", "The agent crew writes a whole world: blocks, regions, factions, monsters, towns, lore.", onForge),
         TileSpec("🧩", "Plugins and games", "Import Flame or Tiled games, install mods, share your own.", onLibrary,
             status = if (importedCount > 0) "$importedCount loaded" else "Nothing imported yet"),
-        TileSpec("🛠", "Creator studio", "The full editor, for pack makers.", onStudio),
         TileSpec("⚙", "Model provider", "Connect the AI that paints and writes for the forges.", onSettings,
             status = if (modelReady) "Connected" else "Not set up"),
     )

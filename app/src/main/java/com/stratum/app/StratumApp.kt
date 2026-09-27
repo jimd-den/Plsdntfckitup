@@ -73,20 +73,17 @@ import com.stratum.feature.play.PlayViewModel
 import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, ARMOURY, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW, MODELS }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, ARMOURY, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, LIBRARY, CREW, MODELS }
 
 /**
  * The app shell.
  *
- * Navigation is a single state value rather than a nav graph: with three
- * destinations and no deep links, a graph would be ceremony. It becomes one when
- * the studio screens are broken into their own feature modules.
+ * Navigation is a single state value rather than a nav graph: every
+ * destination is one step from home and there are no deep links, so a graph
+ * would be ceremony.
  */
 @Composable
-fun StratumApp(
-    modifier: Modifier = Modifier,
-    studioContent: @Composable (onBack: () -> Unit) -> Unit = {},
-) {
+fun StratumApp(modifier: Modifier = Modifier) {
     var destination by remember { mutableStateOf(Destination.HOME) }
 
     val context = LocalContext.current
@@ -368,7 +365,6 @@ fun StratumApp(
                 onSprites = { destination = Destination.SPRITES },
                 spriteCount = spriteSheets.size,
                 onSettings = { destination = Destination.SETTINGS },
-                onStudio = { destination = Destination.STUDIO },
                 onLibrary = { destination = Destination.LIBRARY },
                 importedCount = importedPacks.size,
                 onModelForge = { destination = Destination.MODELS },
@@ -883,7 +879,5 @@ fun StratumApp(
                 modifier = modifier,
             )
         }
-
-        Destination.STUDIO -> studioContent { destination = Destination.HOME }
     }
 }
