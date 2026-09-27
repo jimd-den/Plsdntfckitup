@@ -177,6 +177,10 @@ class PlayViewModel(
     private val rarityColors: (com.stratum.core.domain.item.ItemRarity) -> Long =
         { rarity -> session.content.rarityColor(rarity) }
 
+    /** Damage types by id, for the gear panel's resistance lines and the sandbox's pickers. Above [init]: the first publish reads them. */
+    private val damageTypeNames: Map<String, String> = content.damageTypes.associate { it.id to it.name }
+    private val damageTypeChoices = content.damageTypes.map { NamedChoice(it.id, it.name, color = it.color) }
+
     init {
         publish()
         startLoop()
@@ -546,8 +550,6 @@ class PlayViewModel(
         )
     }
 
-    private val damageTypeNames: Map<String, String> = content.damageTypes.associate { it.id to it.name }
-
     fun unequip(slot: com.stratum.core.domain.item.EquipmentSlot) {
         publish(message = describe(session.unequip(slot)))
     }
@@ -879,8 +881,6 @@ class PlayViewModel(
         _state.value = _state.value.copy(hero = _state.value.hero.copy(query = query))
         publish()
     }
-
-    private val damageTypeChoices = content.damageTypes.map { NamedChoice(it.id, it.name, color = it.color) }
 
     private fun displayName(blockId: String): String =
         session.content.registry.indexOrNull(blockId)
