@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.stratum.agents.ApprovalGate
+import com.stratum.agents.CrewPreset
 import com.stratum.agents.Review
 import com.stratum.agents.StudioBrief
 import com.stratum.agents.StudioJournal
@@ -25,6 +26,9 @@ data class PendingReview(val step: StudioStep, val fragment: String)
 data class CrewUiState(
     val prompt: String = "",
     val packName: String = "",
+    /** Ready-made crews to start from: the loaded packs' own, and a whole world. */
+    val presets: List<CrewPreset> = emptyList(),
+    val presetId: String? = null,
     val crew: List<AgentRoleDefinition> = emptyList(),
     /** Roles the person has switched off for this run. */
     val benched: Set<String> = emptySet(),
@@ -48,12 +52,17 @@ data class CrewUiState(
 class CrewViewModel(
     private val model: LanguageModelPort,
     private val base: () -> List<ContentPack>,
-    crew: List<AgentRoleDefinition>,
+    presets: List<CrewPreset>,
     private val isProviderConfigured: () -> Boolean,
     private val onInstall: (ContentPack) -> Unit,
+    initialPreset: String? = null,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(CrewUiState(crew = crew, providerConfigured = isProviderConfigured()))
+    private val _state = MutableStateFlow(
+        (presets.firstOrNull { it.id == initialPreset } ?: presets.firstOrNull()).let { preset ->
+            CrewUiState(presets = presets, presetId = preset?.id, crew = preset?.roles.orEmpty(), providerConfigured = isProviderConfigured())
+        },
+    )
     val state: StateFlow<CrewUiState> = _state.asStateFlow()
 
     private var decision: CompletableDeferred<Review>? = null
@@ -62,6 +71,13 @@ class CrewViewModel(
     fun updatePrompt(prompt: String) = update { copy(prompt = prompt) }
 
     fun updateName(name: String) = update { copy(packName = name) }
+
+    /** Starts from a ready-made crew, every role back on the bench's other side. */
+    fun selectPreset(presetId: String) {
+        if (_state.value.running) return
+        val preset = _state.value.presets.firstOrNull { it.id == presetId } ?: return
+        update { copy(presetId = preset.id, crew = preset.roles, benched = emptySet()) }
+    }
 
     fun toggleRole(roleId: String) = update { copy(benched = if (roleId in benched) benched - roleId else benched + roleId) }
 
@@ -128,12 +144,13 @@ class CrewViewModel(
         fun factory(
             model: LanguageModelPort,
             base: () -> List<ContentPack>,
-            crew: List<AgentRoleDefinition>,
+            presets: List<CrewPreset>,
             isProviderConfigured: () -> Boolean,
             onInstall: (ContentPack) -> Unit,
+            initialPreset: String? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = CrewViewModel(model, base, crew, isProviderConfigured, onInstall) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = CrewViewModel(model, base, presets, isProviderConfigured, onInstall, initialPreset) as T
         }
     }
 }

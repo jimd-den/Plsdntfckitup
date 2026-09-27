@@ -62,6 +62,14 @@ object Creations {
         loreEntries = pack.loreEntries + creations.loreEntries,
     )
 
+    /**
+     * [pack] with every id it defines moved to [namespace], references
+     * inside it following, for a copy that must not collide with the
+     * original: a player's creations shared to someone who has their own.
+     */
+    fun renamespaced(pack: ContentPack, namespace: String): ContentPack =
+        rename(pack, idsOf(pack).associateWith { "$namespace:${it.substringAfter(':')}" }).copy(id = namespace)
+
     /** Removes one kept thing, and the lore that was about it. */
     fun remove(pack: ContentPack, id: String): ContentPack = pack.copy(
         itemBases = pack.itemBases.filterNot { it.id == id },

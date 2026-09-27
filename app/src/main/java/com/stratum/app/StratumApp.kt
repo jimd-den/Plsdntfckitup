@@ -47,8 +47,8 @@ import com.stratum.core.domain.sprite.SpriteMapper
 import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.core.domain.sprite.WeaponPosing
 import com.stratum.core.domain.sprite.WeaponRig
-import com.stratum.feature.forge.ForgeScreen
-import com.stratum.feature.forge.ForgeViewModel
+import com.stratum.feature.forge.ContentForgeScreen
+import com.stratum.feature.forge.ContentForgeViewModel
 import com.stratum.feature.forge.PoseForgeScreen
 import com.stratum.feature.forge.PoseForgeViewModel
 import com.stratum.feature.forge.PoseRun
@@ -69,7 +69,7 @@ import com.stratum.feature.play.PlayViewModel
 import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, ARMOURY, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW }
 
 /**
  * The app shell.
@@ -87,9 +87,9 @@ fun StratumApp(
 
     val context = LocalContext.current
 
-    // Packs the player has forged this session. Adding one rebuilds the
-    // assembled content, so the next world is made of the new material.
-    var forgedPacks by remember { mutableStateOf(emptyList<ContentPack>()) }
+    // The crew the agent studio opens with, when the way in chose one: the
+    // home screen's world generator is the studio with the whole-world crew.
+    var crewPreset by remember { mutableStateOf<String?>(null) }
 
     // Classes the player built, loaded as a pack of their own so a class they
     // made and a class the pack shipped travel the same road.
@@ -106,9 +106,12 @@ fun StratumApp(
     // Only what resolved, in load order: a plugin missing a dependency never half-loads.
     val importedPacks = pluginLibrary.activePacks
 
-    val content = remember(forgedPacks, importedPacks, customClasses) {
+    // Everything AI writes arrives as an installed plugin -- the crew's packs
+    // and the player's own creations -- so it is all in importedPacks and
+    // survives a restart.
+    val content = remember(importedPacks, customClasses) {
         GameSetup.assemble(
-            importedPacks + forgedPacks + if (customClasses.isEmpty()) emptyList()
+            importedPacks + if (customClasses.isEmpty()) emptyList()
             else listOf(CustomClassPack.of(customClasses)),
         )
     }
@@ -340,8 +343,13 @@ fun StratumApp(
                     seed = System.currentTimeMillis()
                     destination = Destination.PLAY
                 },
-                onForge = { destination = Destination.FORGE },
+                onForge = {
+                    crewPreset = com.stratum.agents.CrewPresets.WORLD
+                    destination = Destination.CREW
+                },
                 onCrew = { destination = Destination.CREW },
+                onArmoury = { destination = Destination.ARMOURY },
+                creationCount = remember(pluginLibrary) { plugins.creationCount() },
                 onSprites = { destination = Destination.SPRITES },
                 spriteCount = spriteSheets.size,
                 onSettings = { destination = Destination.SETTINGS },
@@ -359,7 +367,7 @@ fun StratumApp(
                 onBack = { destination = Destination.HOME },
                 onShareCreations = {
                     if (!plugins.shareCreations(customClasses)) {
-                        Toast.makeText(context, "Build a class first", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Build a class or keep something from the content forge first", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = modifier,
@@ -459,11 +467,17 @@ fun StratumApp(
                 factory = com.stratum.feature.forge.CrewViewModel.factory(
                     model = ai.languageModel,
                     base = { content.packs },
-                    crew = content.agentRoles.ifEmpty { com.stratum.agents.StandardCrew.all },
+                    presets = com.stratum.agents.CrewPresets.available(content.agentRoles),
                     isProviderConfigured = ai::isConfigured,
                     onInstall = { pack -> scope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } },
+                    initialPreset = crewPreset,
                 ),
             )
+            // The view model outlives this screen, so a preset chosen on the way back in is applied, then forgotten.
+            LaunchedEffect(crewPreset) {
+                crewPreset?.let(crewViewModel::selectPreset)
+                crewPreset = null
+            }
             com.stratum.feature.forge.CrewScreen(
                 viewModel = crewViewModel,
                 modifier = modifier,
@@ -472,20 +486,27 @@ fun StratumApp(
             )
         }
 
-        Destination.FORGE -> {
-            val forgeViewModel: ForgeViewModel = viewModel(
-                factory = ForgeViewModel.factory(
-                    generatePack = ai.generateContentPack,
-                    generateLore = ai.generateLore,
+        Destination.ARMOURY -> {
+            val armoury: ContentForgeViewModel = viewModel(
+                factory = ContentForgeViewModel.factory(
+                    model = ai.languageModel,
+                    base = { content.packs },
                     isProviderConfigured = ai::isConfigured,
-                    onPackAccepted = { pack -> forgedPacks = forgedPacks + pack },
+                    creations = plugins::creations,
+                    saveCreations = { pack -> plugins.installCreations(pack) },
                 ),
             )
-            ForgeScreen(
-                viewModel = forgeViewModel,
+            LaunchedEffect(armoury) { armoury.refreshProvider() }
+            ContentForgeScreen(
+                viewModel = armoury,
                 modifier = modifier,
                 onBack = { destination = Destination.HOME },
                 onOpenSettings = { destination = Destination.SETTINGS },
+                onShare = {
+                    if (!plugins.shareCreations(customClasses)) {
+                        Toast.makeText(context, "Keep something first", Toast.LENGTH_SHORT).show()
+                    }
+                },
             )
         }
 

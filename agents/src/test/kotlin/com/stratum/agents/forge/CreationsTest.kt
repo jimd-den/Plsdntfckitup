@@ -84,9 +84,11 @@ class CreationsTest {
     }
 
     @Test
-    fun `sharing folds the creations into the shared pack`() {
-        val shared = Creations.combine(ContentPack("shared", "Shared", "me"), fragment)
-        assertEquals(listOf(ring), shared.uniques)
+    fun `sharing folds the creations into the shared pack, in a namespace of their own`() {
+        val shared = Creations.combine(ContentPack("shared", "Shared", "me"), Creations.renamespaced(fragment, "shared"))
+        assertEquals(listOf("shared:ember"), shared.uniques.map { it.id })
+        assertEquals("shared:ember", shared.loreEntries.single().subjectId)
+        assertEquals("igbo:bronze_ring", shared.uniques.single().baseId, "references outside the pack stay where they point")
     }
 
     @Test
