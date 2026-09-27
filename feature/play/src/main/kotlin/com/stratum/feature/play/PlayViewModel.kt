@@ -536,9 +536,27 @@ class PlayViewModel(
     }
 
     /** What the satchel draws, worked out only while it is open. */
+    // The satchel compares every bagged item against the whole character. That
+    // answer changes when the gear, the bag, the passives or the selection do,
+    // not sixty times a second while the panel is open.
+    private var gearKey: List<Any?>? = null
+
+    /** Keys of immutable state compare by identity: a new object is the only way any of it changes, and deep equality cost as much as it saved. */
+    private fun sameObjects(a: List<Any?>, b: List<Any?>?): Boolean =
+        b != null && a.size == b.size && a.indices.all { i -> a[i] === b[i] || (a[i] is Number || a[i] is Boolean || a[i] is Enum<*>) && a[i] == b[i] }
+    private var gearCache = GearPanelState()
+
     private fun gearPanel(): GearPanelState {
-        if (!_state.value.satchelOpen) return GearPanelState()
+        if (!_state.value.satchelOpen) return GearPanelState().also { gearKey = null }
+        val player = session.player
+        val key = listOf(player.equipment, player.bag, player.insertBag, player.build, player.level, _state.value.gearSlot, _state.value.gearInspected)
+        if (sameObjects(key, gearKey)) return gearCache
+        gearKey = key
         val catalogue = session.content.itemCatalogue
+        return gearPanelUncached(catalogue).also { gearCache = it }
+    }
+
+    private fun gearPanelUncached(catalogue: com.stratum.core.domain.item.ItemCatalogue): GearPanelState {
         return GearPanelBuilder.build(
             player = session.player,
             selectedSlot = _state.value.gearSlot,
@@ -1145,9 +1163,19 @@ class PlayViewModel(
     }
 
     /** What the sandbox panel and the meter chip draw; lists only for the page that is open. */
+    // The sandbox's lists change with the tab and filter; its meter and
+    // numbers are read by a person, so four refreshes a second is plenty.
+    private var sandboxKey: List<Any?>? = null
+    private var sandboxRefreshedAt = -1f
+
     private fun sandboxPanel(): SandboxPanelState {
         val tools = session.sandbox ?: return SandboxPanelState()
         val panel = _state.value.sandbox
+        val key = listOf(panel.open, panel.tab, panel.slotFilter, panel.query, tools.capsLifted, tools.dummies.size,
+            session.player.currency, session.player.supportBag)
+        if (sameObjects(key, sandboxKey) && elapsed - sandboxRefreshedAt < SANDBOX_REFRESH_SECONDS) return panel
+        sandboxKey = key
+        sandboxRefreshedAt = elapsed
         val open = panel.open
         val catalogue = session.content.itemCatalogue
         return panel.copy(
@@ -1176,6 +1204,7 @@ class PlayViewModel(
         private const val MIN_ZOOM = 0.6f
         private const val MAX_ZOOM = 2.2f
         private const val AUTOSAVE_SECONDS = 60f
+        private const val SANDBOX_REFRESH_SECONDS = 0.25f
 
         fun factory(
             content: AssembledContent,
