@@ -90,7 +90,7 @@ object PowerBudget {
     /** One ordinary affix's worth of each stat as a flat amount, at item level 1. */
     private val flatReference: Map<Stat, Float> = mapOf(
         Stat.MAX_HEALTH to 25f, Stat.DAMAGE to 8f, Stat.ARMOUR to 20f, Stat.CRIT_CHANCE to 0.05f,
-        Stat.CRIT_MULTIPLIER to 0.25f, Stat.ATTACK_SPEED to 0.15f, Stat.LIFE_STEAL to 0.03f, Stat.RESISTANCE to 0.12f,
+        Stat.CRIT_MULTIPLIER to 0.25f, Stat.ATTACK_SPEED to 0.15f, Stat.LIFE_STEAL to 0.06f, Stat.RESISTANCE to 0.15f,
         Stat.SKILL_DAMAGE to 8f, Stat.AREA to 0.15f, Stat.COOLDOWN_RECOVERY to 0.12f, Stat.RESOURCE_COST to -5f,
         Stat.MOVE_SPEED to 0.08f, Stat.MAX_RESOURCE to 20f, Stat.EXPERIENCE_GAIN to 0.1f, Stat.ITEM_RARITY to 0.15f,
         Stat.ITEM_QUANTITY to 0.08f, Stat.MINING_SPEED to 0.4f,
@@ -99,7 +99,7 @@ object PowerBudget {
     /** One ordinary affix's worth of each stat as "increased". "More" is worth [MORE_WORTH] of these. */
     private val increasedReference: Map<Stat, Float> = mapOf(
         Stat.MAX_HEALTH to 0.12f, Stat.DAMAGE to 0.3f, Stat.ARMOUR to 0.3f, Stat.CRIT_CHANCE to 0.3f,
-        Stat.CRIT_MULTIPLIER to 0.25f, Stat.ATTACK_SPEED to 0.1f, Stat.LIFE_STEAL to 0.3f, Stat.RESISTANCE to 0.3f,
+        Stat.CRIT_MULTIPLIER to 0.25f, Stat.ATTACK_SPEED to 0.12f, Stat.LIFE_STEAL to 0.3f, Stat.RESISTANCE to 0.3f,
         Stat.SKILL_DAMAGE to 0.25f, Stat.AREA to 0.2f, Stat.COOLDOWN_RECOVERY to 0.12f, Stat.RESOURCE_COST to -0.12f,
         Stat.MOVE_SPEED to 0.08f, Stat.MAX_RESOURCE to 0.15f, Stat.EXPERIENCE_GAIN to 0.12f, Stat.ITEM_RARITY to 0.15f,
         Stat.ITEM_QUANTITY to 0.08f, Stat.MINING_SPEED to 0.4f,

@@ -24,6 +24,8 @@ data class AgentAttempt(
     val reply: String? = null,
     /** Why the reply was not accepted, in the words fed back on the next try. */
     val problems: List<String> = emptyList(),
+    /** What was mended in the reply before it was checked. */
+    val repairs: List<String> = emptyList(),
     /** Ids this attempt added or revised, by section. */
     val added: Map<String, List<String>> = emptyMap(),
     val durationMillis: Long = 0,
@@ -85,6 +87,7 @@ data class StudioJournal(
                     appendLine("```")
                 }
                 attempt.added.forEach { (section, ids) -> appendLine("- wrote $section: ${ids.joinToString()}") }
+                attempt.repairs.forEach { appendLine("- ✎ $it") }
                 attempt.problems.forEach { appendLine("- ✗ $it") }
                 attempt.reviewNote?.let { appendLine("- ↺ reviewer: $it") }
             }

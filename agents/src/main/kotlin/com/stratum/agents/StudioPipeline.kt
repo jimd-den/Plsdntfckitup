@@ -25,6 +25,8 @@ class StudioPipeline(
     private val model: LanguageModelPort,
     base: List<ContentPack>,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Mends each reply before it is checked; the crew takes replies as written. */
+    private val repair: FragmentRepair = FragmentRepair.None,
 ) {
     private val check = DraftCheck(base)
 
@@ -94,13 +96,18 @@ class StudioPipeline(
                 update(step.copy(attempts = step.attempts + attempt.copy(problems = listOf("the model could not be reached: ${failure.message}"), durationMillis = clock() - started)))
                 return step.copy(status = StepStatus.FAILED, reason = "the model could not be reached") to null
             }
-            val parsed = runCatching { PackSections.parse(extractObject(reply)) }
-            val fragment = parsed.getOrNull()
-            val problems = if (fragment == null) listOf("the reply was not a JSON object: ${parsed.exceptionOrNull()?.message}")
-            else check.problems(draft, fragment, role.sections, brief.packId)
+            val parsed = runCatching { PackSections.parse(extractObject(reply, role)) }
+            val repaired = parsed.getOrNull()?.let { repair.repair(it, role, brief) }
+            val fragment = repaired?.fragment
+            val problems = when {
+                repaired == null -> listOf("the reply was not a JSON object: ${parsed.exceptionOrNull()?.message}")
+                repaired.rejections.isNotEmpty() -> repaired.rejections
+                else -> check.problems(draft, repaired.fragment, role.sections, brief.packId)
+            }
             val done = attempt.copy(
                 reply = fragment?.let(PackSections::render) ?: reply,
                 problems = problems,
+                repairs = repaired?.notes.orEmpty(),
                 added = fragment?.let { PackSections.added(it, role.sections) }.orEmpty(),
                 durationMillis = clock() - started,
             )
@@ -123,8 +130,19 @@ class StudioPipeline(
         return step.copy(status = StepStatus.FAILED, reason = "still wrong after ${role.maxAttempts} tries") to null
     }
 
-    private fun extractObject(reply: String): String {
+    /**
+     * The JSON in a reply, fences and commentary stripped. A bare list is
+     * read as the role's first section, since that is what a model that
+     * forgot the wrapper meant.
+     */
+    private fun extractObject(reply: String, role: AgentRoleDefinition): String {
         val start = reply.indexOf('{')
+        val list = reply.indexOf('[')
+        if (list >= 0 && (start < 0 || list < start)) {
+            val end = reply.lastIndexOf(']')
+            require(end > list) { "no JSON object in the reply" }
+            return "{\"${role.sections.first()}\": ${reply.substring(list, end + 1)}}"
+        }
         val end = reply.lastIndexOf('}')
         require(start >= 0 && end > start) { "no JSON object in the reply" }
         return reply.substring(start, end + 1)
