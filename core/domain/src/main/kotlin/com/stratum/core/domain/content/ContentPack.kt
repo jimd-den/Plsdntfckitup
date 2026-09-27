@@ -118,6 +118,12 @@ data class ContentPack(
     val structureTemplates: List<com.stratum.core.domain.world.StructureTemplate> = emptyList(),
     /** 3D models that give props, structures, weapons and monsters a body. */
     val models: List<ModelDefinition> = emptyList(),
+    /** Statuses: ailments, buffs and curses, each built from the engine's status behaviours. */
+    val statuses: List<com.stratum.core.domain.status.StatusDefinition> = emptyList(),
+    /** Keystones and other rule-changing bundles classes and passive nodes can grant. */
+    val traits: List<com.stratum.core.domain.combat.TraitDefinition> = emptyList(),
+    /** Flasks the player carries, refilled by kills. */
+    val flasks: List<com.stratum.core.domain.combat.FlaskDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 
@@ -275,6 +281,8 @@ data class HeroClassDefinition(
     val baseStats: CombatStats = CombatStats(),
     /** The weapon the class starts holding. */
     val startingWeaponId: String? = null,
+    /** Traits the class is born with: the rules its whole playstyle rests on. */
+    val traitIds: List<String> = emptyList(),
 ) {
     /**
      * Health lives on both [baseHealth] and [baseStats] because packs wrote the

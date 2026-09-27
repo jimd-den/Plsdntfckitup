@@ -1,6 +1,7 @@
 package com.stratum.core.domain.actor
 
 import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.stats.StatModifier
 import com.stratum.core.domain.world.WorldPoint
 
 /** A monster archetype defined by a pack. */
@@ -31,7 +32,80 @@ data class EnemyDefinition(
     val factionId: String? = null,
     /** How it fights in a crowd. See [CombatRole]. */
     val role: CombatRole = CombatRole.MELEE,
-)
+    /** What it can do besides swing: the same skills the player uses, chosen by weight. */
+    val skills: List<MonsterSkill> = emptyList(),
+    /**
+     * A boss's script: each phase takes over as health falls below its
+     * threshold, changing what it casts, calling adds and enraging. Empty
+     * for anything that fights the same way from first blow to last.
+     */
+    val phases: List<BossPhase> = emptyList(),
+) {
+    /** Every skill it could ever use, across its phases. */
+    val allSkills: List<MonsterSkill> get() = skills + phases.flatMap { it.skills }
+}
+
+/**
+ * A skill in a monster's hands, and when it reaches for it.
+ *
+ * The skill is an ordinary [SkillDefinition] -- the monster pays no cost but
+ * obeys the cooldown, and its [SkillDefinition.castTime] is the wind-up the
+ * player sees marked on the ground and can roll out of.
+ */
+data class MonsterSkill(
+    val skillId: String,
+    /** Relative chance against its other ready skills. */
+    val weight: Int = 100,
+    /** Only below this share of its health: the desperate move. */
+    val healthBelow: Float = 1f,
+    /** Overrides the skill's own cooldown for this monster, when set. */
+    val cooldownSeconds: Float? = null,
+) {
+    init {
+        require(weight >= 0) { "a monster skill weight of $weight is negative" }
+        require(healthBelow in 0f..1f) { "healthBelow $healthBelow is not a share" }
+    }
+}
+
+/**
+ * One chapter of a boss fight, entered once when health falls to
+ * [healthBelow]. Phases are data so a pack can script an encounter without
+ * code: new skills, reinforcements, and a rage that makes the last third the
+ * hardest.
+ */
+data class BossPhase(
+    val name: String,
+    /** Entered when health first falls to or below this share. */
+    val healthBelow: Float,
+    /** Replaces the skills it uses; empty keeps the ones it had. */
+    val skills: List<MonsterSkill> = emptyList(),
+    /** Called in as the phase begins. */
+    val adds: List<PackMember> = emptyList(),
+    /** Stat changes from here on, e.g. 30% more damage, 20% more attack speed. */
+    val enrage: List<StatModifier> = emptyList(),
+    /** A status it puts on itself as the phase begins. */
+    val statusId: String? = null,
+    /** Shown as the phase begins. */
+    val announcement: String = "",
+) {
+    init {
+        require(healthBelow in 0f..1f) { "phase '$name' threshold $healthBelow is not a share" }
+    }
+}
+
+/** A cast being wound up: what, and where it will land. The renderer draws its marker. */
+data class PendingCast(
+    val skillId: String,
+    val remaining: Float,
+    val duration: Float,
+    val target: WorldPoint,
+    /** The way it will be aimed, for cones and lanes. */
+    val aimX: Float,
+    val aimY: Float,
+) {
+    /** 0 as the wind-up begins, 1 as it lands. */
+    val progress: Float get() = if (duration <= 0f) 1f else (1f - remaining / duration).coerceIn(0f, 1f)
+}
 
 /**
  * What a monster does in a group, which is what makes a pack a fight rather
@@ -126,6 +200,16 @@ data class EnemyInstance(
     val isLeader: Boolean = false,
     /** Where it lives, for a settlement's garrison: it returns here when it loses interest. */
     val home: WorldPoint? = null,
+    /** Its own skills' cooldowns. */
+    val skillCooldowns: SkillCooldowns = SkillCooldowns(),
+    /** A skill being wound up, or null. */
+    val casting: PendingCast? = null,
+    /** How many of its boss phases have begun. */
+    val phase: Int = 0,
+    /** Who called it up, for a summoner's limit; null for anything that walked in on its own. */
+    val summonerId: String? = null,
+    /** Seconds before a summoned body fades; null for one that stays. */
+    val expiresIn: Float? = null,
 ) {
     val isAlive: Boolean get() = health > 0 && state != EnemyState.DEAD
 

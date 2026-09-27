@@ -95,6 +95,9 @@ class ContentPackAssembler {
             units = merger.merge(ContentPack::units, UnitDefinition::id),
             agentRoles = merger.merge(ContentPack::agentRoles, com.stratum.core.domain.ai.AgentRoleDefinition::id),
             models = merger.merge(ContentPack::models, ModelDefinition::id),
+            statuses = merger.merge(ContentPack::statuses, com.stratum.core.domain.status.StatusDefinition::id),
+            traits = merger.merge(ContentPack::traits, com.stratum.core.domain.combat.TraitDefinition::id),
+            flasks = merger.merge(ContentPack::flasks, com.stratum.core.domain.combat.FlaskDefinition::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             itemBases = merger.merge(ContentPack::itemBases, ItemBase::id),
             uniques = merger.merge(ContentPack::uniques, UniqueDefinition::id),
@@ -184,7 +187,8 @@ internal object ContentValidation {
                 content.biomes.mapTo(HashSet()) { it.id }, content.enemies.mapTo(HashSet()) { it.id },
             ) +
             content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) + modelProblems(content) +
-            ItemValidation.problems(content.itemCatalogue, content.inserts, content.damageTypes.mapTo(HashSet()) { it.id })
+            ItemValidation.problems(content.itemCatalogue, content.inserts, content.damageTypes.mapTo(HashSet()) { it.id }) +
+            CombatValidation.problems(content)
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -355,6 +359,9 @@ data class AssembledContent(
     val baseTiers: List<BaseTier> = emptyList(),
     /** Dungeons, ruins and shrines for the world generator. */
     val structureTemplates: List<com.stratum.core.domain.world.StructureTemplate> = emptyList(),
+    val statuses: List<com.stratum.core.domain.status.StatusDefinition> = emptyList(),
+    val traits: List<com.stratum.core.domain.combat.TraitDefinition> = emptyList(),
+    val flasks: List<com.stratum.core.domain.combat.FlaskDefinition> = emptyList(),
 ) {
     /**
      * Everything items are made from: every base, short-form weapons
@@ -372,6 +379,22 @@ data class AssembledContent(
     fun unique(id: String): UniqueDefinition? = itemCatalogue.unique(id)
 
     fun itemSet(id: String): ItemSetDefinition? = itemCatalogue.set(id)
+
+    /** The loaded statuses, for the questions combat asks of them. */
+    val statusBook: com.stratum.core.domain.status.StatusBook by lazy { com.stratum.core.domain.status.StatusBook(statuses) }
+
+    private val skillsById by lazy { skills.associateBy { it.id } }
+    private val damageTypesById by lazy { damageTypes.associateBy { it.id } }
+    private val traitsById by lazy { traits.associateBy { it.id } }
+
+    fun status(id: String): com.stratum.core.domain.status.StatusDefinition? = statusBook[id]
+
+    fun trait(id: String): com.stratum.core.domain.combat.TraitDefinition? = traitsById[id]
+
+    fun flask(id: String): com.stratum.core.domain.combat.FlaskDefinition? = flasks.firstOrNull { it.id == id }
+
+    /** A damage type only if a pack defined it; [damageType] makes one up for display. */
+    fun damageTypeOrNull(id: String): DamageTypeDefinition? = damageTypesById[id]
 
     /** Outposts' resources, structures and units, for the questions the engine asks of them. */
     val strategyBook: StrategyBook by lazy { StrategyBook(resources, structures, units) }
@@ -406,7 +429,7 @@ data class AssembledContent(
         damageTypes.firstOrNull { it.id == id }
             ?: DamageTypeDefinition(id = id, name = id.substringAfter(':'))
 
-    fun skill(id: String): SkillDefinition? = skills.firstOrNull { it.id == id }
+    fun skill(id: String): SkillDefinition? = skillsById[id]
 
     fun weapon(id: String): WeaponBase? = weapons.firstOrNull { it.id == id }
 

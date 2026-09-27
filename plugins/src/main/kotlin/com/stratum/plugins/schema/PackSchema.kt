@@ -62,6 +62,9 @@ internal data class PackSchema(
     val baseTiers: List<BaseTierSchema> = emptyList(),
     val structureTemplates: List<StructureTemplateSchema> = emptyList(),
     val models: List<ModelSchema> = emptyList(),
+    val statuses: List<StatusSchema> = emptyList(),
+    val traits: List<TraitSchema> = emptyList(),
+    val flasks: List<FlaskSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -81,6 +84,7 @@ internal data class PackSchema(
         itemNames = itemNames.map { it.toDomain() }, baseTiers = baseTiers.map { it.toDomain() },
         structureTemplates = structureTemplates.map { it.toDomain() },
         models = models.map { it.toDomain() },
+        statuses = statuses.map { it.toDomain() }, traits = traits.map { it.toDomain() }, flasks = flasks.map { it.toDomain() },
     )
 
     companion object {
@@ -101,6 +105,7 @@ internal data class PackSchema(
             p.itemNames.map(NamePoolSchema::of), p.baseTiers.map(BaseTierSchema::of),
             p.structureTemplates.map(StructureTemplateSchema::of),
             models = p.models.map(ModelSchema::of),
+            statuses = p.statuses.map(StatusSchema::of), traits = p.traits.map(TraitSchema::of), flasks = p.flasks.map(FlaskSchema::of),
         )
     }
 }

@@ -3,6 +3,7 @@ package com.stratum.engine.world
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.EnemyRank
+import com.stratum.core.domain.actor.CombatRole
 import com.stratum.core.domain.actor.Progression
 import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.actor.SkillDefinition
@@ -101,7 +102,6 @@ class WorldSession(
     /** One RNG for the whole run, seeded from the world seed, so a session replays identically given the same inputs. */
     private val random = Random(config.seed)
 
-    private val combat = CombatResolver()
     private val cues = SessionCues()
     private val hitFlashes = HitFlashes()
     private val animator = ActorAnimator()
@@ -110,7 +110,7 @@ class WorldSession(
     private val impacts = ImpactField(streamingWorld)
     private val lootRoller = LootRoller.of(content)
     private val drops = LootDrops(content, lootRoller, config.seaLevel, difficulty)
-    private val workbench = Workbench(content, ItemCrafter(lootRoller))
+    private val workbench = Workbench(content, ItemCrafter(lootRoller), config.rules.combat)
     private val ground = GroundItems()
     private val gear = PlayerGear(::insertOrNull)
     /** How this world plays; see [WorldRules]. */
@@ -124,7 +124,7 @@ class WorldSession(
 
     /** Dawn to dawn; night is colder and busier. */
     val clock = WorldClock(config.rules.dayLengthMinutes * 60f)
-    private val crowd = CrowdControl(streamingWorld, director)
+    private val crowd = CrowdControl(streamingWorld, director, reachOf = ::fightingReach)
     private val garrisons = Garrisons(director)
     private val realm = RealmSystem(content, config.rules.raids)
 
@@ -143,6 +143,20 @@ class WorldSession(
 
     /** Stick intent, the dodge roll, collision and gravity. See [PlayerMotion]. */
     private val motion = PlayerMotion(streamingWorld)
+
+    /** A body's stats with extra modifiers folded into its build: what every combat path reads. */
+    private fun statsWith(state: PlayerState, extra: List<StatModifier>): CombatStats {
+        val built = if (extra.isEmpty()) state else state.copy(build = state.build + extra)
+        return table.applyTo(StatSheet(survival.modifiers(state)).applyTo(built.combatStatsWith(::insertOrNull, damageTypeIds), damageTypeIds))
+    }
+
+    private val profile = PlayerProfile(content, ::statsWith, { survival.modifiers(it) }, { state, skillId -> workbench.linkedTo(state, skillId) })
+
+    /** The fight itself: casting, hits, statuses, projectiles, triggers, flasks. See [CombatSystem]. */
+    private val combat = CombatSystem(
+        content, config.rules.combat, streamingWorld, director, cues, hitFlashes, impacts, random, profile,
+        playerSkill = { id -> content.skill(id)?.let { workbench.tuned(player, it) } },
+    )
 
     private val heroClass = (hero?.heroClassId ?: heroClassId)
         ?.let { id -> content.heroClasses.firstOrNull { it.id == id } }
@@ -391,7 +405,9 @@ class WorldSession(
         // reach before the monsters around them take their swing.
         clock.advance(deltaSeconds)
         player = survival.advance(player, deltaSeconds, clock, currentBiome)
-        val pace = (player.sheet(::insertOrNull) + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED)
+        // A stun roots the player; a chill slows them. Movement still runs, so a roll already under way finishes.
+        val hindered = if (combat.playerStunned(player)) 0f else 1f - combat.playerSlow(player)
+        val pace = (player.sheet(::insertOrNull) + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED) * hindered
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
         streamingWorld.focusOn(player.blockPos)
 
@@ -409,30 +425,39 @@ class WorldSession(
     /** A basic swing. Refused while the weapon is still recovering. */
     fun attack(): AttackReport {
         if (player.attackCooldown > 0f) return AttackReport.NotReady
-        val stats = playerStats
         val damageType = player.equippedWeapon?.damageTypeWithSockets(::insertOrNull) ?: DEFAULT_DAMAGE_TYPE
-        val outcome = combat.playerAttack(stats, player.position, player.facing, enemies.filterNot(::isAllied), damageType, random)
-        player = player.copy(attackCooldown = stats.secondsBetweenAttacks)
+        val battle = battlefield()
+        val report = combat.basicAttack(battle, damageType)
+        if (report == AttackReport.Stunned) return report
+        battle.player = battle.player.copy(attackCooldown = playerStats.secondsBetweenAttacks)
         animator.holdAttack(PLAYER_ACTOR_ID)
-        return applyOutcome(outcome)
+        settle(battle)
+        return report
     }
 
-    /** Casts one of the class's skills, spending resource and starting its cooldown. */
+    /** Casts one of the class's skills, spending its cost and starting its cooldown. */
     fun castSkill(skillId: String): AttackReport {
         val skill = skillOrNull(skillId) ?: return AttackReport.UnknownSkill
-        if (!player.cooldowns.isReady(skillId)) return AttackReport.OnCooldown
-        if (player.resource < skill.resourceCost) return AttackReport.NotEnoughResource
-
-        val outcome = combat.castSkill(playerStats, player.position, player.facing, enemies.filterNot(::isAllied), skill, random)
-        // Cost and cooldown are paid whether or not anything was standing there,
-        // so a skill cannot be spammed to scout for targets for free.
-        player = player.copy(
-            resource = (player.resource - skill.resourceCost).coerceAtLeast(0),
-            cooldowns = player.cooldowns.started(skill),
-        )
-        animator.holdCast(PLAYER_ACTOR_ID)
-        return applyOutcome(outcome, skill)
+        val battle = battlefield()
+        val report = combat.castPlayerSkill(battle, skill)
+        if (report is AttackReport.Landed || report is AttackReport.Cast || report == AttackReport.Missed) animator.holdCast(PLAYER_ACTOR_ID)
+        settle(battle)
+        return report
     }
+
+    /** Drinks from the flask in [slot] on the belt. */
+    fun useFlask(slot: Int): FlaskResult {
+        val battle = battlefield()
+        val result = combat.drinkFlask(battle, slot)
+        settle(battle)
+        return result
+    }
+
+    /** The belt, with charges. */
+    val flasks: List<FlaskView> get() = combat.flaskViews
+
+    /** Statuses [actorId] carries now; the player's under [PLAYER_ACTOR_ID]. */
+    fun statusesOf(actorId: String) = combat.statuses.of(actorId)
 
     /**
      * Places a monster deliberately, for a scripted encounter or a shrine that
@@ -470,6 +495,7 @@ class WorldSession(
             attackCooldown = 0f,
             cooldowns = SkillCooldowns(),
         )
+        combat.clear()
         player = player.copy(health = player.maxHealthWith(::insertOrNull), resource = player.resourceCeiling)
         forgetTheLastRun()
         // Monsters that had cornered the player do not get to greet them at the
@@ -516,7 +542,7 @@ class WorldSession(
      * never in the tooltip but missing from the swing.
      */
     val playerStats: CombatStats
-        get() = table.applyTo(StatSheet(survival.modifiers(player)).applyTo(player.combatStatsWith(::insertOrNull, damageTypeIds), damageTypeIds))
+        get() = statsWith(player, profile.traits(player).modifiers)
 
     // ---- survival ------------------------------------------------------------
 
@@ -679,11 +705,16 @@ class WorldSession(
         activeBoons = activeBoons,
         settlement = currentSettlement,
         settlementHostile = currentSettlement?.let(::isHostileTown) ?: false,
+        projectiles = combat.projectiles.active,
+        zones = combat.zones.active,
+        telegraphs = combat.telegraphs(enemies, player),
+        statuses = combat.statuses.all().mapValues { it.value.instances },
+        flasks = combat.flaskViews,
     )
 
     // ---- the steps a tick is made of ----------------------------------------
 
-    /** Monsters spawn, close in and swing. Returns what the player should be told. */
+    /** Monsters spawn, close in, cast and swing; the fight's clocks run. Returns what the player should be told. */
     private fun monstersAct(deltaSeconds: Float): List<CombatEvent> {
         if (content.enemies.isEmpty()) return emptyList()
         val towns = townsInSight()
@@ -692,85 +723,50 @@ class WorldSession(
             towns.none { it.contains(kotlin.math.floor(spot.x).toInt(), kotlin.math.floor(spot.y).toInt()) && !isHostileTown(it) }
         }
         enemies = enemies + garrisons.muster(towns, enemies, player.level, random)
-        enemies = crowd.advance(enemies, player.position, ::isHostile, deltaSeconds, allyOrders())
+        val before = enemies
+        enemies = combat.constrain(before, crowd.advance(enemies, player.position, ::isHostile, deltaSeconds, allyOrders()), deltaSeconds)
 
-        val incoming = combat.enemyAttacks(
-            enemies = enemies.filter(::isHostile),
-            defender = playerStats,
-            defenderPosition = player.position,
-            cooldownFor = { it.stats.secondsBetweenAttacks },
-            random = random,
-        )
+        val battle = battlefield()
+        val told = combat.advance(battle, deltaSeconds)
         // Whoever swung is mid-attack for a beat, so the animation reads.
-        incoming.enemies.filter { it.attackCooldown > 0f && it.isAlive }.forEach { animator.holdAttack(it.instanceId) }
-        val swung = incoming.enemies.associateBy { it.instanceId }
-        enemies = enemies.map { swung[it.instanceId] ?: it }
+        battle.swung.forEach(animator::holdAttack)
+        settle(battle, reportEvents = false)
         skirmish()
         homeComing()
         rally(deltaSeconds)
-        return if (incoming.totalDamage > 0) takeHit(incoming) else emptyList()
+        return told
     }
+
+    /** The fight as the combat system works on it: this instant's player and monsters. */
+    private fun battlefield() = Battlefield(player, enemies, isInvulnerable, ::isAllied, ::isHostile)
 
     /**
-     * A blow that lands, or does not. A swing during a roll still happened and
-     * went on cooldown; reporting that it missed is what makes a well-timed
-     * roll legible.
+     * Takes a resolved fight back: the player, the monsters, who is now
+     * provoked, and the dead to bury.
      */
-    private fun takeHit(incoming: EnemyAttackOutcome): List<CombatEvent> {
-        if (isInvulnerable) {
-            cues.dodged(player.position)
-            return listOf(CombatEvent.PlayerDodged(incoming.totalDamage))
-        }
-        player = player.damaged(incoming.totalDamage)
-        cues.hurt(incoming.totalDamage, player.position)
-        hitFlashes.strike(PLAYER_ACTOR_ID)
-        val hurt = CombatEvent.PlayerHurt(incoming.totalDamage, incoming.results)
-        if (player.isAlive) return listOf(hurt)
-        cues.fallen(player.position)
-        return listOf(hurt, CombatEvent.PlayerDied)
-    }
-
-    private fun applyOutcome(outcome: AttackOutcome, skill: SkillDefinition? = null): AttackReport {
-        if (outcome !is AttackOutcome.Hits) return AttackReport.Missed
-        val byId = outcome.hits.associateBy { it.enemyId }
-        enemies = enemies.map { byId[it.instanceId]?.enemy ?: it }
-        provoked += outcome.hits.map { it.enemyId }
-        outcome.hits.forEach(::showHit)
-
-        val healed = outcome.hits.sumOf { it.result.healedAttacker }
-        if (healed > 0) {
-            player = player.healed(healed)
-            cues.healed(healed, player.position)
-        }
+    private fun settle(battle: Battlefield, reportEvents: Boolean = true) {
+        player = battle.player
+        enemies = battle.enemies
+        provoked += battle.hits.map { it.enemyId }
+        provoked += battle.provoked
+        if (reportEvents) pending += battle.events
         val slain = enemies.filterNot { it.isAlive }
         if (slain.isNotEmpty()) buryTheDead(slain)
-        return AttackReport.Landed(hits = outcome.hits, slain = slain, skill = skill)
     }
 
-    /** The number, the flash and the shove of one hit. */
-    private fun showHit(hit: EnemyHit) {
-        val color = content.damageType(hit.result.damageTypeId).color
-        when {
-            hit.result.wasBlocked -> cues.blocked(hit.enemy.position)
-            hit.result.wasCritical -> cues.critical(hit.result.amount, hit.enemy.position, color)
-            else -> cues.dealt(hit.result.amount, hit.enemy.position, color)
-        }
-        hitFlashes.strike(hit.enemyId)
-        // Force scales with the blow, but only a heavy hit really throws: an
-        // ordinary swing barely rocks the body, because knocking a monster back
-        // every time pushes it out of reach and turns melee into chase-and-poke.
-        val heavy = hit.result.wasCritical || hit.result.amount >= hit.enemy.stats.maxHealth * HEAVY_HIT_FRACTION
-        impacts.strike(
-            actorId = hit.enemyId,
-            from = player.position,
-            to = hit.enemy.position,
-            force = hit.result.amount.toFloat() * if (heavy) 1f else LIGHT_HIT_DAMPING,
-        )
+    /** How far a monster fights from: its swing, or for a ranged or support caster its longest offensive skill. */
+    private fun fightingReach(enemy: EnemyInstance): Float {
+        val swing = enemy.stats.attackRange.toFloat()
+        if (enemy.role != CombatRole.RANGED && enemy.role != CombatRole.SUPPORT) return swing
+        val longest = director.definition(enemy.definitionId)?.allSkills.orEmpty()
+            .mapNotNull { content.skill(it.skillId) }.filterNot { it.isBeneficial }.maxOfOrNull { it.range.toFloat() } ?: 0f
+        return maxOf(swing, longest * RANGED_HOLD)
     }
 
     private fun buryTheDead(slain: List<EnemyInstance>) {
         enemies = enemies.filter { it.isAlive }
         slain.forEach { enemy ->
+            combat.forget(enemy.instanceId)
             hitFlashes.forget(enemy.instanceId)
             impacts.forget(enemy.instanceId)
             drops.gearFor(enemy, player.level, random, earnings.lootFind)?.let(ground::drop)
@@ -1121,6 +1117,9 @@ class WorldSession(
         const val LIGHT_HIT_DAMPING = 0.2f
 
         const val PLAYER_ACTOR_ID = "player"
+
+        /** A ranged monster stands at this share of its skill's reach, so a step back does not put the player out of it. */
+        const val RANGED_HOLD = 0.8f
 
         /** How far away a town's people muster, in blocks. */
         const val TOWN_SIGHT = 40
