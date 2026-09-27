@@ -17,6 +17,12 @@ interface SessionFight {
      */
     val playerStats: CombatStats
 
+    /** The player's life ceiling with every source counted: the figure the health bar and every heal use. */
+    val maxHealth: Int
+
+    /** The player's resource ceiling, from the same sources. */
+    val maxResource: Int
+
     /** Skills the class has, resolved against the loaded packs and tuned by the build. */
     val skills: List<SkillDefinition>
 
@@ -70,6 +76,10 @@ internal class FightSystem(
 ) : SessionFight {
 
     override val playerStats: CombatStats get() = profile.statsWith(state.player, profile.traits(state.player).modifiers)
+
+    override val maxHealth: Int get() = profile.maxHealth(state.player)
+
+    override val maxResource: Int get() = profile.maxResource(state.player)
 
     override val skills: List<SkillDefinition> get() = state.player.skillIds.mapNotNull(::skillOrNull)
 
@@ -125,7 +135,6 @@ internal class FightSystem(
         // Whoever swung is mid-attack for a beat, so the animation reads.
         battle.swung.forEach(animator::holdAttack)
         settle(battle, reportEvents = false)
-        encounters.skirmish()
         politics.afterFight(deltaSeconds)
         return told
     }

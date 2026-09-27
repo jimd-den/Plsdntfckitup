@@ -141,18 +141,6 @@ internal class EncounterSystem(
         return maxOf(swing, longest * RANGED_HOLD)
     }
 
-    /** Followers and hostiles in reach trade blows; a hostile that already swung at the player waits its turn. */
-    fun skirmish() {
-        val friends = state.enemies.filter { it.factionId == Factions.PLAYER && it.isAlive }
-        if (friends.isEmpty()) return
-        val foes = state.enemies.filter { politics.isHostile(it) && it.isAlive }
-        val (foesAfter, friendsHit, _) = Skirmish.exchange(foes, friends, random)
-        val (friendsAfter, foesHit, _) = Skirmish.exchange(friendsHit, foesAfter, random)
-        val updated = (friendsAfter + foesHit).associateBy { it.instanceId }
-        state.enemies = state.enemies.map { updated[it.instanceId] ?: it }
-        bury(state.enemies.filter { !it.isAlive })
-    }
-
     private fun forget(actorId: String) {
         combat.forget(actorId)
         flashes.forget(actorId)

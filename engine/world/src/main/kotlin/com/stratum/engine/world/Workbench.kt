@@ -56,7 +56,7 @@ internal class Workbench(
         val item = player.itemById(instanceId) ?: return player to CraftResult.NoSuchItem
         val crafted = crafter.apply(item, currency.effect, random).getOrElse { return player to CraftResult.NoEffect(it.message.orEmpty()) }
         val updated = player.replacing(crafted).withCurrency(currencyId, -1)
-        return updated.copy(health = updated.health.coerceAtMost(updated.maxHealthWithGear)) to CraftResult.Crafted(item, crafted, currency)
+        return updated to CraftResult.Crafted(item, crafted, currency)
     }
 
     fun link(player: PlayerState, skillId: String, supportId: String): Pair<PlayerState, SupportResult> {

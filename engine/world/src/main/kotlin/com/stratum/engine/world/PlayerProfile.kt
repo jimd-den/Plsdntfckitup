@@ -12,9 +12,11 @@ import com.stratum.core.domain.combat.KeyedTrigger
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.StatModifier
 import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.status.StatusSet
+import kotlin.math.roundToInt
 
 /**
  * The player as combat sees them at one instant: stats with every source
@@ -109,5 +111,27 @@ internal class PlayerProfile(
         return HitDefender(statsWith(player, extras), sheet(player, extras), own)
     }
 
-    fun maxHealth(player: PlayerState): Int = statsWith(player, emptyList()).maxHealth
+    /**
+     * How much life the player can have: gear, inserts, passives, traits,
+     * needs and boons, counted exactly as a hit counts them. The one answer
+     * every part of the session asks -- regeneration, flasks, a level's
+     * refill, the bar on screen -- so a keystone's extra life is never in the
+     * fight but missing from the bar.
+     */
+    fun maxHealth(player: PlayerState): Int = statsWith(player, traits(player).modifiers).maxHealth
+
+    /** The resource pool, from the same sources as [maxHealth]. */
+    fun maxResource(player: PlayerState): Int =
+        sheet(player, traits(player).modifiers).apply(Stat.MAX_RESOURCE, player.maxResource.toFloat()).roundToInt()
+
+    /** The player refilled to both ceilings: a new character, a level gained, a revival. */
+    fun restored(player: PlayerState): PlayerState = player.copy(health = maxHealth(player), resource = maxResource(player))
+
+    /**
+     * [after] with the life and resource [before] had, held under the new
+     * ceilings. What changing gear or the build does to the bars: taking off
+     * a life ring takes the life with it, putting one on does not heal.
+     */
+    fun carried(before: PlayerState, after: PlayerState): PlayerState =
+        after.copy(health = before.health.coerceAtMost(maxHealth(after)), resource = before.resource.coerceAtMost(maxResource(after)))
 }

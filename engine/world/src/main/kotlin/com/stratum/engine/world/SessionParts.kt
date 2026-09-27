@@ -64,11 +64,11 @@ internal class SessionParts(
     private val survivalRules = SurvivalSystem(content, config.rules.survival, world, roomScanner)
 
     val heroClass = (hero?.heroClassId ?: heroClassId)?.let { id -> content.heroClasses.firstOrNull { it.id == id } } ?: content.heroClasses.firstOrNull()
-    val survival = SurvivalFacade(state, content, survivalRules)
-    val gear = GearSystem(state, content, workbench, ground, lootRoller, cues, random)
+    val profile = PlayerProfile(content, table, survivalRules::modifiers, workbench::linkedTo)
+    val survival = SurvivalFacade(state, content, survivalRules, profile::maxHealth)
+    val gear = GearSystem(state, content, workbench, ground, lootRoller, cues, random, profile)
     val building = BuildingSystem(state, world, content.registry, motion, survivalRules, roomScanner, cues, random, content::insert)
-    val profile = PlayerProfile(content, table, survivalRules::modifiers, gear::linkedTo)
-    val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert) { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
+    val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert, profile)
     val politics = PoliticsSystem(state, content, generator as? SettlementAtlas, director, RealmSystem(content, config.rules.raids), cues, random)
 
     /** The fight itself: casting, hits, statuses, projectiles, triggers, flasks. */

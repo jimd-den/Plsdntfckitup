@@ -49,8 +49,8 @@ internal class ProgressionSystem(
     private val difficulty: Difficulty,
     private val cues: SessionCues,
     private val insertOf: (String) -> InsertDefinition?,
-    /** The player refilled to their ceilings, from the one place ceilings are worked out. */
-    private val restored: (PlayerState) -> PlayerState,
+    /** Where the player's ceilings are worked out: refilled on a level, held under them when the tree changes. */
+    private val profile: PlayerProfile,
 ) : SessionProgression {
     private val passives = PassiveProgress(content.passiveTree)
     private var player: PlayerState
@@ -77,12 +77,12 @@ internal class ProgressionSystem(
 
     override fun allocatePassive(nodeId: String): PassiveResult {
         val (updated, result) = passives.allocate(player, nodeId)
-        player = updated
+        player = profile.carried(player, updated)
         if (result is PassiveResult.Allocated) cues.passiveTaken(result.nodes.last().name, player.position)
         return result
     }
 
-    override fun refundPassive(nodeId: String): PassiveResult = passives.refund(player, nodeId).also { player = it.first }.second
+    override fun refundPassive(nodeId: String): PassiveResult = passives.refund(player, nodeId).also { player = profile.carried(player, it.first) }.second
 
     /**
      * Experience for a kill. A level restores the character, which is what
@@ -94,7 +94,7 @@ internal class ProgressionSystem(
         val result = Progression.apply(player.level, player.experience, (amount * earnings.multiplier(Stat.EXPERIENCE_GAIN)).roundToInt())
         player = player.copy(level = result.level, experience = result.experience)
         if (!result.leveledUp) return
-        player = restored(player)
+        player = profile.restored(player)
         cues.levelUp(result.level, player.position)
     }
 

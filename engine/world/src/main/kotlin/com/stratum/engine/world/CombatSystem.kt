@@ -39,7 +39,9 @@ import kotlin.random.Random
  * One cast path for everyone. A monster's fireball and the player's are the
  * same [cast] with a different side, so every rule -- evasion, conversion,
  * ailments, the trigger guards -- applies to both without being written
- * twice. The session hands in a [Battlefield] and takes the results back;
+ * twice. The player's followers, summons and defenders fight on the
+ * player's side through the same path, with the skills their definitions
+ * give them, and monsters strike them as readily as the player. The session hands in a [Battlefield] and takes the results back;
  * nothing here reaches into the session.
  */
 internal class CombatSystem(
@@ -134,7 +136,7 @@ internal class CombatSystem(
         if (dose.seconds <= 0f) {
             battle.player = player.copy(
                 health = (player.health + dose.life.roundToInt()).coerceAtMost(maxOf(player.health, maxHealth)),
-                resource = (player.resource + dose.resource.roundToInt()).coerceAtMost(maxOf(player.resource, player.resourceCeiling)),
+                resource = (player.resource + dose.resource.roundToInt()).coerceAtMost(maxOf(player.resource, profile.maxResource(player))),
             )
         } else {
             vitals.recoverOverTime(dose)
@@ -209,7 +211,7 @@ internal class CombatSystem(
         enemies.mapNotNull { enemy ->
             val casting = enemy.casting ?: return@mapNotNull null
             val skill = content.skill(casting.skillId) ?: return@mapNotNull null
-            Telegraph.of(enemy.instanceId, skill, casting, enemy.position, hostile = true)
+            Telegraph.of(enemy.instanceId, skill, casting, enemy.position, hostile = enemy.factionId != Factions.PLAYER)
         } + listOfNotNull(pendingPlayer?.let { (skill, cast) -> Telegraph.of(PLAYER, skill, cast, player.position, hostile = false) })
 
     fun forget(actorId: String) {
@@ -336,7 +338,7 @@ internal class CombatSystem(
                 applyStatus(battle, recipientId, StatusApplication(effect.statusId, stacks = effect.stacks, sourceId = casterId))
             }
             is SkillEffect.RestoreResource -> if (recipientId == PLAYER) {
-                battle.player = battle.player.copy(resource = (battle.player.resource + effect.amount).coerceAtMost(battle.player.resourceCeiling))
+                battle.player = battle.player.copy(resource = (battle.player.resource + effect.amount).coerceAtMost(profile.maxResource(battle.player)))
             }
             is SkillEffect.CastSkill -> castFollowUp(battle, casterId, side, effect.skillId, battle.positionOf(recipientId) ?: return, null, depth)
             else -> Unit
@@ -368,7 +370,11 @@ internal class CombatSystem(
     // ---- hitting -----------------------------------------------------------------
 
     private fun hit(battle: Battlefield, side: CombatSide, casterId: String, skill: SkillDefinition, targetId: String, depth: Int, from: WorldPoint) {
-        if (targetId == PLAYER) hitPlayer(battle, casterId, skill, depth, from) else hitEnemy(battle, casterId, side, skill, targetId, depth, from)
+        when {
+            targetId == PLAYER -> hitPlayer(battle, casterId, skill, depth, from)
+            side == CombatSide.MONSTERS -> hitAlly(battle, casterId, skill, targetId, depth, from)
+            else -> hitEnemy(battle, casterId, side, skill, targetId, depth, from)
+        }
     }
 
     /** The player's side striking a monster. */
@@ -423,6 +429,24 @@ internal class CombatSystem(
         onTarget(battle, casterId, CombatSide.MONSTERS, skill, PLAYER, battle.player.position, from, attacker, depth)
         if (result.landed) fire(battle, TriggerEvent.ON_HIT_TAKEN, 0, emptySet(), casterId)
         checkLowLife(battle)
+    }
+
+    /**
+     * A monster's skill or swing reaching one of the player's side who is not
+     * the player: a follower, a summon, a defender. Its numbers show like any
+     * other hit, but it is nobody's kill: a follower that falls simply falls.
+     */
+    private fun hitAlly(battle: Battlefield, casterId: String, skill: SkillDefinition, allyId: String, depth: Int, from: WorldPoint) {
+        val ally = battle.enemy(allyId)?.takeIf { it.isAlive } ?: return
+        val attacker = monsterAttacker(battle, casterId, skill) ?: return
+        val result = resolve(attacker, monsterDefender(ally), skill)
+        val struck = ally.damaged(result.amount)
+        battle.put(struck)
+        showHit(EnemyHit(allyId, struck, result), from)
+        if (result.wasEvaded || (result.wasBlocked && result.amount == 0)) return
+        battle.enemy(casterId)?.takeIf { result.healedAttacker > 0 }?.let { heal(battle, it.instanceId, result.healedAttacker, 0f) }
+        result.inflicted.forEach { applyStatus(battle, allyId, it) }
+        onTarget(battle, casterId, CombatSide.MONSTERS, skill, allyId, struck.position, from, attacker, depth)
     }
 
     /**
@@ -560,25 +584,30 @@ internal class CombatSystem(
         cast(battle, PLAYER, CombatSide.PLAYER, skill, battle.player.position, Aim(pending.aimX, pending.aimY), pending.target, 0)
     }
 
-    /** Boss phases, wind-ups landing, and new casts chosen. */
+    /**
+     * Boss phases, wind-ups landing, and new casts chosen -- by hostile
+     * monsters against the player's side, and by the player's followers
+     * against whatever is hostile near them.
+     */
     private fun monstersCast(battle: Battlefield, deltaSeconds: Float) {
         battle.enemies.map { it.instanceId }.forEach { id ->
             var enemy = battle.enemy(id)?.takeIf { it.isAlive } ?: return@forEach
             enemy = enemy.copy(skillCooldowns = enemy.skillCooldowns.advanced(deltaSeconds))
             battle.put(enemy)
             abilities.phaseDue(enemy)?.let { enemy = enterPhase(battle, enemy) }
-            if (enemy.factionId == Factions.PLAYER || !battle.isHostile(enemy) || statuses.of(id).isStunned(book)) return@forEach
+            val side = sideOf(battle, enemy) ?: return@forEach
+            if (statuses.of(id).isStunned(book)) return@forEach
             val casting = enemy.casting
             if (casting != null) {
                 val left = casting.remaining - deltaSeconds
                 if (left > 0f) return@forEach battle.put(enemy.copy(casting = casting.copy(remaining = left)))
                 battle.put(enemy.copy(casting = null))
                 val skill = content.skill(casting.skillId) ?: return@forEach
-                cast(battle, id, CombatSide.MONSTERS, skill, enemy.position, Aim(casting.aimX, casting.aimY), casting.target, 0)
+                cast(battle, id, side, skill, enemy.position, Aim(casting.aimX, casting.aimY), casting.target, 0)
                 return@forEach
             }
-            val target = battle.player.position.takeIf { battle.player.isAlive }
-            val allies = alliesOf(battle, id, CombatSide.MONSTERS).mapNotNull(battle::enemy)
+            val target = targetFor(battle, enemy, side)?.position
+            val allies = alliesOf(battle, id, side).mapNotNull(battle::enemy)
             val choice = abilities.choose(enemy, target, allies, statuses::of, random) ?: return@forEach
             val skill = choice.skill
             val aim = target?.let { Aim.toward(enemy.position, it) } ?: Aim.of(enemy.facingX, enemy.facingY)
@@ -592,7 +621,7 @@ internal class CombatSystem(
                 battle.put(started.copy(casting = PendingCast(skill.id, skill.castTime, skill.castTime, point, aim.dx, aim.dy)))
             } else {
                 battle.put(started)
-                cast(battle, id, CombatSide.MONSTERS, skill, enemy.position, aim, if (skill.isBeneficial) enemy.position else target, 0)
+                cast(battle, id, side, skill, enemy.position, aim, if (skill.isBeneficial) enemy.position else target, 0)
             }
         }
     }
@@ -623,16 +652,56 @@ internal class CombatSystem(
         return next
     }
 
-    /** Monsters in reach and off cooldown swing at the player. */
+    /**
+     * Bodies in reach and off cooldown swing: a hostile monster at the player
+     * when the player is in reach, or else at one of the player's side; a
+     * follower at the nearest hostile.
+     */
     private fun monstersSwing(battle: Battlefield) {
         if (!battle.player.isAlive) return
-        battle.enemies.forEach { enemy ->
-            if (!enemy.isAlive || enemy.attackCooldown > 0f || enemy.casting != null) return@forEach
-            if (enemy.factionId == Factions.PLAYER || !battle.isHostile(enemy) || statuses.of(enemy.instanceId).isStunned(book)) return@forEach
-            if (enemy.position.horizontalDistanceTo(battle.player.position) > enemy.stats.attackRange + SkillTargeting.REACH_FORGIVENESS) return@forEach
+        battle.enemies.map { it.instanceId }.forEach { id ->
+            val enemy = battle.enemy(id)?.takeIf { it.isAlive } ?: return@forEach
+            if (enemy.attackCooldown > 0f || enemy.casting != null) return@forEach
+            val side = sideOf(battle, enemy) ?: return@forEach
+            if (statuses.of(id).isStunned(book)) return@forEach
+            val reach = enemy.stats.attackRange + SkillTargeting.REACH_FORGIVENESS
+            val target = targetFor(battle, enemy, side, reach) ?: return@forEach
             battle.put(enemy.copy(attackCooldown = enemy.stats.secondsBetweenAttacks))
-            battle.swung += enemy.instanceId
-            hitPlayer(battle, enemy.instanceId, basicSkill(enemy.damageTypeId, enemy.stats.attackRange), 0, enemy.position)
+            battle.swung += id
+            hit(battle, side, id, basicSkill(enemy.damageTypeId, enemy.stats.attackRange), target.id, 0, enemy.position)
+        }
+    }
+
+    /** Which side [enemy] fights on now, or null when it is not fighting: followers for the player, hostile monsters against. */
+    private fun sideOf(battle: Battlefield, enemy: EnemyInstance): CombatSide? = when {
+        enemy.factionId == Factions.PLAYER -> CombatSide.PLAYER
+        battle.isHostile(enemy) -> CombatSide.MONSTERS
+        else -> null
+    }
+
+    /**
+     * Whom [enemy] goes for: the nearest of the other side, within [within]
+     * blocks when given. A monster with the player in swinging reach swings
+     * at the player -- the player is the one the fight is about -- and
+     * otherwise at the nearest of the player's side; a follower goes for the
+     * nearest hostile it can see.
+     */
+    private fun targetFor(battle: Battlefield, enemy: EnemyInstance, side: CombatSide, within: Float? = null): Candidate? {
+        val here = enemy.position
+        return when (side) {
+            CombatSide.MONSTERS -> {
+                val range = within ?: Float.MAX_VALUE
+                if (within != null && battle.player.isAlive && battle.player.position.horizontalDistanceTo(here) <= range) {
+                    return Candidate(PLAYER, battle.player.position)
+                }
+                candidatesAgainst(battle, CombatSide.MONSTERS).filter { it.position.horizontalDistanceTo(here) <= range }
+                    .minByOrNull { it.position.horizontalDistanceTo(here) }
+            }
+            CombatSide.PLAYER -> {
+                val range = within ?: (director.definition(enemy.definitionId)?.aggroRange?.toFloat() ?: FOLLOWER_SIGHT)
+                battle.enemies.filter { it.isAlive && it.factionId != Factions.PLAYER && battle.isHostile(it) && it.position.horizontalDistanceTo(here) <= range }
+                    .minByOrNull { it.position.horizontalDistanceTo(here) }?.let { Candidate(it.instanceId, it.position) }
+            }
         }
     }
 
@@ -654,10 +723,11 @@ internal class CombatSystem(
         val own = statuses.of(PLAYER)
         val sheet = profile.sheet(player, profile.extras(player, own, null, null))
         val maxHealth = profile.maxHealth(player)
+        val maxResource = profile.maxResource(player)
         val noRegen = profile.traits(player).has(Keystone.NO_REGENERATION)
         val life = if (noRegen) 0f else sheet.apply(Stat.LIFE_REGEN, 0f) + own.recoveryPerSecond(maxHealth, book)
-        val resource = BASE_RESOURCE_REGEN * player.resourceCeiling + sheet.apply(Stat.RESOURCE_REGEN, 0f)
-        battle.player = vitals.advance(player, deltaSeconds, Regeneration(life, resource, maxHealth, player.resourceCeiling))
+        val resource = BASE_RESOURCE_REGEN * maxResource + sheet.apply(Stat.RESOURCE_REGEN, 0f)
+        battle.player = vitals.advance(player, deltaSeconds, Regeneration(life, resource, maxHealth, maxResource))
         lastLifeFraction = battle.player.health.toFloat() / maxHealth.coerceAtLeast(1)
     }
 
@@ -684,10 +754,17 @@ internal class CombatSystem(
 
     // ---- who is who ------------------------------------------------------------------
 
-    /** What a side's skills can reach: the player's reach any monster that is not an ally; the monsters' reach the player. */
+    /**
+     * What a side's skills can reach: the player's reach any monster that is
+     * not an ally; the monsters' reach the player and the player's followers,
+     * summons and defenders.
+     */
     private fun candidatesAgainst(battle: Battlefield, side: CombatSide): List<Candidate> = when (side) {
         CombatSide.PLAYER -> battle.enemies.filter { it.isAlive && !battle.isAllied(it) }.map { Candidate(it.instanceId, it.position) }
-        CombatSide.MONSTERS -> if (battle.player.isAlive) listOf(Candidate(PLAYER, battle.player.position)) else emptyList()
+        CombatSide.MONSTERS -> {
+            val allies = battle.enemies.filter { it.isAlive && it.factionId == Factions.PLAYER }.map { Candidate(it.instanceId, it.position) }
+            if (battle.player.isAlive) listOf(Candidate(PLAYER, battle.player.position)) + allies else allies
+        }
     }
 
     /** Ids of the caster's side, the caster included. */
@@ -787,6 +864,9 @@ internal class CombatSystem(
         private const val SUMMON_SQUAD = "summon:"
         private const val AUTO_AIM_SLACK = 2f
         private const val MAX_SWING_GAP = 1.5f
+
+        /** How far a follower looks for a fight when its definition does not say. */
+        private const val FOLLOWER_SIGHT = 8f
         private const val MAX_REMEMBERED = 256
     }
 }

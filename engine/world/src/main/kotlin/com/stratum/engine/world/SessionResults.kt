@@ -65,6 +65,13 @@ data class SessionSnapshot(
     /** Statuses by actor id: the player's under [WorldSession.PLAYER_ACTOR_ID]. */
     val statuses: Map<String, List<StatusInstance>> = emptyMap(),
     val flasks: List<FlaskView> = emptyList(),
+    /**
+     * The player's life and resource ceilings with gear, inserts, passives,
+     * traits, needs and boons counted: what the bars should be measured
+     * against. [PlayerState.maxHealthWithGear] cannot see traits or boons.
+     */
+    val maxHealth: Int = player.maxHealthWithGear,
+    val maxResource: Int = player.resourceCeiling,
 )
 
 /** What a pending build would cost and cover. */

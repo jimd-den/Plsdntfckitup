@@ -2,6 +2,7 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.stats.StatModifier
 import com.stratum.core.domain.survival.ConsumableDefinition
 import com.stratum.core.domain.survival.Environment
@@ -42,6 +43,8 @@ internal class SurvivalFacade(
     private val state: SessionState,
     private val content: AssembledContent,
     private val survival: SurvivalSystem,
+    /** The player's life ceiling, from the one place it is worked out. */
+    private val maxHealth: (PlayerState) -> Int,
 ) : SessionSurvival {
     override val survivalActive: Boolean get() = survival.active
 
@@ -54,7 +57,7 @@ internal class SurvivalFacade(
 
     override val canDrink: Boolean get() = survival.active && survival.waterNear(state.player.blockPos)
 
-    override fun consume(itemId: String): SurvivalResult = survival.consume(state.player, itemId).also { state.player = it.first }.second
+    override fun consume(itemId: String): SurvivalResult = survival.consume(state.player, itemId, maxHealth(state.player)).also { state.player = it.first }.second
 
     override fun drink(): SurvivalResult = survival.drink(state.player).also { state.player = it.first }.second
 
@@ -63,7 +66,7 @@ internal class SurvivalFacade(
     fun modifiers(): List<StatModifier> = survival.modifiers(state.player)
 
     fun advance(deltaSeconds: Float, clock: WorldClock, biome: BiomeDefinition) {
-        if (survival.active) state.player = survival.advance(state.player, deltaSeconds, clock, biome)
+        if (survival.active) state.player = survival.advance(state.player, deltaSeconds, clock, biome, maxHealth(state.player))
     }
 
     /** Meat from a kill, when the body has needs to feed. */

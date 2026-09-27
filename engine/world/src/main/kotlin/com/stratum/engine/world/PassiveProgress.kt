@@ -63,12 +63,11 @@ internal class PassiveProgress(private val tree: PassiveTree?) {
      */
     fun settle(player: PlayerState): PlayerState = buildFor(player)?.let { rebuilt(player, it.pruned()) } ?: player.copy(passives = emptySet(), build = StatSheet.EMPTY)
 
-    /** Health and resource are capped to the new ceilings, so refunding a life node takes the life with it. */
-    private fun rebuilt(player: PlayerState, build: PassiveBuild): PlayerState {
-        val updated = player.copy(passives = build.allocated, build = build.sheet)
-        return updated.copy(
-            health = updated.health.coerceAtMost(updated.maxHealthWithGear),
-            resource = updated.resource.coerceAtMost(updated.resourceCeiling),
-        )
-    }
+    /**
+     * The allocation and its modifiers. Holding life and resource under the
+     * new ceilings is the session's, which alone can count the traits a
+     * keystone brings with it.
+     */
+    private fun rebuilt(player: PlayerState, build: PassiveBuild): PlayerState =
+        player.copy(passives = build.allocated, build = build.sheet)
 }

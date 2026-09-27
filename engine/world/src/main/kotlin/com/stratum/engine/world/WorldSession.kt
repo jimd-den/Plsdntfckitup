@@ -117,7 +117,7 @@ class WorldSession private constructor(private val parts: SessionParts) :
         val spawn = parts.spawnPoint()
         val fresh = parts.heroClass?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
         player = parts.gear.armed(fresh, parts.heroClass).let { armed -> parts.hero?.restoreOnto(armed) ?: armed }
-        player = parts.progression.settle(player).let { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
+        player = parts.profile.restored(parts.progression.settle(player))
         encounters.placeLevelEncounters(currentBiome.id)
     }
 
@@ -170,7 +170,7 @@ class WorldSession private constructor(private val parts: SessionParts) :
         val lost = (player.experience * config.rules.deathPenalty).roundToInt()
         player = player.copy(position = parts.spawnPoint(), experience = (player.experience - lost).coerceAtLeast(0), attackCooldown = 0f, cooldowns = SkillCooldowns())
         combat.clear()
-        player = player.copy(health = player.maxHealthWith(content::insert), resource = player.resourceCeiling)
+        player = parts.profile.restored(player)
         // The run starts clean: no leftover roll, no stale numbers over a corpse that is no longer there.
         motion.reset()
         parts.building.reset()
@@ -270,6 +270,8 @@ class WorldSession private constructor(private val parts: SessionParts) :
         telegraphs = combat.telegraphs(enemies, player),
         statuses = combat.statuses.all().mapValues { it.value.instances },
         flasks = combat.flaskViews,
+        maxHealth = maxHealth,
+        maxResource = maxResource,
     )
 
     /** Moves whatever is still being knocked back. */

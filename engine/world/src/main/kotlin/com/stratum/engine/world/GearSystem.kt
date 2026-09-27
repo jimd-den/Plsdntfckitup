@@ -78,20 +78,20 @@ internal class GearSystem(
     private val roller: LootRoller,
     private val cues: SessionCues,
     private val random: Random,
+    /** Holds life and resource under whatever ceilings a change of gear leaves. */
+    private val profile: PlayerProfile,
 ) : SessionGear {
     private val gear = PlayerGear(::insertOrNull)
     private var player: PlayerState
         get() = state.player
         set(value) {
-            state.player = value
+            state.player = profile.carried(state.player, value)
         }
 
     override fun insertOrNull(insertId: String): InsertDefinition? = content.insert(insertId)
 
     /** A skill as this character casts it, with the build's damage, cost, cooldown and area applied. */
     fun tuned(skill: SkillDefinition): SkillDefinition = workbench.tuned(player, skill)
-
-    fun linkedTo(player: PlayerState, skillId: String): List<SupportDefinition> = workbench.linkedTo(player, skillId)
 
     override fun supportsOn(skillId: String): List<SupportDefinition> = workbench.linkedTo(player, skillId)
 
