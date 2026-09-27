@@ -20,8 +20,6 @@ import com.stratum.core.domain.character.CharacterRepository
 import com.stratum.core.domain.ai.CachingImageModel
 import com.stratum.core.domain.ai.GenerateClipRowUseCase
 import com.stratum.core.domain.ai.VideoModelPort
-import com.stratum.core.domain.ai.GenerateContentPackUseCase
-import com.stratum.core.domain.ai.GenerateLoreUseCase
 import com.stratum.core.domain.ai.GenerateBasePoseUseCase
 import com.stratum.core.domain.ai.GeneratePoseFrameUseCase
 import com.stratum.core.domain.ai.GenerateSpriteSheetUseCase
@@ -118,10 +116,6 @@ class AiWiring(context: Context) {
         poseGuides = poseGuides,
         weaponFits = weaponFits,
     )
-
-    val generateContentPack = GenerateContentPackUseCase(languageModel)
-
-    val generateLore = GenerateLoreUseCase(languageModel)
 
     val generateSpriteSheet = GenerateSpriteSheetUseCase(imageModel)
 

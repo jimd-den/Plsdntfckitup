@@ -16,5 +16,9 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.kotlinx.coroutines.android)
 
+  testImplementation(libs.junit)
   testImplementation(kotlin("test"))
+  testImplementation(libs.kotlinx.coroutines.test)
+  // A real pack to forge against, so the view model is tested on the checks the game runs.
+  testImplementation(project(":content:igbo"))
 }

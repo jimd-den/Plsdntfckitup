@@ -17,11 +17,21 @@ import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.world.IsometricProjection
 import com.stratum.engine.world.WorldSession
-import com.stratum.core.domain.ai.GeneratedPackDto
-import com.stratum.core.domain.ai.toDomain
-import com.stratum.feature.forge.ForgeScreenContent
-import com.stratum.feature.forge.ForgeStatus
-import com.stratum.feature.forge.ForgeUiState
+import com.stratum.agents.forge.Creations
+import com.stratum.agents.forge.ForgeCards
+import com.stratum.agents.forge.ForgeKind
+import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.content.LoreCategory
+import com.stratum.core.domain.content.LoreEntry
+import com.stratum.core.domain.item.ModifierRange
+import com.stratum.core.domain.item.PowerTier
+import com.stratum.core.domain.item.UniqueDefinition
+import com.stratum.core.domain.stats.BuildFlag
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.Stat
+import com.stratum.feature.forge.ContentForgeActions
+import com.stratum.feature.forge.ContentForgeContent
+import com.stratum.feature.forge.ContentForgeUiState
 import com.stratum.feature.forge.SpriteForgeContent
 import com.stratum.feature.forge.SpriteForgeUiState
 import com.stratum.core.domain.content.ClassDraft
@@ -744,55 +754,34 @@ class StratumScreenshotTest {
     }
 
     @Test
-    fun forge_screen() {
-        // Rendered with a result in hand, because the preview after generation
-        // is the part of this screen worth guarding against regressions.
-        val generated = GeneratedPackDto(
-            id = "glasswake",
-            name = "Glasswake",
-            description = "A drowned city of glass beneath a frozen sea.",
-            blocks = listOf(
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:silt", name = "Black Silt", material = "SOIL",
-                    hardness = 0.4f, topColor = "#2b2f3a", sideColor = "#1d2029",
-                ),
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:pane", name = "Cathedral Pane", material = "STONE",
-                    hardness = 2.0f, opaque = false, topColor = "#5f8ea8", sideColor = "#3f6274",
-                ),
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:coldlight", name = "Coldlight Vein", material = "ORE",
-                    hardness = 4.5f, requiredTier = 2, light = 10,
-                    topColor = "#7fd4e0", sideColor = "#4a9aa6",
-                ),
-            ),
-            biomes = listOf(
-                com.stratum.core.domain.ai.GeneratedBiomeDto(
-                    id = "glasswake:nave", name = "The Flooded Nave",
-                    surfaceBlock = "glasswake:silt", subsurfaceBlock = "glasswake:silt",
-                    fillerBlock = "glasswake:pane",
-                ),
-            ),
-            heroClasses = listOf(
-                com.stratum.core.domain.ai.GeneratedClassDto(
-                    id = "glasswake:tidewright", name = "Tidewright", health = 220,
-                ),
-            ),
-        ).toDomain("glasswake")
+    fun content_forge_screen() {
+        // Rendered with a result in hand, because the cards after forging are
+        // the part of this screen worth guarding against regressions.
+        val unique = UniqueDefinition(
+            "${Creations.ID}:kiln_heart", "Heart of the Last Kiln", "igbo:bronze_ring",
+            modifiers = listOf(ModifierRange(Stat.DAMAGE, ModifierKind.MORE, 0.6f), ModifierRange(Stat.MAX_HEALTH, ModifierKind.FLAT, 20f, 35f)),
+            flags = setOf(BuildFlag.SKILLS_COST_HEALTH), flavour = "It burned for a hundred years. Then it was worn.", minItemLevel = 8,
+        )
+        val story = LoreEntry("${Creations.ID}:kiln", "The Last Kiln", "When the kilns of Awka went cold, one ember was kept.", LoreCategory.ARTIFACT, unique.id)
+        val fragment = ContentPack(Creations.ID, Creations.NAME, "forge", uniques = listOf(unique), loreEntries = listOf(story))
 
         composeTestRule.setContent {
             StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                ForgeScreenContent(
-                    state = ForgeUiState(
-                        theme = "A drowned city of glass beneath a frozen sea",
-                        status = ForgeStatus.READY,
-                        result = generated,
+                ContentForgeContent(
+                    state = ContentForgeUiState(
+                        kind = ForgeKind.UNIQUE,
+                        prompt = "A ring that makes every skill cost blood",
+                        budget = PowerTier.STRONG,
+                        result = fragment,
+                        cards = ForgeCards.of(fragment, listOf(IgboContentPack.pack)),
                         providerConfigured = true,
+                        kept = 3,
                     ),
+                    actions = ContentForgeActions(),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/forge.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/content_forge.png")
     }
 }

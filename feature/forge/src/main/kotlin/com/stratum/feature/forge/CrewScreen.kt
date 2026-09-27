@@ -46,6 +46,7 @@ data class CrewActions(
     val onPrompt: (String) -> Unit = {},
     val onName: (String) -> Unit = {},
     val onToggleRole: (String) -> Unit = {},
+    val onPreset: (String) -> Unit = {},
     val onStart: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onOpenStep: (String) -> Unit = {},
@@ -63,7 +64,7 @@ fun CrewScreen(viewModel: CrewViewModel, onBack: () -> Unit, onOpenSettings: () 
     val state by viewModel.state.collectAsStateWithLifecycle()
     val actions = remember(viewModel) {
         CrewActions(
-            onPrompt = viewModel::updatePrompt, onName = viewModel::updateName, onToggleRole = viewModel::toggleRole,
+            onPrompt = viewModel::updatePrompt, onName = viewModel::updateName, onToggleRole = viewModel::toggleRole, onPreset = viewModel::selectPreset,
             onStart = viewModel::start, onCancel = viewModel::cancel, onOpenStep = viewModel::openStep,
             onNote = viewModel::updateNote, onApprove = viewModel::approve, onRevise = { viewModel.revise() }, onSkip = viewModel::skip,
             onInstall = viewModel::install, onBack = onBack, onOpenSettings = onOpenSettings,
@@ -134,6 +135,20 @@ private fun Brief(state: CrewUiState, actions: CrewActions) {
             value = state.packName, onValueChange = actions.onName, modifier = Modifier.fillMaxWidth(),
             label = { Text("Pack name (optional)") }, enabled = !state.running, singleLine = true,
         )
+        if (state.presets.size > 1) {
+            Spacer(Modifier.height(Space.medium))
+            Text("Start from", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+            Spacer(Modifier.height(Space.tight))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.small), verticalArrangement = Arrangement.spacedBy(Space.small)) {
+                state.presets.forEach { preset ->
+                    StratumChip(label = preset.name, selected = preset.id == state.presetId, onClick = { if (!state.running) actions.onPreset(preset.id) })
+                }
+            }
+        }
+        state.presets.firstOrNull { it.id == state.presetId }?.let { preset ->
+            Spacer(Modifier.height(Space.tight))
+            Text(preset.description, style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+        }
         Spacer(Modifier.height(Space.medium))
         Text("The crew -- tap to bench a role", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
         Spacer(Modifier.height(Space.tight))
@@ -253,7 +268,7 @@ private fun Attempt(attempt: AgentAttempt) {
 }
 
 @Composable
-private fun Code(text: String, limit: Int) {
+internal fun Code(text: String, limit: Int) {
     StratumWell(modifier = Modifier.fillMaxWidth()) {
         Text(
             if (text.length > limit) text.take(limit) + "\n… ${text.length - limit} more characters" else text,

@@ -538,6 +538,51 @@ renders as markdown. The finished pack installs as an ordinary plugin
 that names its dependency, so it can be shared, disabled or deleted like
 anything else.
 
+There is one way AI writes content, and this is it. The old world
+generator is now a crew preset (`CrewPresets.world`, the standard crew)
+rather than a second generator with its own schema, and its result is an
+installed plugin rather than state that died with the process.
+
+### The content forge
+
+`agents/forge` puts short, focused requests on the same pipeline: a lore
+entry or set, a weapon or armour base (or a ladder of one family), tiered
+affixes, a unique, an item set. Each `ForgeOrder` becomes a one-role crew
+(`ForgeRoles`) -- the same composer, checks, retries and journal -- with
+two additions the studio makes room for:
+
+- **The brief carries the vocabulary.** `StudioBrief.guidance` and
+  `.vocabulary` list the exact stats, modifier kinds, slots, flags, damage
+  types, tags, bases and lore the reply may use, read from the assembled
+  content by `ForgeVocabulary`. A model that is shown every real word has
+  less room to invent a plausible one.
+- **A repair step before the checks.** `FragmentRepair` is a hook on
+  `StudioPipeline`; the crew uses none. `ForgeRepair` reads the reply
+  leniently into domain objects (fences, bare lists, "20%", "10-25",
+  "life" for health, "fire_resistance", missing namespaces, a base named
+  by its name), clamps numbers to sanity limits, matches or drops dangling
+  references, ties a unique or set to a lore entry about it, and writes the
+  result back as plugin JSON. Every change is a note on the attempt;
+  whatever cannot be saved is a rejection fed back to the model like any
+  other problem, and after the last try the person gets that reason.
+
+**Power is a budget, not a cap.** `PowerBudget` (in `core/domain/item`)
+measures every modifier in affix points against item level, weighs build
+flags, and labels affixes, uniques, bases and sets balanced, strong or
+broken. A balanced request is scaled into the budget (helpful numbers
+only; penalties stay, and the strongest flags go first when scaling alone
+cannot), a strong one only past strong, and a broken one is let through,
+labelled. The sandbox welcomes broken builds; the label makes sure one is
+chosen rather than stumbled on. It is calibrated so the built-in pack's own
+gear never reads as broken, and a test keeps it that way.
+
+What is kept goes into **one** plugin, `user.creations` (`Creations`),
+that grows -- a second "ember edge" is renamed, references following --
+and is checked to assemble before it is installed. Sharing exports it with
+the player's classes, moved to a namespace of its own so a friend's copy
+sits beside theirs. `ForgeCards` renders results with the item model's
+own tooltip wording, so the forge shows what the satchel will.
+
 ## Why the renderer draws into a sink
 
 `WorldFrameRenderer` walks a read-only `World` and emits primitives to a

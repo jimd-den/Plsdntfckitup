@@ -431,6 +431,21 @@ word from `first`, one from `second` -- that fit the item's `slots` and
 "itemNames": [{ "id": "yourname:blades", "first": ["Storm", "Ash"], "second": ["Bite", "Oath"], "slots": ["weapon"] }]
 ```
 
+**Power.** Nothing caps how strong gear may be -- broken builds are
+allowed -- but the content forge labels every base, affix, unique and set
+it makes as *balanced*, *strong* or *broken* against what an ordinary affix
+gives at its item level, and scales a result asked for as balanced into
+that budget. Hand-written gear is never scaled; the same yardstick
+(`PowerBudget`) is there for any tool that wants to show it.
+
+**Your creations.** What a player keeps from the content forge is an
+ordinary plugin, `user.creations`, holding `itemBases`, `affixes`,
+`uniques`, `itemSets` and `lore` in exactly the shapes above, with ids in
+the `user.creations:` namespace and a dependency on the built-in pack. It
+can be disabled or removed in the library like any plugin. Sharing exports
+it (with the player's classes) as `shared.creations`, its ids moved to
+that namespace so it installs beside the recipient's own.
+
 ## The combat core
 
 Skills, statuses, triggers and bosses are data. The engine knows a handful

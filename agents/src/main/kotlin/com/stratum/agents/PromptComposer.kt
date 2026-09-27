@@ -12,6 +12,17 @@ data class StudioBrief(
     val packName: String,
     val author: String = "Studio",
     val modelId: String? = null,
+    /**
+     * Rules for this request on top of each role's standing brief: "write
+     * one unique for a ring", "stay within item levels 10 to 20".
+     */
+    val guidance: List<String> = emptyList(),
+    /**
+     * The exact words the reply may use, by what they name: stats, slots,
+     * flags, damage types. Listed in full so a model names real things
+     * rather than plausible ones.
+     */
+    val vocabulary: Map<String, List<String>> = emptyMap(),
 )
 
 /**
@@ -56,6 +67,16 @@ object PromptComposer {
         appendLine("PACK: ${brief.packName} (${brief.packId})")
         appendLine()
         appendLine("WRITE: ${role.sections.joinToString()}")
+        if (brief.guidance.isNotEmpty()) {
+            appendLine()
+            appendLine("THIS REQUEST:")
+            brief.guidance.forEach { appendLine("- $it") }
+        }
+        if (brief.vocabulary.isNotEmpty()) {
+            appendLine()
+            appendLine("ALLOWED VALUES (use these exact spellings; nothing else exists):")
+            brief.vocabulary.forEach { (name, words) -> appendLine("$name: ${words.joinToString()}") }
+        }
         role.sections.forEach { section ->
             val example = (listOf(draft) + base).firstNotNullOfOrNull { PackSections.example(it, section) }
             if (example != null) {
