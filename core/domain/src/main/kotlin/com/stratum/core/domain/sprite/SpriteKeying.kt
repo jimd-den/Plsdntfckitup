@@ -126,6 +126,10 @@ object SpriteKeying {
         // a fifth of the range -- so nothing of the figure is at stake.
         if (dominant.any { isChroma(it) }) {
             val cleared = clearChroma(out)
+            // Only once there is a silhouette to find the edge of. Refused
+            // results hand back the original anyway, so despilling first would
+            // be work thrown away.
+            if (cleared > 0) despill(out, width, height)
             return survivorsOf(pixels, out, KeyStrategy.CHROMA, cleared)
         }
 
@@ -338,6 +342,61 @@ object SpriteKeying {
         return cleared
     }
 
+    /**
+     * Cleans the rim chroma leaves on a silhouette.
+     *
+     * Clearing by range takes every pixel that is mostly backdrop, and leaves
+     * the ones that are *partly* backdrop: the antialiased ring where the
+     * figure's outline was blended into green. Those are costume-coloured with
+     * a green cast, and downscaled into a sprite they draw the whole character
+     * with a thin green halo — the tell of a keyed sprite everyone recognises.
+     *
+     * Two corrections, both confined to pixels within [SPILL_RADIUS] of
+     * something that was cleared, so a character who genuinely wears green
+     * keeps it everywhere but the very edge of their silhouette. The green
+     * channel is pulled down to the larger of the other two, which is what
+     * removes the cast without shifting the costume's hue; and a pixel whose
+     * green excess says it was more than a sliver backdrop is made partly
+     * transparent in proportion, so the edge fades instead of stepping.
+     */
+    private fun despill(out: IntArray, width: Int, height: Int) {
+        val nearCleared = BooleanArray(out.size)
+        for (y in 0 until height) {
+            val row = y * width
+            for (x in 0 until width) {
+                if (alphaOf(out[row + x]) != 0) continue
+                for (dy in -SPILL_RADIUS..SPILL_RADIUS) {
+                    val ny = y + dy
+                    if (ny < 0 || ny >= height) continue
+                    for (dx in -SPILL_RADIUS..SPILL_RADIUS) {
+                        val nx = x + dx
+                        if (nx < 0 || nx >= width) continue
+                        nearCleared[ny * width + nx] = true
+                    }
+                }
+            }
+        }
+        for (i in out.indices) {
+            if (!nearCleared[i]) continue
+            val pixel = out[i]
+            val alpha = alphaOf(pixel)
+            if (alpha == 0) continue
+            val r = redOf(pixel)
+            val g = greenOf(pixel)
+            val b = blueOf(pixel)
+            val ceiling = max(r, b)
+            val excess = g - ceiling
+            if (excess <= 0) continue
+            val fade = if (excess <= SPILL_SOFT_MARGIN) {
+                1f
+            } else {
+                1f - (excess - SPILL_SOFT_MARGIN).toFloat() / (CHROMA_MARGIN - SPILL_SOFT_MARGIN)
+            }
+            val newAlpha = (alpha * fade.coerceIn(0f, 1f)).toInt().coerceIn(1, 255)
+            out[i] = (newAlpha shl 24) or (r shl 16) or (ceiling shl 8) or b
+        }
+    }
+
     private fun clearEverywhere(out: IntArray, background: List<Int>, tolerance: Int): Int {
         if (background.isEmpty()) return 0
         var cleared = 0
@@ -452,6 +511,18 @@ object SpriteKeying {
      * anything a figure is made of.
      */
     private const val CHROMA_MARGIN = 60
+
+    /** How far from a cleared pixel a rim pixel can be, and still be rim. */
+    private const val SPILL_RADIUS = 2
+
+    /**
+     * Green excess a rim pixel may carry and stay fully opaque.
+     *
+     * Below it the cast is removed and the pixel kept; above it the pixel was
+     * substantially backdrop, and fades toward clear as the excess approaches
+     * the margin that would have cleared it outright.
+     */
+    private const val SPILL_SOFT_MARGIN = 24
 
     /** Dark enough to be a shadow rather than a backdrop. */
     private const val CHROMA_MIN_GREEN = 90

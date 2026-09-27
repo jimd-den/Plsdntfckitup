@@ -2,6 +2,8 @@ package com.stratum.app
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.core.content.FileProvider
 import com.stratum.content.igbo.IgboContentPack
 import com.stratum.core.data.importing.AndroidImportedAssetWriter
@@ -15,9 +17,12 @@ import com.stratum.core.domain.plugin.PluginDependency
 import com.stratum.core.domain.plugin.PluginManifest
 import com.stratum.core.domain.plugin.PluginRepository
 import com.stratum.core.domain.plugin.Version
+import com.stratum.core.domain.sprite.SheetArt
+import com.stratum.core.domain.sprite.SpritePluginExport
 import com.stratum.core.domain.plugin.VersionRange
 import com.stratum.plugins.Importers
 import com.stratum.plugins.PluginArchive
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -71,6 +76,35 @@ class PluginWiring(private val context: Context, sprites: SpriteLibrary) {
         context.startActivity(Intent.createChooser(send, "Share your classes").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return true
     }
+
+    /**
+     * Packs generated character sheets into a `.stratum` plugin and opens the
+     * share sheet. Each sheet goes under `art/sheets/` with its grid in
+     * pack.json, so the other device installs a character it can draw rather
+     * than receiving a picture. What could not be included is returned by id
+     * with the reason; null when nothing could be shared at all.
+     */
+    fun shareSheets(art: List<SheetArt>): Map<String, String>? {
+        val bundle = SpritePluginExport.bundle(art, toPng = ::reencodePng) ?: return null
+        val file = File(File(context.cacheDir, "share").apply { mkdirs() }, "shared-sprites.${PluginArchive.EXTENSION}")
+        file.writeBytes(PluginArchive.write(bundle.manifest, bundle.pack, sheets = bundle.images))
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("application/octet-stream")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(Intent.createChooser(send, "Share your characters").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return bundle.skipped
+    }
+
+    /** Some providers answer in JPEG whatever was asked; a plugin's sheets must be PNG. */
+    private fun reencodePng(bytes: ByteArray): ByteArray? = runCatching {
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val out = ByteArrayOutputStream()
+        val ok = bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        bitmap.recycle()
+        if (ok) out.toByteArray() else null
+    }.getOrNull()
 
     /**
      * Installs what the agent studio wrote as an ordinary plugin, depending on

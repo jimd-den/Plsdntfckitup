@@ -85,6 +85,7 @@ fun SpriteForgeScreen(
         onActionChange = viewModel::selectAction,
         onGenerate = viewModel::generate,
         onDelete = viewModel::delete,
+        onShare = viewModel::shareAsPlugin,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
         onToggleDetails = viewModel::toggleDetails,
@@ -106,6 +107,8 @@ fun SpriteForgeContent(
     onActionChange: (AnimationState) -> Unit = {},
     onGenerate: () -> Unit = {},
     onDelete: (String) -> Unit = {},
+    /** Shares every sheet in the library as one installable plugin. */
+    onShare: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onToggleDetails: () -> Unit = {},
@@ -453,6 +456,13 @@ fun SpriteForgeContent(
         if (state.sheets.isNotEmpty()) {
             Spacer(Modifier.height(Space.large))
             SectionLabel("Drawn so far")
+            Spacer(Modifier.height(Space.small))
+            StratumAction(
+                label = "Share as plugin",
+                onClick = onShare,
+                emphasis = ActionEmphasis.SECONDARY,
+                enabled = !state.busy,
+            )
             Spacer(Modifier.height(Space.small))
             state.sheets.forEach { sheet ->
                 SheetRow(

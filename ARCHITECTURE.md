@@ -887,18 +887,84 @@ resumable at frame thirty-one and lets one bad frame be redrawn on its own.
 `PoseLibrary` writes every pose to disk as it arrives, at full size, so a set can
 be re-packed at another frame size later without paying for anything twice.
 
-`PoseSheetComposer` does the part that needs pixels: chroma key, measure, scale,
-pack. The measuring pass is the point. Each pose arrives on its own canvas with
+`PoseSheetLayout` decides where every frame goes and `PoseSheetComposer` only
+moves the pixels there: decode, chroma key, measure, draw. The measuring is the
+point, and it is arithmetic over rectangles, so it lives in the domain and is
+tested there. Each pose arrives on its own canvas with
 the figure at whatever size and height the model felt like, and dropping those
 into cells as they arrive gives a character that pulses in size and bobs off the
 floor — which reads as broken in a way the individual frames never hint at. So
-the whole set is measured first, scaled by one factor, and hung from one
-baseline.
+the whole set is measured first (`FrameAnalyser`, once per frame), each row is
+pulled toward the heights its authored poses say it should have
+(`SpriteDrift`, against whichever guides the art was actually drawn under),
+scaled by one factor, and every frame is hung from its ground contact at the
+centre of its cell.
+
+Colour drifts the same way size does: one frame a little warmer, one a little
+darker, and played back the character flickers. `PaletteMatch` summarises each
+frame's colours and nudges it toward the consensus of the set with a clamped
+gain and offset per channel — enough to remove a tint, not enough to erase a
+real change in what the pose shows. Identity still comes from the star of edits
+off one reference; chaining each frame off the previous one would compound the
+drift this is correcting.
 
 The background is asked for as flat chroma green rather than as transparency.
 Models answer a request for alpha by *drawing* the editor checkerboard at least
 as often as they return a real alpha channel, and a drawn checkerboard is
-unrecoverable; a flat colour is unambiguous to produce and trivial to key out.
+unrecoverable; a flat colour is unambiguous to produce and trivial to key out. Trivial but
+not free: an antialiased outline blends into the green, and cleared by range
+alone it leaves a thin green halo round every sprite. `SpriteKeying` despills
+the rim — pulls green down to the other channels and fades pixels that were
+mostly backdrop — within two pixels of what it cleared, so green the character
+actually wears is untouched.
+
+## Why a frame is checked before it is kept
+
+The run used to accept whatever came back and count it as drawn. A frame
+returned blank, cropped at the head, drawn twice side by side, shrunk to a
+distant figure, or handed back as the reference T-pose untouched was then
+indistinguishable from a good one until the sheet was packed and the character
+vanished for a frame. Every one of those is measurable from pixels, so
+`FrameQuality` measures them as each frame arrives, and `PoseFrameRun` asks
+again for just that frame — the cheapest moment there will ever be to fix it.
+Two redraws, then the last attempt is kept and flagged by name: a flawed frame
+in its cell is better than a hole, and the person is told which to redraw. The
+checks are conservative on purpose; a false alarm costs one generation, while a
+crouch or a body lying flat must never be rejected for being unusual.
+
+The loop itself — retry a rate limit, skip a broken frame, abandon on a bad
+key, redraw a bad picture — is `PoseFrameRun` in the domain, with every
+collaborator (drawing, judging, saving, waiting) passed in as a function. It
+lived in the view model, where none of it could be exercised; now a test plays
+a forty-frame run in microseconds.
+
+## Why a run survives the process
+
+Poses were always written the moment they arrived, and written atomically now,
+because a truncated file still exists and existence is what marks a pose done.
+What was lost when the system reclaimed the process was everything that said
+what the poses were *for*: twelve walk frames rather than six, the away angle,
+the cell size, which frames had been thrown away. `PoseRunRecord` keeps that
+beside the poses, marked active while a run is in flight. A record still active
+when the forge opens is a run that was killed, and the forge offers to resume
+it exactly as it was set up. Offered, never started: resuming spends money.
+
+Pose frames go through `CachingImageModel`, which keeps each answer against a
+fingerprint of the whole request, references included. A frame that arrived
+just before the process died, or whose save failed, is then free the second
+time. `ImageRequest.take` is part of the fingerprint, and a deliberate redraw
+asks with the next take — otherwise the cache would hand back the very picture
+the person had just rejected.
+
+## Sharing a character
+
+The `.stratum` format always had `art/sheets/` and the importer always read it,
+but nothing on the device wrote one, so a generated character could only leave
+as a loose PNG. `SpritePluginExport` bundles the sprite library into a pack and
+runs the importer's own checks before sending: an image that is not a PNG (some
+providers answer in JPEG whatever was asked) is re-encoded, one smaller than
+its grid is left out and named. The sprite forge's share action writes it with
+`PluginArchive` and the ordinary share sheet.
 
 ## Why there is a skeleton
 
@@ -914,6 +980,10 @@ rather than coordinates, because bone lengths are then fixed: no authored pose
 can stretch a forearm, and a guide with wrong proportions teaches the model
 wrong proportions. The prose instruction is still sent, generated from the same
 skeleton, so the two can never disagree about what frame three of a walk is.
+That only holds if both sample the cycle at the same length, which is why a
+`PoseStep` carries its animation's `frameCount`: the guide used to be drawn at
+the default six, so a twelve-frame walk followed its guides for six frames and
+then held the last pose for the other six.
 
 The second reason is the one that pays for it. A weapon is held in a hand and
 points along a forearm, and a skeleton knows exactly where both are.
