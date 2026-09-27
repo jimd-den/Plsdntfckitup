@@ -20,9 +20,17 @@ import com.stratum.core.domain.sprite.SpriteSlicing
 import com.stratum.core.domain.sprite.SpriteValidation
 import com.stratum.core.domain.sprite.SpriteValidationReport
 import com.stratum.core.domain.sprite.ValidationSeverity
+import androidx.lifecycle.viewModelScope
+import com.stratum.core.domain.sprite.EditHistory
+import com.stratum.core.domain.sprite.FrameCursor
+import com.stratum.core.domain.sprite.MapperGrid
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Drives the frame mapper.
@@ -44,12 +52,13 @@ class SpriteMapperViewModel(
     /** Packs the mapping into a sheet the engine can draw, and stores it. */
     private val bakeAtlas: (SpriteAtlas) -> SpriteSheet?,
     private val loadSheets: () -> List<SpriteSheet>,
+    private val compute: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SpriteMapperUiState(sheets = loadSheets()))
     val state: StateFlow<SpriteMapperUiState> = _state.asStateFlow()
 
-    private val undo = ArrayDeque<SpriteAtlas>()
+    private var history = EditHistory<SpriteAtlas>()
 
     fun refresh() {
         _state.value = _state.value.copy(sheets = loadSheets())
@@ -71,10 +80,10 @@ class SpriteMapperViewModel(
             )
             return
         }
-        undo.clear()
+        history = history.cleared()
         _state.value = _state.value.copy(
             atlas = atlas,
-            slice = sliceOf(atlas, SheetGrid(sheet.columns, sheet.rows)),
+            slice = MapperGrid.initial(SheetGrid(sheet.columns, sheet.rows), atlas.sourceWidth, atlas.sourceHeight),
             squareCells = true,
             activeState = atlas.mappedStates.firstOrNull() ?: AnimationState.IDLE,
             report = SpriteValidation.validate(atlas),
@@ -98,7 +107,7 @@ class SpriteMapperViewModel(
     }
 
     fun close() {
-        undo.clear()
+        history = history.cleared()
         _state.value = _state.value.copy(
             atlas = null,
             slice = null,
@@ -119,17 +128,10 @@ class SpriteMapperViewModel(
         gutterY: Int = _state.value.slice?.gutterY ?: 0,
     ) {
         val atlas = _state.value.atlas ?: return
-        val grid = SheetGrid(columns.coerceIn(1, MAX_DIVISIONS), rows.coerceIn(1, MAX_DIVISIONS))
-        val cut = if (_state.value.squareCells) SliceSpec::squareFitting else SliceSpec::fitting
         applySlice(
-            cut(
-                grid,
-                atlas.sourceWidth,
-                atlas.sourceHeight,
-                offsetX.coerceAtLeast(0),
-                offsetY.coerceAtLeast(0),
-                gutterX.coerceAtLeast(0),
-                gutterY.coerceAtLeast(0),
+            MapperGrid.of(
+                columns, rows, atlas.sourceWidth, atlas.sourceHeight, _state.value.squareCells,
+                offsetX, offsetY, gutterX, gutterY,
             ),
         )
     }
@@ -197,34 +199,14 @@ class SpriteMapperViewModel(
      */
     fun setGridFromBox(rect: SourceRect) {
         val atlas = _state.value.atlas ?: return
-        val left = rect.left.coerceIn(0, atlas.sourceWidth - 1)
-        val top = rect.top.coerceIn(0, atlas.sourceHeight - 1)
-        var width = rect.width.coerceAtMost(atlas.sourceWidth - left)
-        var height = rect.height.coerceAtMost(atlas.sourceHeight - top)
-        if (width < MIN_DRAWN_CELL || height < MIN_DRAWN_CELL) {
+        val spec = MapperGrid.fromBox(rect, atlas.sourceWidth, atlas.sourceHeight, _state.value.squareCells)
+        if (spec == null) {
             _state.value = _state.value.copy(
                 error = "That box is too small to be a cell. Drag around one frame.",
             )
             return
         }
-        if (_state.value.squareCells) {
-            val side = minOf(width, height)
-            width = side
-            height = side
-        }
-        // The gap is deliberately dropped: a box drawn around one cell says
-        // nothing about what sits between cells, and keeping a gutter from a
-        // grid this replaces would shift every cell after the first.
-        applySlice(
-            SliceSpec.ofCellSize(
-                cellWidth = width,
-                cellHeight = height,
-                imageWidth = atlas.sourceWidth,
-                imageHeight = atlas.sourceHeight,
-                offsetX = left,
-                offsetY = top,
-            ),
-        )
+        applySlice(spec)
     }
 
     private fun applySlice(spec: SliceSpec?) {
@@ -259,9 +241,8 @@ class SpriteMapperViewModel(
         // throw the person back to the contact sheet to find their place again.
         // The frame that slid into this index is the next one; when the last
         // frame went, there is nothing left to step to.
-        val remaining = _state.value.atlas?.frames.orEmpty()
         _state.value = _state.value.copy(
-            focusFrameId = remaining.getOrNull(at.coerceAtMost(remaining.size - 1))?.id,
+            focusFrameId = FrameCursor.afterRemoval(_state.value.atlas?.frames.orEmpty(), at),
         )
     }
 
@@ -324,15 +305,8 @@ class SpriteMapperViewModel(
      */
     fun stepFrame(forward: Boolean) {
         val atlas = _state.value.atlas ?: return
-        if (atlas.frames.isEmpty()) return
-        val at = atlas.frames.indexOfFirst { it.id == _state.value.focusFrameId }
-        val count = atlas.frames.size
-        val next = when {
-            at < 0 -> 0
-            forward -> (at + 1) % count
-            else -> (at - 1 + count) % count
-        }
-        _state.value = _state.value.copy(focusFrameId = atlas.frames[next].id)
+        val next = FrameCursor.step(atlas.frames, _state.value.focusFrameId, forward) ?: return
+        _state.value = _state.value.copy(focusFrameId = next)
     }
 
     /** How far one press of a nudge or resize button moves an edge. */
@@ -436,7 +410,8 @@ class SpriteMapperViewModel(
     fun setFacing(facing: FacingLayout) = edit { it.copy(facing = facing) }
 
     fun undo() {
-        val previous = undo.removeLastOrNull() ?: return
+        val (previous, rest) = history.undo() ?: return
+        history = rest
         _state.value = _state.value.copy(
             atlas = previous,
             report = SpriteValidation.validate(previous),
@@ -475,8 +450,18 @@ class SpriteMapperViewModel(
         }
 
         _state.value = _state.value.copy(busy = true, error = null)
-        saveProject(atlas)
-        val sheet = bakeAtlas(atlas.pruned())
+        viewModelScope.launch {
+            // Blitting and encoding a whole sheet is pixel work; on the main
+            // thread it froze the editor for as long as it took.
+            val sheet = withContext(compute) {
+                saveProject(atlas)
+                bakeAtlas(atlas.pruned())
+            }
+            finishBake(sheet, report)
+        }
+    }
+
+    private fun finishBake(sheet: SpriteSheet?, report: SpriteValidationReport) {
         _state.value = if (sheet == null) {
             _state.value.copy(busy = false, error = "The sheet could not be written.")
         } else {
@@ -510,10 +495,7 @@ class SpriteMapperViewModel(
         val current = _state.value.atlas ?: return
         val next = change(current)
         if (next == current) return
-        if (record) {
-            undo.addLast(current)
-            while (undo.size > UNDO_DEPTH) undo.removeFirst()
-        }
+        if (record) history = history.record(current)
         _state.value = _state.value.copy(
             atlas = next,
             report = SpriteValidation.validate(next),
@@ -521,28 +503,17 @@ class SpriteMapperViewModel(
         )
     }
 
-    private fun sliceOf(atlas: SpriteAtlas, grid: SheetGrid): SliceSpec? =
-        SliceSpec.squareFitting(grid, atlas.sourceWidth, atlas.sourceHeight)
-            ?: SliceSpec.fitting(grid, atlas.sourceWidth, atlas.sourceHeight)
-
     companion object {
         /** More divisions than this on a phone screen is a grid nobody can tap. */
-        const val MAX_DIVISIONS = 16
+        const val MAX_DIVISIONS = MapperGrid.MAX_DIVISIONS
 
-        /**
-         * Below this, a box drawn on the sheet was a tap that slid.
-         *
-         * Eight source pixels. Small enough that a genuinely tiny cell can
-         * still be drawn, large enough that a finger resting on the image does
-         * not cut the sheet into thousands of cells and lose the mapping.
-         */
-        const val MIN_DRAWN_CELL = 8
+        /** Below this, a box drawn on the sheet was a tap that slid. */
+        const val MIN_DRAWN_CELL = MapperGrid.MIN_DRAWN_CELL
 
         /** Larger than this a nudge is a throw, not an adjustment. */
         const val MAX_STEP = 64
         const val MIN_FPS = 1f
         const val MAX_FPS = 30f
-        private const val UNDO_DEPTH = 40
 
         fun factory(
             openProject: (String) -> SpriteAtlas?,

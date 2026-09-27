@@ -11,14 +11,16 @@ import com.stratum.core.domain.ai.GenerationJournal
 import com.stratum.core.domain.ai.GenerationObserver
 import com.stratum.core.domain.ai.GenerationStage
 import com.stratum.core.domain.sprite.AnimationState
-import com.stratum.core.domain.sprite.GridOutcome
 import com.stratum.core.domain.sprite.KeyStrategy
 import com.stratum.core.domain.sprite.SheetPreparation
 import com.stratum.core.domain.sprite.SpriteSheet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Drives sprite sheet generation.
@@ -39,6 +41,13 @@ class SpriteForgeViewModel(
     private val isProviderConfigured: () -> Boolean,
     /** The last few provider calls, so a failure can be read rather than guessed at. */
     private val journal: GenerationJournal = GenerationJournal(),
+    /**
+     * Shares sheets, by id, as one `.stratum` plugin. Returns the sheets left
+     * out and why, or null when nothing could be shared.
+     */
+    private val shareSheets: (List<String>) -> Map<String, String>? = { null },
+    /** Where keying and grid checks run; they are a second of pixel work. */
+    private val compute: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -135,7 +144,10 @@ class SpriteForgeViewModel(
             _state.value = result.fold(
                 onSuccess = { generated ->
                     _state.value = _state.value.copy(stage = GenerationStage.SAVING)
-                    val prepared = saveSheet(generated.sheet, generated.image.bytes)
+                    // Off the main thread: decoding, keying twice and checking
+                    // the grid of a 1024 pixel image froze the screen for as
+                    // long as it took.
+                    val prepared = withContext(compute) { saveSheet(generated.sheet, generated.image.bytes) }
                     _state.value.copy(
                         busy = false,
                         stage = GenerationStage.DONE,
@@ -145,16 +157,7 @@ class SpriteForgeViewModel(
                         // on the one it drew.
                         lastGenerated = prepared.sheet,
                         keyStrategy = prepared.keyStrategy,
-                        gridNote = when {
-                            // Said first, because an empty sheet makes every
-                            // other observation about it beside the point.
-                            prepared.looksEmpty ->
-                                "The model returned an all but blank image — there is nothing " +
-                                    "to draw, so the world will keep showing the fallback shape. " +
-                                    "Try again, or a different model."
-                            prepared.grid.outcome != GridOutcome.AS_ASKED -> prepared.grid.summary
-                            else -> null
-                        },
+                        gridNote = prepared.note,
                         error = null,
                     )
                 },
@@ -182,6 +185,28 @@ class SpriteForgeViewModel(
         )
     }
 
+    /**
+     * Shares the whole library as a plugin another player can install.
+     *
+     * The library rather than one sheet, because a character is often several:
+     * a walk block, an attack block, and the packed pose sheet.
+     */
+    fun shareAsPlugin() {
+        val ids = _state.value.sheets.map { it.id }
+        if (ids.isEmpty()) {
+            _state.value = _state.value.copy(error = "There is nothing to share yet.")
+            return
+        }
+        val skipped = shareSheets(ids)
+        _state.value = when {
+            skipped == null -> _state.value.copy(error = "None of these sheets could be packed as a plugin.")
+            skipped.isEmpty() -> _state.value.copy(error = null)
+            else -> _state.value.copy(
+                error = "Left out: " + skipped.entries.joinToString("; ") { (id, why) -> "$id, because $why" },
+            )
+        }
+    }
+
     fun dismissError() {
         _state.value = _state.value.copy(error = null)
     }
@@ -193,10 +218,12 @@ class SpriteForgeViewModel(
             loadSheets: () -> List<SpriteSheet>,
             deleteSheet: (String) -> Unit,
             isProviderConfigured: () -> Boolean,
+            shareSheets: (List<String>) -> Map<String, String>? = { null },
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = SpriteForgeViewModel(
                 generateSheet, saveSheet, loadSheets, deleteSheet, isProviderConfigured,
+                shareSheets = shareSheets,
             ) as T
         }
     }

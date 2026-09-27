@@ -148,6 +148,8 @@ fun PoseForgeScreen(
         onBasePromptChange = viewModel::editBasePrompt,
         onResetBasePrompt = viewModel::resetBasePrompt,
         onDismiss = viewModel::dismissMessage,
+        onResumeRun = viewModel::resumeInterrupted,
+        onDismissRun = viewModel::dismissInterrupted,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
     )
@@ -186,6 +188,9 @@ fun PoseForgeContent(
     onImportPose: (PoseStep) -> Unit = {},
     onImportJson: (PoseStep, String) -> Unit = { _, _ -> },
     onDismiss: () -> Unit = {},
+    /** Carries on a run the process died in, set up as it was. */
+    onResumeRun: () -> Unit = {},
+    onDismissRun: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
@@ -235,6 +240,40 @@ fun PoseForgeContent(
         }
 
         Notice(state.message, state.error, onDismiss)
+
+        state.interruptedRun?.let { run ->
+            Spacer(Modifier.height(Space.medium))
+            StratumPanel(raised = false, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Drawing ${run.subject.ifBlank { "a character" }} was interrupted. The poses " +
+                        "already drawn are kept; resuming draws only the rest, set up exactly as before.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StratumTheme.colors.accent,
+                )
+                Spacer(Modifier.height(Space.small))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                    StratumAction(
+                        label = "Resume",
+                        onClick = onResumeRun,
+                        emphasis = ActionEmphasis.PRIMARY,
+                        enabled = !state.busy && state.providerConfigured,
+                    )
+                    StratumAction(label = "Not now", onClick = onDismissRun, emphasis = ActionEmphasis.QUIET)
+                }
+            }
+        }
+
+        if (state.flagged.isNotEmpty() && !state.busy) {
+            Spacer(Modifier.height(Space.medium))
+            StratumPanel(raised = false, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Kept, but worth redrawing: " +
+                        state.flagged.entries.joinToString("; ") { (key, why) -> "$key $why" } + ".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StratumTheme.colors.inkMuted,
+                )
+            }
+        }
 
         if (state.setId != null && state.savedSheet == null && state.drawn.isNotEmpty() && !state.busy) {
             Spacer(Modifier.height(Space.medium))

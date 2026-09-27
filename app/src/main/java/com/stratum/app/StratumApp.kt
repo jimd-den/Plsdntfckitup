@@ -28,20 +28,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stratum.core.data.hero.CustomClassStore
 import com.stratum.core.data.sprite.GeneratedSheetPreparer
+import com.stratum.core.data.sprite.PoseFrameInspector
 import com.stratum.core.data.sprite.PoseGuideRenderer
 import com.stratum.core.data.sprite.PoseSheetComposer
 import com.stratum.core.data.sprite.SpriteAtlasBaker
 import com.stratum.core.data.sprite.SpriteExporter
 import com.stratum.core.data.sprite.WeaponPreparer
 import com.stratum.core.domain.ai.ImageReference
-import com.stratum.core.domain.ai.PoseScript
 import com.stratum.core.domain.ai.PoseStep
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.CustomClassPack
 import com.stratum.core.domain.sprite.OpenPoseImageReader
 import com.stratum.core.domain.sprite.OpenPoseImport
 import com.stratum.core.domain.sprite.OpenPoseJson
-import com.stratum.core.domain.sprite.SheetPreparation
+import com.stratum.core.domain.sprite.SheetArt
+import com.stratum.core.domain.sprite.SpriteDrift
 import com.stratum.core.domain.sprite.SpriteFallback
 import com.stratum.core.domain.sprite.SpriteMapper
 import com.stratum.core.domain.sprite.SpriteNamespace
@@ -500,18 +501,24 @@ fun StratumApp(
                         // would pay the cost every frame.
                         val prepared = GeneratedSheetPreparer.prepare(sheet, bytes)
                         ai.sprites.save(prepared.sheet, prepared.bytes)
-                        SheetPreparation(
-                            prepared.sheet,
-                            prepared.keyStrategy,
-                            prepared.grid,
-                            prepared.looksEmpty,
-                        )
+                        prepared.preparation()
                     },
                     loadSheets = ai.sprites::all,
                     deleteSheet = { id ->
                         ai.sprites.delete(id)
                     },
                     isProviderConfigured = ai::isConfigured,
+                    shareSheets = { ids ->
+                        // As a plugin, so what arrives on another device is
+                        // a character the game can draw, not a loose PNG.
+                        plugins.shareSheets(
+                            ids.mapNotNull { id ->
+                                val sheet = ai.sprites.all().firstOrNull { it.id == id }
+                                val bytes = ai.sprites.bytesFor(id)
+                                if (sheet != null && bytes != null) SheetArt(sheet, bytes) else null
+                            },
+                        )
+                    },
                 ),
             )
             SpriteForgeScreen(
@@ -543,7 +550,10 @@ fun StratumApp(
                         guides.poseFor(
                             state = step.state,
                             index = step.index,
-                            frameCount = PoseScript.posesFor(step.state).size,
+                            // The length of this step's own animation. The
+                            // default length here guided every frame past the
+                            // sixth of a longer row with the cycle's last pose.
+                            frameCount = step.frameCount,
                         )?.let { pose ->
                             PoseGuideRenderer.render(pose, style = guides.style)
                                 ?.let { ImageReference(it) }
@@ -585,7 +595,13 @@ fun StratumApp(
                         // Loaded by key rather than all at once: a full
                         // character is forty 1024-pixel images, which is more
                         // than a phone will hold decoded at the same time.
-                        val composed = PoseSheetComposer.compose(plan) { key ->
+                        // Drift is judged against the poses the art was
+                        // actually drawn under, imported ones included.
+                        val guides = ai.poseGuides.guidesFor(setId)
+                        val composed = PoseSheetComposer.compose(
+                            plan = plan,
+                            expectedHeights = { state, count -> SpriteDrift.authoredHeightsFor(guides, state, count) },
+                        ) { key ->
                             ai.poses.pose(setId, key)
                         }
                         composed?.let {
@@ -646,6 +662,10 @@ fun StratumApp(
                         file != null
                     },
                     isProviderConfigured = ai::isConfigured,
+                    inspectPose = PoseFrameInspector::analyse,
+                    saveRunRecord = ai.poses::saveRunRecord,
+                    loadRunRecord = ai.poses::runRecord,
+                    runRecords = ai.poses::runRecords,
                 ),
             )
             // Which frame an imported pose is destined for. The picker hands
