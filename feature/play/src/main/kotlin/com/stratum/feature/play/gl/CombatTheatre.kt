@@ -67,6 +67,8 @@ internal class CombatTheatre(director: WorldArtDirector) {
             FeedbackKind.KILL -> CombatMoment.KILL
             FeedbackKind.LEVEL_UP, FeedbackKind.CHECK -> CombatMoment.LEVEL_UP
             FeedbackKind.LOOT -> CombatMoment.LOOT_DROP
+            // A status taking hold is words over a body, not an impact: nothing to stage.
+            FeedbackKind.STATUS -> return null
         }
         return CombatCue(moment, mark.color, emphasis, onPlayer = mark.kind == FeedbackKind.DAMAGE_TAKEN)
     }

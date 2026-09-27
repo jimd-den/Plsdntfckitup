@@ -7,6 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import com.stratum.engine.world.Projectile
+import com.stratum.engine.world.Telegraph
+import com.stratum.engine.world.Zone
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Size
@@ -70,6 +73,10 @@ fun WorldCanvas(
     /** Resolves a dropped insert's glyph, so a rune on the ground reads as one. */
     insertGlyph: (String) -> String? = { null },
     feedback: List<FeedbackMark> = emptyList(),
+    /** The combat core's shapes: things in flight, burning ground, and wind-ups to roll out of. */
+    projectiles: List<Projectile> = emptyList(),
+    zones: List<Zone> = emptyList(),
+    telegraphs: List<Telegraph> = emptyList(),
     /** 0..1, how recently the player was hit. Drives the hurt tint. */
     playerFlash: Float = 0f,
     /** Rolling players are drawn flattened and trailing. */
@@ -192,6 +199,10 @@ fun WorldCanvas(
             }
         }
 
+        // Markers lie on the ground, under whoever is standing in them.
+        drawZones(zones, projection, originX, originY)
+        drawTelegraphs(telegraphs, projection, originX, originY)
+
         // Actors are drawn after the terrain and sorted among themselves, so a
         // monster standing behind a pillar is still covered by it but a monster
         // in front of another draws over it.
@@ -285,6 +296,8 @@ fun WorldCanvas(
                 }
             }
         }
+
+        drawProjectiles(projectiles, projection, originX, originY)
 
         // Weather and vignette sit over the actors rather than under them.
         // Air in front of the characters is what makes a scene read as a place

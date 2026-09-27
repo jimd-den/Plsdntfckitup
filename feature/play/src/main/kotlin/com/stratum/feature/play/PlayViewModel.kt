@@ -29,6 +29,7 @@ import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
 import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.AttackReport
+import com.stratum.engine.world.FlaskResult
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
 import com.stratum.engine.world.CheckAttempt
@@ -453,6 +454,7 @@ class PlayViewModel(
         is CombatEvent.InsertTaken -> "Picked up ${event.insert.name}"
         is CombatEvent.TownLiberated -> "${event.town.name} is liberated, and yours to hold"
         is CombatEvent.Realm -> describe(event.event)
+        is CombatEvent.BossPhaseBegan -> event.announcement.ifBlank { "${event.enemyName}: ${event.phaseName}" }
     }
 
     // ---- dying -----------------------------------------------------------
@@ -669,6 +671,17 @@ class PlayViewModel(
             AttackReport.OnCooldown -> Unit
             AttackReport.NotReady -> Unit
             AttackReport.UnknownSkill -> publish(message = "That skill is not available")
+            is AttackReport.Cast -> publish()
+            AttackReport.Stunned -> publish(message = "Stunned")
+        }
+    }
+
+    /** Drinks from the flask in [slot] on the belt. */
+    fun useFlask(slot: Int) {
+        when (val result = session.useFlask(slot)) {
+            is FlaskResult.Drunk -> publish(message = result.flask.name)
+            is FlaskResult.Empty -> publish(message = "${result.flask.name} is empty")
+            FlaskResult.NoSuchFlask -> Unit
         }
     }
 
@@ -773,6 +786,10 @@ class PlayViewModel(
             realm = realmPanel(),
             settlementName = snapshot.settlement?.name,
             settlementHostile = snapshot.settlementHostile,
+            projectiles = snapshot.projectiles,
+            zones = snapshot.zones,
+            telegraphs = snapshot.telegraphs,
+            flasks = snapshot.flasks,
             hero = heroPanel(),
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
@@ -995,6 +1012,11 @@ data class PlayUiState(
     val isInvulnerable: Boolean = false,
     val rollCooldownFraction: Float = 0f,
     val feedback: List<FeedbackMark> = emptyList(),
+    /** Things in flight, burning ground and wind-ups, from the combat core. */
+    val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
+    val zones: List<com.stratum.engine.world.Zone> = emptyList(),
+    val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
+    val flasks: List<com.stratum.engine.world.FlaskView> = emptyList(),
     val playerFlash: Float = 0f,
     /** Per-actor hit flash, read by the renderer for each visible monster. */
     val flashFor: (String) -> Float = { 0f },

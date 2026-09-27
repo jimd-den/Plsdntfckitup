@@ -93,6 +93,7 @@ fun PlayScreen(
         onStopMining = viewModel::stopMining,
         onAttack = viewModel::attack,
         onCastSkill = viewModel::castSkill,
+        onUseFlask = viewModel::useFlask,
         onRevive = viewModel::revive,
         onNewRun = viewModel::newRun,
         onToggleSatchel = viewModel::toggleSatchel,
@@ -137,6 +138,7 @@ fun PlayScreenContent(
     onStopMining: () -> Unit = {},
     onAttack: () -> Unit = {},
     onCastSkill: (String) -> Unit = {},
+    onUseFlask: (Int) -> Unit = {},
     onRevive: () -> Unit = {},
     onNewRun: () -> Unit = {},
     onToggleSatchel: () -> Unit = {},
@@ -222,6 +224,9 @@ fun PlayScreenContent(
                 insertColor = { state.insertOrNull(it)?.color },
                 insertGlyph = { state.insertOrNull(it)?.glyph },
                 feedback = state.feedback,
+                projectiles = state.projectiles,
+                zones = state.zones,
+                telegraphs = state.telegraphs,
                 playerFlash = state.playerFlash,
                 isRolling = state.isRolling,
                 isInvulnerable = state.isInvulnerable,
@@ -256,6 +261,7 @@ fun PlayScreenContent(
                 onDodge = onDodge,
                 onAttack = onAttack,
                 onCastSkill = onCastSkill,
+                onUseFlask = onUseFlask,
                 onToggleBuild = onToggleBuild,
                 onSelectBuildTool = onSelectBuildTool,
                 onSelectSlot = onSelectSlot,
@@ -406,6 +412,7 @@ private fun Hud(
     onDodge: () -> Unit,
     onAttack: () -> Unit,
     onCastSkill: (String) -> Unit,
+    onUseFlask: (Int) -> Unit,
     onToggleBuild: () -> Unit,
     onSelectBuildTool: (BuildTool) -> Unit,
     onSelectSlot: (Int) -> Unit,
@@ -495,7 +502,7 @@ private fun Hud(
                 primaryGlyph = "⚔",
                 primaryLabel = "Strike",
                 onPrimary = onAttack,
-                around = fightButtons(state, onDodge, onCastSkill) +
+                around = fightButtons(state, onDodge, onCastSkill, onUseFlask) +
                     // Water in reach offers a drink where the thumb already is.
                     listOfNotNull(ArcButton("💧", "Drink", onDrink).takeIf { state.survival.canDrink }),
                 modifier = Modifier.align(Alignment.BottomEnd),
@@ -504,8 +511,8 @@ private fun Hud(
     }
 }
 
-/** Roll first, beside the thumb's rest, then each skill up the arc. */
-private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (String) -> Unit): List<ArcButton> {
+/** Roll first, beside the thumb's rest, then each skill up the arc, then the flasks. */
+private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (String) -> Unit, onUseFlask: (Int) -> Unit): List<ArcButton> {
     val roll = ArcButton("🌀", "Roll", onDodge, cooldown = state.rollCooldownFraction, enabled = state.rollCooldownFraction <= 0f)
     val skills = state.skills.map { skill ->
         ArcButton(
@@ -517,7 +524,18 @@ private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (
             enabled = state.canAfford(skill),
         )
     }
-    return listOf(roll) + skills
+    // A flask's ring drains as its charges do, so the thumb can see it is empty before pressing.
+    val flasks = state.flasks.mapIndexed { slot, flask ->
+        ArcButton(
+            glyph = flask.definition.glyph,
+            label = flask.definition.name.substringBefore(' '),
+            onClick = { onUseFlask(slot) },
+            tint = Color(flask.definition.color),
+            cooldown = 1f - flask.fill,
+            enabled = flask.canDrink,
+        )
+    }
+    return listOf(roll) + skills + flasks
 }
 
 /** The dock's entries, each shown only when the loaded packs give it something to do. */
