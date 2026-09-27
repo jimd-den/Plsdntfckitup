@@ -88,7 +88,19 @@ class SceneGlRenderer(
     private var emptyVao = 0
 
     private val staticMeshes = IdentityHashMap<MeshBatch, GpuMesh>()
-    private val dynamicMesh = GpuMesh()
+
+    // One buffer per kind of per-frame geometry. The actors are drawn by both
+    // the shadow and the scene pass; each batch is uploaded once, when it is
+    // new, rather than once per draw into one shared buffer.
+    private val actorMesh = GpuMesh()
+    private val cutoutMesh = GpuMesh()
+    private val decalMesh = GpuMesh()
+    private val glowMesh = GpuMesh()
+
+    // Staging memory for uploads, grown when a batch outgrows it and otherwise
+    // reused. Allocating it per upload was megabytes of native memory a frame.
+    private var floatStaging: FloatBuffer = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private var intStaging: IntBuffer = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer()
 
     /** Hands a new frame to the GL thread. Cheap; call as often as the world changes. */
     fun submit(frame: SceneFrame) {
@@ -120,6 +132,7 @@ class SceneGlRenderer(
         textureArray = 0
         settingsStale = true
         staticMeshes.clear()
+        listOf(actorMesh, cutoutMesh, decalMesh, glowMesh).forEach { it.vao = 0; it.source = null }
         // A new context has none of the old one's objects: queue the last art again.
         pendingTextures = pendingTextures ?: textures
         pendingMaps = pendingMaps ?: maps
@@ -256,7 +269,7 @@ class SceneGlRenderer(
         GLES30.glUniform1i(loc(lit, "uCutout"), 0)
         drawOpaque(frame)
         GLES30.glUniform1i(loc(lit, "uCutout"), 1)
-        draw(frame.cutout, static = false)
+        drawStreamed(frame.cutout, cutoutMesh)
 
         // Decals and glows test depth but never write it.
         GLES30.glDepthMask(false)
@@ -266,10 +279,10 @@ class SceneGlRenderer(
         bindTextures(soft)
         GLES30.glUniform1i(loc(soft, "uGlow"), 0)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-        draw(frame.decals, static = false)
+        drawStreamed(frame.decals, decalMesh)
         GLES30.glUniform1i(loc(soft, "uGlow"), 1)
         GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE)
-        draw(frame.glows, static = false)
+        drawStreamed(frame.glows, glowMesh)
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDepthMask(true)
     }
@@ -295,6 +308,8 @@ class SceneGlRenderer(
         var vbo = 0
         var ibo = 0
         var count = 0
+        /** The batch now in the buffers, for per-frame meshes that are drawn by more than one pass. */
+        var source: MeshBatch? = null
     }
 
     /** Terrain from the chunk buffers already on the GPU; actor bodies streamed fresh. */
@@ -302,13 +317,26 @@ class SceneGlRenderer(
         frame.terrain.forEach { draw(it, static = true) }
         // Model props change only with the terrain, so they are kept on the GPU like it.
         frame.models.forEach { draw(it, static = true) }
-        frame.actors?.let { draw(it, static = false) }
+        frame.actors?.let { drawStreamed(it, actorMesh) }
     }
 
     private fun draw(batch: MeshBatch, static: Boolean) {
         if (batch.indices.isEmpty()) return
-        val mesh = if (static) staticMeshes.getOrPut(batch) { GpuMesh().also { upload(it, batch, GLES30.GL_STATIC_DRAW) } }
-        else dynamicMesh.also { upload(it, batch, GLES30.GL_STREAM_DRAW) }
+        check(static) { "per-frame batches go through drawStreamed" }
+        drawMesh(staticMeshes.getOrPut(batch) { GpuMesh().also { upload(it, batch, GLES30.GL_STATIC_DRAW) } })
+    }
+
+    /** A batch rebuilt every frame, uploaded the first time this frame draws it. */
+    private fun drawStreamed(batch: MeshBatch, mesh: GpuMesh) {
+        if (batch.indices.isEmpty()) return
+        if (mesh.source !== batch) {
+            upload(mesh, batch, GLES30.GL_STREAM_DRAW)
+            mesh.source = batch
+        }
+        drawMesh(mesh)
+    }
+
+    private fun drawMesh(mesh: GpuMesh) {
         GLES30.glBindVertexArray(mesh.vao)
         GLES30.glDrawElements(GLES30.GL_TRIANGLES, mesh.count, GLES30.GL_UNSIGNED_INT, 0)
         GLES30.glBindVertexArray(0)
@@ -346,7 +374,7 @@ class SceneGlRenderer(
 
     /** Chunk batches that were remeshed or left the view are freed once they stop being drawn. */
     private fun releaseStale(frame: SceneFrame) {
-        val kept = frame.terrain + frame.models
+        val kept = frame.residentTerrain + frame.models
         if (staticMeshes.size == kept.size && kept.all(staticMeshes::containsKey)) return
         val live = java.util.Collections.newSetFromMap(IdentityHashMap<MeshBatch, Boolean>()).apply { addAll(kept) }
         val stale = staticMeshes.keys.filterNot(live::contains)
@@ -535,10 +563,11 @@ class SceneGlRenderer(
         return shader
     }
 
-    private val locations = HashMap<Pair<Int, String>, Int>()
+    // Per program, then per name: a pair key allocated one object per uniform per frame.
+    private val locations = HashMap<Int, HashMap<String, Int>>()
 
     private fun loc(program: Int, name: String): Int =
-        locations.getOrPut(program to name) { GLES30.glGetUniformLocation(program, name) }
+        locations.getOrPut(program) { HashMap() }.getOrPut(name) { GLES30.glGetUniformLocation(program, name) }
 
     private fun matrix(program: Int, name: String, m: FloatArray) =
         GLES30.glUniformMatrix4fv(loc(program, name), 1, false, m, 0)
@@ -546,11 +575,22 @@ class SceneGlRenderer(
     private fun vec3(program: Int, name: String, v: FloatArray) =
         GLES30.glUniform3f(loc(program, name), v[0], v[1], v[2])
 
-    private fun floats(data: FloatArray): FloatBuffer =
-        ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(data); position(0) }
+    private fun floats(data: FloatArray): FloatBuffer {
+        if (floatStaging.capacity() < data.size) {
+            floatStaging = ByteBuffer.allocateDirect(grown(data.size) * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        }
+        return floatStaging.apply { clear(); put(data); flip() }
+    }
 
-    private fun ints(data: IntArray): IntBuffer =
-        ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asIntBuffer().apply { put(data); position(0) }
+    private fun ints(data: IntArray): IntBuffer {
+        if (intStaging.capacity() < data.size) {
+            intStaging = ByteBuffer.allocateDirect(grown(data.size) * 4).order(ByteOrder.nativeOrder()).asIntBuffer()
+        }
+        return intStaging.apply { clear(); put(data); flip() }
+    }
+
+    /** Room for this and a little more, so a batch growing by a few quads a frame does not reallocate each time. */
+    private fun grown(needed: Int): Int = needed + needed / 4
 
     private companion object {
         const val TAG = "SceneGl"

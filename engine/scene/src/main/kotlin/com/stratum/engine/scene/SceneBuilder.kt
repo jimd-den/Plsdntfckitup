@@ -73,6 +73,13 @@ class SceneFrame(
      * can keep it on the GPU.
      */
     val models: List<MeshBatch> = emptyList(),
+    /**
+     * Every terrain batch still in the meshed square, drawn or not. [terrain]
+     * holds only the chunks the camera can see; this is what a backend keeps
+     * on the GPU, so a chunk that slides out of view and back is not uploaded
+     * again.
+     */
+    val residentTerrain: List<MeshBatch> = terrain,
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -114,6 +121,8 @@ class SceneBuilder(
         val lights: List<PointLight>,
         val details: List<GroundDetail>,
         val models: MeshBatch? = null,
+        /** Each mesh's box, six floats apiece (min x, y, z, max x, y, z), for culling against the view. */
+        val bounds: FloatArray = FloatArray(0),
     )
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
@@ -200,9 +209,20 @@ class SceneBuilder(
         val eyeLevel = floor(camera.target.z).toInt()
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
-        if (settings.groundLitter) terrain.details.forEach(::litter)
-        terrain.props.forEach { if (propModels(it.block.id) == null) prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
+        // Only what the lens can see, or can reach into it, is built. The
+        // meshed square is many times the screen, and every prop in it used
+        // to be turned to the camera, shadowed and uploaded every frame.
+        val volume = ViewVolume.of(camera)
+        if (settings.groundLitter) terrain.details.forEach { if (volume.mayShow(it.x, it.y, it.z, it.size, it.size)) litter(it) }
+        terrain.props.forEach { prop ->
+            if (propModels(prop.block.id) != null) return@forEach
+            val height = SPRITE_HEIGHT * prop.block.glyphScale * (1f + PROP_SIZE_SPREAD)
+            // A shadow falls up to its caster's height times the reach away, so a tree off screen can still darken it.
+            if (!volume.mayShow(prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), height, height * MAX_SHADOW_REACH + 1f)) return@forEach
+            prop(prop, camera, eyeLevel, occlusionFade(prop, actors, forward))
+        }
         terrain.lights.forEach { light ->
+            if (!volume.mayShow(light.x, light.y, light.z, BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength))) return@forEach
             // A light you can see the source of. Point lights colour the ground;
             // the bloom is what tells the eye where the fire actually is.
             glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength), light.color, BLOOM_OPACITY)
@@ -245,7 +265,8 @@ class SceneBuilder(
             lighting = lighting,
             lights = nearest,
             shadowViewProjection = shadowMatrix(camera.target, lighting),
-            terrain = terrain.meshes,
+            terrain = visibleTerrain(terrain, volume),
+            residentTerrain = terrain.meshes,
             actors = actorMesh.takeUnless { it.isEmpty }?.build(),
             cutout = cutout.build(),
             decals = decals.build(),
@@ -258,16 +279,57 @@ class SceneBuilder(
         val results = chunks.around(world, centreX, centreY, radius, worldRevision)
         if (chunks.generation != terrainGeneration) {
             val props = results.flatMap { it.props }
+            val meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() }
             terrain = Terrain(
-                meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() },
+                meshes = meshes,
                 props = props,
                 lights = results.flatMap { it.lights },
                 details = results.flatMap { it.details },
                 models = modelProps(props),
+                bounds = boundsOf(meshes),
             )
             terrainGeneration = chunks.generation
         }
         return terrain
+    }
+
+    /**
+     * The chunks the camera can see, or that could throw a shadow into view.
+     *
+     * The shadow pass draws the same list, so the box is widened by how far a
+     * cliff's shadow can fall; a chunk is sixteen blocks wide, so the margin
+     * costs little.
+     */
+    private fun visibleTerrain(terrain: Terrain, volume: ViewVolume): List<MeshBatch> {
+        val b = terrain.bounds
+        return terrain.meshes.filterIndexed { i, _ ->
+            val o = i * 6
+            volume.intersects(
+                b[o] - TERRAIN_SHADOW_MARGIN, b[o + 1] - TERRAIN_SHADOW_MARGIN, b[o + 2],
+                b[o + 3] + TERRAIN_SHADOW_MARGIN, b[o + 4] + TERRAIN_SHADOW_MARGIN, b[o + 5],
+            )
+        }
+    }
+
+    /** Each mesh's box, measured once when the terrain changes rather than every frame. */
+    private fun boundsOf(meshes: List<MeshBatch>): FloatArray {
+        val out = FloatArray(meshes.size * 6)
+        meshes.forEachIndexed { i, mesh ->
+            var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+            val v = mesh.vertices
+            var at = 0
+            while (at < v.size) {
+                val x = v[at + Vertex.PX]; val y = v[at + Vertex.PX + 1]; val z = v[at + Vertex.PX + 2]
+                if (x < minX) minX = x; if (x > maxX) maxX = x
+                if (y < minY) minY = y; if (y > maxY) maxY = y
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+                at += Vertex.STRIDE
+            }
+            val o = i * 6
+            out[o] = minX; out[o + 1] = minY; out[o + 2] = minZ; out[o + 3] = maxX; out[o + 4] = maxY; out[o + 5] = maxZ
+        }
+        return out
     }
 
     /**
@@ -856,6 +918,8 @@ class SceneBuilder(
     companion object {
         /** Blocks meshed around the camera target in each direction. */
         const val REGION_STEP = 6
+        /** How far past a chunk's edge its shadow may reach into view, in blocks. */
+        const val TERRAIN_SHADOW_MARGIN = 8f
         const val FOG_FLOOR_DEPTH = 4f
         /** Share of the meshed radius past the focus where fog becomes total. */
         const val EDGE_FOG_SHARE = 0.8f

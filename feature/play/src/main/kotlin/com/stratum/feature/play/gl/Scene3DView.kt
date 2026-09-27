@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.nativeCanvas
@@ -163,6 +164,23 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
+    // Gesture detectors read the camera as it is when the finger lands. Keyed
+    // on the camera itself they were torn down and restarted every time it
+    // moved -- every step the player took -- which could drop a tap mid-press.
+    val currentCamera by rememberUpdatedState(camera)
+    val currentSize by rememberUpdatedState(size)
+    val tapBlock by rememberUpdatedState(onTapBlock)
+    val longPressBlock by rememberUpdatedState(onLongPressBlock)
+    val buildDrag by rememberUpdatedState(onBuildDrag)
+    val buildCommit by rememberUpdatedState(onBuildCommit)
+    val labelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+    }
+
     Box(modifier = modifier.onSizeChanged { size = it }) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -182,27 +200,27 @@ fun Scene3DView(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(input.buildMode, camera) {
+                .pointerInput(input.buildMode, world) {
                     if (!input.buildMode) return@pointerInput
                     var anchor: BlockPos? = null
                     detectDragGestures(
                         onDragStart = { offset ->
-                            anchor = pick(world, camera, offset.x, offset.y, size)
-                            anchor?.let { onBuildDrag(it, it) }
+                            anchor = pick(world, currentCamera, offset.x, offset.y, currentSize)
+                            anchor?.let { buildDrag(it, it) }
                         },
                         onDrag = { change, _ ->
                             change.consume()
                             val start = anchor ?: return@detectDragGestures
-                            pick(world, camera, change.position.x, change.position.y, size)?.let { onBuildDrag(start, it) }
+                            pick(world, currentCamera, change.position.x, change.position.y, currentSize)?.let { buildDrag(start, it) }
                         },
-                        onDragEnd = { onBuildCommit(); anchor = null },
+                        onDragEnd = { buildCommit(); anchor = null },
                         onDragCancel = { anchor = null },
                     )
                 }
-                .pointerInput(camera) {
+                .pointerInput(world) {
                     detectTapGestures(
-                        onTap = { offset -> pick(world, camera, offset.x, offset.y, size)?.let(onTapBlock) },
-                        onLongPress = { offset -> pick(world, camera, offset.x, offset.y, size)?.let(onLongPressBlock) },
+                        onTap = { offset -> pick(world, currentCamera, offset.x, offset.y, currentSize)?.let(tapBlock) },
+                        onLongPress = { offset -> pick(world, currentCamera, offset.x, offset.y, currentSize)?.let(longPressBlock) },
                     )
                 },
         ) {
@@ -221,11 +239,7 @@ fun Scene3DView(
                 }
             }
 
-            val paint = Paint().apply {
-                isAntiAlias = true
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.DEFAULT_BOLD
-            }
+            val paint = labelPaint
             input.feedback.forEach { mark ->
                 val (x, y) = ScenePicker.project(
                     camera, mark.origin.x, mark.origin.y, mark.origin.z + 1.6f + mark.progress * 0.9f,
