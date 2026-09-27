@@ -67,9 +67,15 @@ class SceneFrame(
     val cutout: MeshBatch,
     val decals: MeshBatch,
     val glows: MeshBatch,
+    /**
+     * Props drawn as 3D models, one batch for the view. The same object from
+     * frame to frame until the terrain changes, like [terrain], so a backend
+     * can keep it on the GPU.
+     */
+    val models: List<MeshBatch> = emptyList(),
 ) {
-    /** Everything opaque: the terrain, then the actors. */
-    val opaque: List<MeshBatch> get() = terrain + listOfNotNull(actors)
+    /** Everything opaque: the terrain, the model props, then the actors. */
+    val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
 
     companion object {
         const val MAX_LIGHTS = 8
@@ -92,6 +98,12 @@ class SceneBuilder(
         ?: error("${director::class.simpleName} cannot describe a 3D scene"),
     /** How much this device can afford: view distance, lights, litter and motes. */
     private val settings: RenderSettings = RenderSettings.of(QualityTier.HIGH),
+    /**
+     * The 3D model a prop block is drawn as, by block id, or null for the
+     * painted sprite. Models go through the opaque path, so they are lit,
+     * shadowed and fogged exactly like the terrain.
+     */
+    private val propModels: (String) -> PropModel? = { null },
 ) {
     private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
 
@@ -101,6 +113,7 @@ class SceneBuilder(
         val props: List<PropInstance>,
         val lights: List<PointLight>,
         val details: List<GroundDetail>,
+        val models: MeshBatch? = null,
     )
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
@@ -186,7 +199,7 @@ class SceneBuilder(
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
         if (settings.groundLitter) terrain.details.forEach(::litter)
-        terrain.props.forEach { prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
+        terrain.props.forEach { if (propModels(it.block.id) == null) prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
         terrain.lights.forEach { light ->
             // A light you can see the source of. Point lights colour the ground;
             // the bloom is what tells the eye where the fire actually is.
@@ -234,21 +247,41 @@ class SceneBuilder(
             cutout = cutout.build(),
             decals = decals.build(),
             glows = glows.build(),
+            models = listOfNotNull(terrain.models),
         )
     }
 
     private fun terrainAround(world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int): Terrain {
         val results = chunks.around(world, centreX, centreY, radius, worldRevision)
         if (chunks.generation != terrainGeneration) {
+            val props = results.flatMap { it.props }
             terrain = Terrain(
                 meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() },
-                props = results.flatMap { it.props },
+                props = props,
                 lights = results.flatMap { it.lights },
                 details = results.flatMap { it.details },
+                models = modelProps(props),
             )
             terrainGeneration = chunks.generation
         }
         return terrain
+    }
+
+    /**
+     * Every prop that has a 3D model, as one opaque batch.
+     *
+     * Built only when the terrain changes, not per frame: a model prop does
+     * not face the camera, so nothing about it depends on where the camera is.
+     * Each is turned by a quarter picked from its cell, as sprite props pick
+     * a painting, so a grove of one statue is not a row of clones.
+     */
+    private fun modelProps(props: List<PropInstance>): MeshBatch? {
+        val out = MeshBuilder(MaterialKind.OPAQUE)
+        props.forEach { prop ->
+            val model = propModels(prop.block.id) ?: return@forEach
+            model.emit(out, prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), quarterTurns = hash(prop.x, prop.y) ushr 5, scale = prop.block.glyphScale)
+        }
+        return out.takeUnless { it.isEmpty }?.build()
     }
 
     /**

@@ -82,6 +82,8 @@ data class Scene3DInput(
     val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
     /** The player's graphics choice, or null to let the device decide. */
     val quality: QualityTier? = null,
+    /** Prop blocks drawn as 3D models instead of sprites, by block id. */
+    val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
 )
 
 /**
@@ -125,8 +127,8 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
-    val builder = remember(input.director, library, settings) {
-        SceneBuilder(input.director, library, input.biomeAt, settings = settings)
+    val builder = remember(input.director, library, settings, input.propModels) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)
