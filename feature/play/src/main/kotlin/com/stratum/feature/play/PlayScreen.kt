@@ -97,6 +97,7 @@ fun PlayScreen(
         onNewRun = viewModel::newRun,
         onToggleSatchel = viewModel::toggleSatchel,
         onEquip = viewModel::equip,
+        onUnequip = viewModel::unequip,
         onDiscard = viewModel::discard,
         onToggleAnvil = viewModel::toggleAnvil,
         onSelectAnvilItem = viewModel::selectAnvilItem,
@@ -141,6 +142,7 @@ fun PlayScreenContent(
     onNewRun: () -> Unit = {},
     onToggleSatchel: () -> Unit = {},
     onEquip: (String) -> Unit = {},
+    onUnequip: (com.stratum.core.domain.item.EquipmentSlot) -> Unit = {},
     onDiscard: (String) -> Unit = {},
     onToggleAnvil: () -> Unit = {},
     onSelectAnvilItem: (String) -> Unit = {},
@@ -286,6 +288,7 @@ fun PlayScreenContent(
                 state = state,
                 world = world,
                 onEquip = onEquip,
+                onUnequip = onUnequip,
                 onDiscard = onDiscard,
                 // The two panels are one errand: read the item here, socket
                 // it next door, without going back out to the world first.

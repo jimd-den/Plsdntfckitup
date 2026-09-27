@@ -749,6 +749,8 @@ private fun com.stratum.core.domain.item.ItemRarity.beamColor(): Long = when (th
     com.stratum.core.domain.item.ItemRarity.RARE -> 0xFFFFCA28
     com.stratum.core.domain.item.ItemRarity.EPIC -> 0xFFFF7043
     com.stratum.core.domain.item.ItemRarity.RELIC -> 0xFF26A69A
+    com.stratum.core.domain.item.ItemRarity.UNIQUE -> 0xFFE65100
+    com.stratum.core.domain.item.ItemRarity.SET -> 0xFF7CB342
 }
 
 private const val DEFAULT_INSERT_TINT = 0xFF7FD4E0L
