@@ -9,6 +9,7 @@ dependencies {
   implementation(project(":core:domain"))
   implementation(project(":core:designsystem"))
   implementation(project(":agents"))
+  implementation(project(":engine:model"))
 
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.compose)
