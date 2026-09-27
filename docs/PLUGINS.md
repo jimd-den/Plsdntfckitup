@@ -82,11 +82,12 @@ loaded, including the built-in pack's `igbo:` content.
 | `terrain` | How the world is shaped: `generator` (`stratum:layered`, or `stratum:tilemap` with `options.map` naming a map), `elevation` noise layers, `terraceStep`, `strata`. |
 | `maps` | Hand-made levels: `width`, `height`, `ground`, `groundLevel`, `layers` (`palette` of block ids and one `cells` index per cell, `-1` empty; `elevation`, `thickness`), `markers` (`kind`: player_spawn, enemy_spawn, point_of_interest; `x`, `y`, `ref`). |
 | `classes` | `id`, `name`, `title`, `strength`, `agility`, `insight`, `abilities` (skill ids), `startingWeapon`, `resourceName`, `spriteSet`, `stats`. |
-| `damageTypes` | `id`, `name`, `color`, `symbol`. Every weapon, skill and monster must use a damage type some loaded pack defines. |
+| `damageTypes` | `id`, `name`, `color`, `symbol`, `armour` (whether armour reduces it, default true), `ailment` (a status id) and `ailmentChance`. Every weapon, skill and monster must use a damage type some loaded pack defines. |
 | `weapons` | `id`, `name`, `damageType`, `minDamage`, `maxDamage`, `attackSpeed`, `attackRange`, `toolTier`, `minItemLevel`. |
 | `affixes`, `inserts` | Item modifiers and socketable runes: `stat` is one of attack_power, max_health, armour, crit_chance, crit_multiplier, attack_speed, resistance, life_steal, mining_speed. |
-| `enemies` | `id`, `name`, `rank` (minion, elite, champion...), `damageType`, `stats`, `moveSpeed`, `aggroRange`, `experience`, `spawnBiomes`, `spawnWeight`, `spriteSet`. |
-| `skills` | `id`, `name`, `damageType`, `powerMultiplier`, `resourceCost`, `cooldownSeconds`, `shape` (strike, nova, lance), `range`. |
+| `enemies` | `id`, `name`, `rank` (minion, elite, champion...), `damageType`, `stats`, `moveSpeed`, `aggroRange`, `experience`, `spawnBiomes`, `spawnWeight`, `spriteSet`, `role`, `skills` and boss `phases`; see *The combat core*. |
+| `skills` | `id`, `name`, `damageType`, `powerMultiplier`, `resourceCost`, `cooldownSeconds`, `delivery`, `range`, `area`, `effects`, `tags`, `castTime`, `charges`, `lifeCost`, `projectile`, `zone`, `summon`, `conversions`; see *The combat core*. The old `shape` (strike, nova, lance) still loads. |
+| `statuses`, `traits`, `flasks` | Ailments and buffs, keystones and triggers, and the flask belt; see *The combat core*. |
 | `lore` | `id`, `title`, `body`, `category` (history, deity, artifact, bestiary, place, ritual), `subject`. |
 | `sheets` | Sprite sheet layouts: `id`, `columns`, `rows`, `frameWidth`, `frameHeight`, `clips` (`state`: idle, walk, attack, special, hurt, roll, die; `first`, `count`, `frameMs`, `loops`). The image goes in `art/sheets/`. |
 | `checks` | Tabletop rules; see below. |
@@ -98,7 +99,8 @@ loaded, including the built-in pack's `igbo:` content.
 
 `stats` blocks take `maxHealth`, `attackPower`, `armour`, `critChance`,
 `critMultiplier`, `attackSpeed`, `attackRange`, `resistances` (damage type
-id to a share, e.g. `0.5`) and `lifeSteal`.
+id to a share, e.g. `0.5`), `lifeSteal`, `evasion`, `blockChance` and
+`accuracy`.
 
 ## Tabletop rules
 
@@ -150,7 +152,13 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
 `crit_chance`, `crit_multiplier`, `attack_speed`, `life_steal`, `resistance`
 (add `"damageType"` to scope it), `skill_damage`, `area`,
 `cooldown_recovery`, `resource_cost`, `move_speed`, `max_resource`,
-`experience_gain`, `item_rarity`, `item_quantity`.
+`experience_gain`, `item_rarity`, `item_quantity`, and for the combat core
+`evasion`, `accuracy`, `block_chance`, `life_regen`, `resource_regen`,
+`penetration` and `max_resistance` (both take `"damageType"`),
+`ailment_chance`, `duration`, `damage_over_time`, `damage_taken`,
+`projectiles`, `pierce`, `chain`, `fork` (flat counts), `projectile_speed`,
+`cast_speed`, `flask_charges`, `flask_effect`. `damage` with a
+`"damageType"` is "increased fire damage" and touches only that type.
 
 **Passive trees** — the last pack with one wins; trees replace, never merge:
 
@@ -187,6 +195,16 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
   "modifiers": [{ "stat": "skill_damage", "kind": "more", "value": 0.2 }] }]
 ```
 
+A support can also demand tags (`requiresTags`: it only links to a skill
+carrying one of them), add tags (`addsTags`), add `effects` and partial
+`conversions`, and carry a `trigger` that makes the linked skill cast
+itself -- "cast on critical strike":
+
+```json
+{ "id": "yourname:answer", "name": "The Answer", "requiresTags": ["spell"],
+  "trigger": { "on": "crit", "requiresTags": ["attack"], "cooldownSeconds": 0.3 } }
+```
+
 **Waystone mods** make a world harder and pay for it:
 
 ```json
@@ -194,6 +212,165 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
   "monster": [{ "stat": "damage", "kind": "more", "value": 0.3 }],
   "reward": [{ "stat": "item_rarity", "value": 0.25 }] }]
 ```
+
+## The combat core
+
+Skills, statuses, triggers and bosses are data. The engine knows a handful
+of verbs -- how a skill travels, what an effect does, how a status behaves,
+when a trigger fires -- and a pack combines them. Nothing here names a
+damage type: "fire burns" is a pack giving its fire an ailment whose
+behaviour is damage over time.
+
+### Skills
+
+A skill is a **delivery**, an **area**, a list of **effects**, **tags** and
+**costs**:
+
+```json
+{ "id": "yourname:fireball", "name": "Fireball", "damageType": "yourname:fire",
+  "delivery": "projectile", "range": 10, "powerMultiplier": 1.2,
+  "resourceCost": 12, "cooldownSeconds": 0.5, "castTime": 0, "charges": 1,
+  "projectile": { "count": 1, "speed": 12, "pierce": 0, "chain": 0, "fork": 0, "spread": 20 },
+  "tags": ["spell"],
+  "effects": [
+    { "type": "damage", "damageType": "yourname:fire" },
+    { "type": "status", "status": "yourname:burn", "chance": 0.3 },
+    { "type": "cast", "skill": "yourname:explosion" }
+  ] }
+```
+
+- **delivery**: `melee` (the nearest thing in reach), `cone`, `nova`
+  (around the caster), `area` (around a point: the nearest enemy, or `range`
+  ahead), `beam` (a lane), `projectile` (a real thing that flies, stops at
+  blocks unless `"collides": false`, and may pierce, chain and fork),
+  `chain` (leaps between bodies `projectile.chain` times), `dash` (carries
+  the caster, hitting what it passes), `summon` (with `summon`: `enemy`,
+  `count`, `duration`, `limit`), `self` (the caster, and allies for effects
+  aimed at `allies`), `zone` (ground that pulses: `zone`: `duration`,
+  `pulse`, `trap: true` to wait for someone to step in).
+- **area**: `radius` (of a nova, area, zone or chain leap), `angle` (a cone's
+  width in degrees), `halfWidth` (of a beam or dash lane).
+- **effects**, each with a `type`: `damage` (`damageType`, `share` of the
+  skill's power; several make one multi-typed hit), `status` (`status`,
+  `chance`, `stacks`, `target`), `heal` (`amount`, `maxShare`, `target`),
+  `resource` (`amount`), `knockback` (`force`), `cast` (`skill`: cast
+  another skill where this one landed). `target` is `target` (what was hit),
+  `self`, or `allies`. No effects means one hit of the skill's `damageType`.
+- **tags**: any strings. The delivery adds its own (`melee`, `projectile`,
+  `area`...), every damage type the skill deals is a tag, and a skill is an
+  `attack` or a `spell` (attacks can be evaded). Supports and conditions
+  read them.
+- **costs**: `resourceCost`, `lifeCost`, `cooldownSeconds`, `charges`
+  (stored uses, each recharging on the cooldown), `castTime` (the wind-up;
+  on a monster, what the player sees marked on the ground and can roll out
+  of).
+- **conversions**: `{ "from": "yourname:phys", "to": "yourname:fire", "share": 0.5 }`;
+  add `"extra": true` for "gain as extra" instead. A missing `from` means
+  all damage. Conversion happens once: converted damage is never converted
+  again, so a cycle cannot loop.
+
+### Hits and defences
+
+Every hit, the player's or a monster's, runs the same order: evasion
+(`evasion / (evasion + accuracy)`, attacks only), block, conversion, crit,
+typed damage, penetration, resistance within the world's caps, damage
+taken, armour, leech, ailments. Armour is a curve, `armour / (armour + 5 x
+hit)`, so it shrugs off a swarm and barely dents a slam but never reaches
+immunity on its own. Leech fills a pool drained at the world's leech rate.
+
+### Statuses
+
+```json
+"statuses": [
+  { "id": "yourname:burn", "name": "Burning", "durationSeconds": 4, "tags": ["burning"],
+    "behaviours": [{ "type": "dot", "damageType": "yourname:fire", "hitShare": 0.25 }] },
+  { "id": "yourname:shock", "name": "Shocked", "stacking": "intensity", "maxStacks": 3,
+    "behaviours": [{ "type": "damage_taken", "amount": 0.08 }] }
+]
+```
+
+Behaviours: `dot` (`damageType`, `perSecond`, `hitShare` of the hit that
+caused it), `slow` (`amount` 0..1), `stun`, `damage_taken` (`amount`,
+optional `damageType`), `modifiers` (any modifiers, per stack), `recover`
+(`perSecond`, `maxShare`). `stacking` is `refresh` (one, keep the
+stronger), `stack` (independent, up to `maxStacks`) or `intensity` (one,
+stacks grow). `debuff: false` marks a buff. A damage type's `ailment` is
+the status its hits may inflict, at `ailmentChance` plus the attacker's
+`ailment_chance`.
+
+### Traits: keystones, conditions and triggers
+
+Classes (`traits`) and passive nodes (`traits`) grant traits:
+
+```json
+"traits": [{
+  "id": "yourname:oath", "name": "Oath of Glass",
+  "keystones": ["cannot_crit"],
+  "modifiers": [{ "stat": "damage", "kind": "more", "value": 0.4 }],
+  "conditional": [
+    { "when": "target_has", "status": "burning", "stat": "damage", "value": 0.3 },
+    { "when": "per", "attribute": "strength", "per": 10, "stat": "armour", "kind": "flat", "value": 5 }
+  ],
+  "conversions": [{ "from": "yourname:phys", "to": "yourname:fire", "share": 0.5 }],
+  "triggers": [{ "on": "kill", "chance": 0.25, "cast": "yourname:nova", "cooldownSeconds": 1 }]
+}]
+```
+
+- **keystones**: `instant_leech`, `cannot_crit`, `life_pays_costs`,
+  `crits_inflict_ailments`, `unshakeable` (no stun or slow),
+  `no_regeneration`.
+- **conditions** (`when`): `full_life`, `low_life` (`threshold`),
+  `target_has` / `self_has` (`status`: an id or a tag), `skill_tag`
+  (`tag`), `per` (`attribute`: strength, agility, insight or level; `per`).
+- **triggers** (`on`): `hit`, `crit`, `kill`, `hit_taken`, `block`,
+  `evade`, `skill_use`, `low_life` (`lowLife`), each with `chance`,
+  `cooldownSeconds`, `cast` (a skill, free), `status` (`statusOnSelf`), and
+  `requiresTags`.
+
+Triggers cannot loop forever. Each cast carries a depth; a cast at the
+world's `triggerDepth` triggers nothing, every trigger waits its own
+cooldown (never below `triggerCooldownFloor`), and one action may cause at
+most `triggerBudget` triggered casts. A skill that casts itself obeys the
+same limits.
+
+### Monsters and bosses
+
+```json
+{ "id": "yourname:tyrant", "name": "Tyrant", "damageType": "yourname:phys", "role": "support",
+  "skills": [{ "skill": "yourname:fireball", "weight": 100, "healthBelow": 1, "cooldownSeconds": 3 }],
+  "phases": [
+    { "name": "Rage", "healthBelow": 0.5, "announcement": "The tyrant roars",
+      "skills": [{ "skill": "yourname:slam" }], "adds": [{ "enemy": "yourname:imp", "count": 2 }],
+      "enrage": [{ "stat": "damage", "kind": "more", "value": 0.5 }], "status": "yourname:frenzy" }
+  ] }
+```
+
+Monsters use the same skills as heroes, for free but on cooldown, when the
+player is in reach (a heal or buff when an ally needs it). Ranged and
+support monsters keep their distance at their longest skill's reach.
+Phases are entered in order as health falls: they replace the skill list
+when they name one, call adds, enrage and announce themselves.
+
+### Flasks
+
+```json
+"flasks": [{ "id": "yourname:gourd", "name": "Gourd", "maxCharges": 30, "chargesPerUse": 10,
+  "chargesPerKill": 2, "lifeShare": 0.4, "recoverySeconds": 2, "resource": 0,
+  "status": "yourname:ward", "cleanses": false }]
+```
+
+Kills refill every flask (elites twice, champions four times, bosses ten).
+The first five flasks loaded are the belt.
+
+### Caps a world can lift
+
+`rules.combat` sets the caps: `resistanceCap`, `resistanceHardCap` (what
+`max_resistance` can raise it to; 1 allows immunity), `minResistance`,
+`maxEvadeChance`, `maxBlockChance`, `maxArmourReduction`, `cooldownFloor`,
+`maxLeechRate`, `critChanceCap`, `triggerDepth` (at most 8),
+`triggerCooldownFloor`, `triggerBudget` (at most 256), `maxStatusStacks`.
+The *Unbound* preset lifts all of them, for building something broken on
+purpose.
 
 ## Worlds with their own lore
 
