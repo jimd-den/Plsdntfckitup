@@ -256,5 +256,10 @@ object IgboContentPack {
         factions = IgboPackWorld.factions,
         enemyPacks = IgboPackWorld.packs,
         settlements = IgboPackWorld.settlements,
+        itemBases = IgboPackGear.bases,
+        uniques = IgboPackGear.uniques,
+        itemSets = IgboPackGear.sets,
+        itemNames = IgboPackGear.namePools,
+        baseTiers = IgboPackGear.baseTiers,
     )
 }

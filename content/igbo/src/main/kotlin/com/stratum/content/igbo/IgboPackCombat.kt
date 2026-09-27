@@ -9,10 +9,15 @@ import com.stratum.core.domain.combat.DamageTypeDefinition
 import com.stratum.core.domain.item.AffixDefinition
 import com.stratum.core.domain.item.AffixKind
 import com.stratum.core.domain.item.AffixStat
+import com.stratum.core.domain.item.AffixTier
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.item.ItemSlot
+import com.stratum.core.domain.item.ModifierRange
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.Stat
 
 /**
  * The action RPG half of the built-in pack: what you fight, what you fight with,
@@ -21,6 +26,10 @@ import com.stratum.core.domain.item.WeaponBase
 internal object IgboPackCombat {
 
     private const val NS = "igbo"
+
+    // Declared before anything that reads them: an object initialises top to bottom.
+    private val ARMOUR_SLOTS = setOf(ItemSlot.HELM, ItemSlot.CHEST, ItemSlot.GLOVES, ItemSlot.BOOTS, ItemSlot.BELT)
+    private val JEWELLERY = setOf(ItemSlot.AMULET, ItemSlot.RING)
 
     // ---- damage types ----------------------------------------------------
 
@@ -40,6 +49,8 @@ internal object IgboPackCombat {
         RarityStyle(ItemRarity.RARE, "Sacred", 0xFFFFCA28),
         RarityStyle(ItemRarity.EPIC, "Ozo Royal", 0xFFFF7043),
         RarityStyle(ItemRarity.RELIC, "Igbo-Ukwu Artifact", 0xFF26A69A),
+        RarityStyle(ItemRarity.UNIQUE, "Named by the Elders", 0xFFE65100),
+        RarityStyle(ItemRarity.SET, "Ozo Regalia", 0xFF7CB342),
     )
 
     // ---- weapons ---------------------------------------------------------
@@ -47,6 +58,7 @@ internal object IgboPackCombat {
     val weapons = listOf(
         WeaponBase(
             id = "$NS:mma_nkwu",
+            tags = setOf("blade"),
             name = "Mma Nkwu",
             glyph = "🔪",
             description = "A curved bronze machete cast with spiral filigree. Fast, and it digs.",
@@ -61,6 +73,8 @@ internal object IgboPackCombat {
         ),
         WeaponBase(
             id = "$NS:alo_staff",
+            tags = setOf("staff", "heavy"),
+            twoHanded = true,
             name = "Alo War Staff",
             glyph = "🔱",
             description = "The ringed bronze staff of a titled man. Slow, heavy, and long.",
@@ -75,6 +89,7 @@ internal object IgboPackCombat {
         ),
         WeaponBase(
             id = "$NS:ofo_scepter",
+            tags = setOf("staff", "caster"),
             name = "Ofo Scepter",
             glyph = "🔮",
             description = "A staff of moral authority. It answers an argument with lightning.",
@@ -89,6 +104,8 @@ internal object IgboPackCombat {
         ),
         WeaponBase(
             id = "$NS:ikenga_cleaver",
+            tags = setOf("blade", "heavy"),
+            twoHanded = true,
             name = "Ikenga Cleaver",
             glyph = "⚔\uFE0F",
             description = "A two-handed ceremonial blade, horned like the shrine it came from.",
@@ -103,6 +120,7 @@ internal object IgboPackCombat {
         ),
         WeaponBase(
             id = "$NS:nzu_wand",
+            tags = setOf("wand", "caster"),
             name = "Nzu Chalk Wand",
             glyph = "✨",
             description = "White chalk bound in raffia. What it marks, it can also unmake.",
@@ -119,22 +137,119 @@ internal object IgboPackCombat {
 
     // ---- affixes ---------------------------------------------------------
 
+    /**
+     * Tiered, weakest first. The deeper tiers carry the names of deeper craft:
+     * roped bronze at the surface, lost-wax casting further down, the Ozo's own
+     * smiths at the bottom. Slots keep weapon numbers on weapons and plate on
+     * armour, so a ring never rolls "Riveted".
+     */
     val affixes = listOf(
-        AffixDefinition("$NS:roped", "Roped", AffixKind.PREFIX, AffixStat.ATTACK_POWER, 2f, 9f, weight = 160),
-        AffixDefinition("$NS:cast", "Lost-Wax", AffixKind.PREFIX, AffixStat.ATTACK_POWER, 8f, 20f, minItemLevel = 8, weight = 70),
-        AffixDefinition("$NS:ringed", "Ringed", AffixKind.PREFIX, AffixStat.ARMOUR, 2f, 8f, weight = 140),
-        AffixDefinition("$NS:heavy", "Weighted", AffixKind.PREFIX, AffixStat.MAX_HEALTH, 10f, 40f, weight = 130),
-        AffixDefinition("$NS:keen", "Keen", AffixKind.PREFIX, AffixStat.CRIT_CHANCE, 0.02f, 0.09f, weight = 110),
-        AffixDefinition("$NS:quick", "Quickened", AffixKind.PREFIX, AffixStat.ATTACK_SPEED, 0.08f, 0.25f, weight = 90),
-        AffixDefinition("$NS:pitted", "Pitted", AffixKind.PREFIX, AffixStat.MINING_SPEED, 0.15f, 0.6f, weight = 100),
+        AffixDefinition(
+            "$NS:roped", "Roped", AffixKind.PREFIX,
+            listOf(
+                tier(1, range(Stat.DAMAGE, 2f, 9f)),
+                tier(8, range(Stat.DAMAGE, 8f, 20f), name = "Lost-Wax"),
+                tier(20, range(Stat.DAMAGE, 18f, 34f), name = "Ozo-Cast"),
+            ),
+            group = "$NS:added_damage", slots = setOf(ItemSlot.WEAPON), local = true, weight = 160,
+        ),
+        AffixDefinition(
+            "$NS:tempered", "Tempered", AffixKind.PREFIX,
+            listOf(
+                tier(3, range(Stat.DAMAGE, 0.15f, 0.35f, ModifierKind.INCREASED)),
+                tier(14, range(Stat.DAMAGE, 0.35f, 0.7f, ModifierKind.INCREASED), name = "Smith-Blessed"),
+            ),
+            slots = setOf(ItemSlot.WEAPON), local = true, weight = 90,
+        ),
+        AffixDefinition(
+            "$NS:ringed", "Ringed", AffixKind.PREFIX,
+            listOf(
+                tier(1, range(Stat.ARMOUR, 3f, 10f)),
+                tier(10, range(Stat.ARMOUR, 10f, 24f), name = "Riveted"),
+                tier(22, range(Stat.ARMOUR, 24f, 45f), name = "Bronze-Plated"),
+            ),
+            slots = ARMOUR_SLOTS + ItemSlot.OFFHAND, local = true, weight = 140,
+        ),
+        AffixDefinition(
+            "$NS:heavy", "Weighted", AffixKind.PREFIX,
+            listOf(
+                tier(1, range(Stat.MAX_HEALTH, 10f, 25f)),
+                tier(10, range(Stat.MAX_HEALTH, 25f, 45f), name = "Stout"),
+                tier(22, range(Stat.MAX_HEALTH, 45f, 70f), name = "Titled"),
+            ),
+            weight = 130,
+        ),
+        AffixDefinition(
+            "$NS:keen", "Keen", AffixKind.PREFIX,
+            listOf(tier(1, range(Stat.CRIT_CHANCE, 0.02f, 0.05f)), tier(8, range(Stat.CRIT_CHANCE, 0.05f, 0.09f), name = "Honed")),
+            slots = setOf(ItemSlot.WEAPON, ItemSlot.GLOVES, ItemSlot.RING), weight = 110,
+        ),
+        AffixDefinition(
+            "$NS:quick", "Quickened", AffixKind.PREFIX,
+            listOf(
+                tier(1, range(Stat.ATTACK_SPEED, 0.08f, 0.15f, ModifierKind.INCREASED)),
+                tier(10, range(Stat.ATTACK_SPEED, 0.15f, 0.25f, ModifierKind.INCREASED), name = "Hastened"),
+            ),
+            slots = setOf(ItemSlot.WEAPON, ItemSlot.GLOVES), weight = 90,
+        ),
+        AffixDefinition(
+            "$NS:pitted", "Pitted", AffixKind.PREFIX,
+            listOf(tier(1, range(Stat.MINING_SPEED, 0.15f, 0.6f, ModifierKind.INCREASED))),
+            slots = setOf(ItemSlot.WEAPON, ItemSlot.GLOVES), weight = 100,
+        ),
+        AffixDefinition(
+            "$NS:carved", "Carved", AffixKind.PREFIX,
+            listOf(
+                tier(4, range(Stat.DAMAGE, 0.06f, 0.12f, ModifierKind.INCREASED)),
+                tier(15, range(Stat.DAMAGE, 0.12f, 0.2f, ModifierKind.INCREASED), name = "Nsibidi-Carved"),
+            ),
+            slots = JEWELLERY, weight = 80,
+        ),
+        AffixDefinition(
+            "$NS:chalked", "Chalked", AffixKind.PREFIX,
+            listOf(tier(2, range(Stat.MAX_RESOURCE, 8f, 15f)), tier(12, range(Stat.MAX_RESOURCE, 15f, 25f), name = "Nzu-Marked")),
+            slots = JEWELLERY + ItemSlot.HELM + ItemSlot.OFFHAND, weight = 90,
+        ),
 
-        AffixDefinition("$NS:of_storms", "of Storms", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.08f, 0.3f, damageTypeId = thunder.id, weight = 100),
-        AffixDefinition("$NS:of_ash", "of Ash", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.08f, 0.3f, damageTypeId = solar.id, weight = 100),
-        AffixDefinition("$NS:of_the_grove", "of the Grove", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.08f, 0.3f, damageTypeId = venom.id, weight = 100),
-        AffixDefinition("$NS:of_ancestors", "of Ancestors", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.08f, 0.3f, damageTypeId = spirit.id, weight = 90),
-        AffixDefinition("$NS:of_communion", "of Communion", AffixKind.SUFFIX, AffixStat.LIFE_STEAL, 0.03f, 0.12f, minItemLevel = 5, weight = 60),
-        AffixDefinition("$NS:of_judgement", "of Judgement", AffixKind.SUFFIX, AffixStat.CRIT_MULTIPLIER, 0.15f, 0.55f, minItemLevel = 7, weight = 55),
-        AffixDefinition("$NS:of_the_ozo", "of the Ozo", AffixKind.SUFFIX, AffixStat.MAX_HEALTH, 25f, 80f, minItemLevel = 9, weight = 45),
+        resistance("$NS:of_storms", "of Storms", thunder.id, 100),
+        resistance("$NS:of_ash", "of Ash", solar.id, 100),
+        resistance("$NS:of_the_grove", "of the Grove", venom.id, 100),
+        resistance("$NS:of_ancestors", "of Ancestors", spirit.id, 90),
+        AffixDefinition.single(
+            "$NS:of_communion", "of Communion", AffixKind.SUFFIX, range(Stat.LIFE_STEAL, 0.03f, 0.12f), minItemLevel = 5, weight = 60,
+            slots = setOf(ItemSlot.WEAPON, ItemSlot.RING, ItemSlot.AMULET),
+        ),
+        AffixDefinition.single(
+            "$NS:of_judgement", "of Judgement", AffixKind.SUFFIX, range(Stat.CRIT_MULTIPLIER, 0.15f, 0.55f), minItemLevel = 7, weight = 55,
+            slots = setOf(ItemSlot.WEAPON, ItemSlot.AMULET, ItemSlot.GLOVES),
+        ),
+        AffixDefinition.single("$NS:of_the_ozo", "of the Ozo", AffixKind.SUFFIX, range(Stat.MAX_HEALTH, 25f, 80f), minItemLevel = 9, weight = 45),
+        AffixDefinition.single(
+            "$NS:of_the_road", "of the Road", AffixKind.SUFFIX, range(Stat.MOVE_SPEED, 0.05f, 0.12f, ModifierKind.INCREASED), weight = 90,
+            slots = setOf(ItemSlot.BOOTS),
+        ),
+        AffixDefinition.single(
+            "$NS:of_the_market", "of the Market", AffixKind.SUFFIX, range(Stat.ITEM_RARITY, 0.08f, 0.2f, ModifierKind.INCREASED), weight = 70,
+            slots = JEWELLERY + ItemSlot.BELT + ItemSlot.HELM,
+        ),
+        AffixDefinition.single(
+            "$NS:of_the_dibia", "of the Dibia", AffixKind.SUFFIX, range(Stat.COOLDOWN_RECOVERY, 0.06f, 0.14f, ModifierKind.INCREASED),
+            minItemLevel = 6, weight = 60, slots = setOf(ItemSlot.HELM, ItemSlot.AMULET, ItemSlot.OFFHAND),
+        ),
+    )
+
+    private fun range(stat: Stat, min: Float, max: Float, kind: ModifierKind = ModifierKind.FLAT, damageTypeId: String? = null) =
+        ModifierRange(stat, kind, min, max, damageTypeId)
+
+    private fun tier(minItemLevel: Int, vararg ranges: ModifierRange, name: String? = null) = AffixTier(ranges.toList(), minItemLevel, name)
+
+    private fun resistance(id: String, name: String, damageTypeId: String, weight: Int) = AffixDefinition(
+        id, name, AffixKind.SUFFIX,
+        listOf(
+            tier(1, range(Stat.RESISTANCE, 0.08f, 0.18f, damageTypeId = damageTypeId)),
+            tier(12, range(Stat.RESISTANCE, 0.18f, 0.3f, damageTypeId = damageTypeId)),
+        ),
+        weight = weight,
     )
 
     // ---- inserts ---------------------------------------------------------
@@ -153,8 +268,7 @@ internal object IgboPackCombat {
             name = "Ogu Bead",
             glyph = "📿",
             description = "Carved from a staff of truth. Quiet, and it hits harder than it looks.",
-            stat = AffixStat.ATTACK_POWER,
-            value = 4f,
+            modifiers = listOf(AffixStat.ATTACK_POWER.modifier(4f)),
             color = 0xFFD7A86E,
             weight = 170,
         ),
@@ -163,8 +277,7 @@ internal object IgboPackCombat {
             name = "Iron Stud",
             glyph = "🔩",
             description = "Hammered flat and set into the haft. It is not subtle.",
-            stat = AffixStat.ARMOUR,
-            value = 5f,
+            modifiers = listOf(AffixStat.ARMOUR.modifier(5f)),
             color = 0xFF90A4AE,
             weight = 150,
         ),
@@ -173,8 +286,7 @@ internal object IgboPackCombat {
             name = "Palm Resin",
             glyph = "💧",
             description = "Sticky, and it makes a grip you do not have to think about.",
-            stat = AffixStat.ATTACK_SPEED,
-            value = 0.12f,
+            modifiers = listOf(AffixStat.ATTACK_SPEED.modifier(0.12f)),
             color = 0xFFCDDC39,
             weight = 120,
         ),
@@ -183,8 +295,7 @@ internal object IgboPackCombat {
             name = "Whetted Flake",
             glyph = "🔸",
             description = "A splinter of the edge, set back into the edge.",
-            stat = AffixStat.CRIT_CHANCE,
-            value = 0.05f,
+            modifiers = listOf(AffixStat.CRIT_CHANCE.modifier(0.05f)),
             color = 0xFFE0E0E0,
             minItemLevel = 4,
             weight = 95,
@@ -194,8 +305,7 @@ internal object IgboPackCombat {
             name = "Mining Flint",
             glyph = "⛏\uFE0F",
             description = "For the ones who came down here to dig, not to fight.",
-            stat = AffixStat.MINING_SPEED,
-            value = 0.35f,
+            modifiers = listOf(AffixStat.MINING_SPEED.modifier(0.35f)),
             color = 0xFFA1887F,
             weight = 110,
         ),
@@ -207,10 +317,8 @@ internal object IgboPackCombat {
             name = "Thunder Shard",
             glyph = "⚡",
             description = "Amadioha's ram struck a rock and this is what was left standing.",
-            stat = AffixStat.ATTACK_POWER,
-            value = 6f,
-            damageTypeId = thunder.id,
-            convertsDamageType = true,
+            modifiers = listOf(AffixStat.ATTACK_POWER.modifier(6f)),
+            convertsToDamageTypeId = thunder.id,
             tier = 2,
             color = 0xFF00E5FF,
             minItemLevel = 3,
@@ -221,10 +329,8 @@ internal object IgboPackCombat {
             name = "Sun Ember",
             glyph = "☀\uFE0F",
             description = "Anyanwu's light, kept in a bead that has not cooled since.",
-            stat = AffixStat.ATTACK_POWER,
-            value = 6f,
-            damageTypeId = solar.id,
-            convertsDamageType = true,
+            modifiers = listOf(AffixStat.ATTACK_POWER.modifier(6f)),
+            convertsToDamageTypeId = solar.id,
             tier = 2,
             color = 0xFFFF6D00,
             minItemLevel = 3,
@@ -235,10 +341,8 @@ internal object IgboPackCombat {
             name = "Venom Pearl",
             glyph = "🌿",
             description = "Idemili's river keeps what it swallows, and sometimes gives it back.",
-            stat = AffixStat.ATTACK_POWER,
-            value = 5f,
-            damageTypeId = venom.id,
-            convertsDamageType = true,
+            modifiers = listOf(AffixStat.ATTACK_POWER.modifier(5f)),
+            convertsToDamageTypeId = venom.id,
             tier = 2,
             color = 0xFF00E676,
             minItemLevel = 3,
@@ -249,10 +353,8 @@ internal object IgboPackCombat {
             name = "Ancestor Nzu",
             glyph = "👻",
             description = "White chalk pressed into the socket. What you swing, they swing.",
-            stat = AffixStat.LIFE_STEAL,
-            value = 0.06f,
-            damageTypeId = spirit.id,
-            convertsDamageType = true,
+            modifiers = listOf(AffixStat.LIFE_STEAL.modifier(0.06f)),
+            convertsToDamageTypeId = spirit.id,
             tier = 3,
             color = 0xFFB388FF,
             minItemLevel = 6,
@@ -263,8 +365,7 @@ internal object IgboPackCombat {
             name = "Igbo-Ukwu Bronze",
             glyph = "🏺",
             description = "Cast a thousand years ago by someone who expected it to outlast you.",
-            stat = AffixStat.CRIT_MULTIPLIER,
-            value = 0.4f,
+            modifiers = listOf(AffixStat.CRIT_MULTIPLIER.modifier(0.4f)),
             tier = 3,
             color = 0xFF26A69A,
             minItemLevel = 9,
