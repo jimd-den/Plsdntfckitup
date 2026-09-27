@@ -27,6 +27,8 @@ enum class Stat(val label: String, val isPercent: Boolean = false) {
     EXPERIENCE_GAIN("experience gained"),
     ITEM_RARITY("rarity of items found"),
     ITEM_QUANTITY("quantity of items found"),
+    /** How fast blocks break; read by the dig, so a pick can be a build of its own. */
+    MINING_SPEED("mining speed"),
 }
 
 /**

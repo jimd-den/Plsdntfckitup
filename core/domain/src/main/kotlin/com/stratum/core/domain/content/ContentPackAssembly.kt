@@ -4,9 +4,16 @@ import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.combat.DamageTypeDefinition
 import com.stratum.core.domain.item.AffixDefinition
+import com.stratum.core.domain.item.BaseTier
 import com.stratum.core.domain.item.InsertDefinition
+import com.stratum.core.domain.item.ItemBase
+import com.stratum.core.domain.item.ItemCatalogue
+import com.stratum.core.domain.item.ItemNamePool
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.item.ItemSetDefinition
+import com.stratum.core.domain.item.ItemValidation
 import com.stratum.core.domain.item.RarityStyle
+import com.stratum.core.domain.item.UniqueDefinition
 import com.stratum.core.domain.item.WeaponBase
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.crafting.CurrencyDefinition
@@ -88,6 +95,11 @@ class ContentPackAssembler {
             units = merger.merge(ContentPack::units, UnitDefinition::id),
             agentRoles = merger.merge(ContentPack::agentRoles, com.stratum.core.domain.ai.AgentRoleDefinition::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
+            itemBases = merger.merge(ContentPack::itemBases, ItemBase::id),
+            uniques = merger.merge(ContentPack::uniques, UniqueDefinition::id),
+            itemSets = merger.merge(ContentPack::itemSets, ItemSetDefinition::id),
+            itemNames = merger.merge(ContentPack::itemNames, ItemNamePool::id),
+            baseTiers = packs.lastOrNull { it.baseTiers.isNotEmpty() }?.baseTiers.orEmpty(),
             overrides = merger.overrides,
         ).let(::withEndgameDefaults)
         ContentValidation.requireValid(content)
@@ -117,7 +129,7 @@ class ContentPackAssembler {
      */
     private fun withStandardStrategy(content: AssembledContent): AssembledContent {
         if (content.resources.isNotEmpty() || content.structures.isNotEmpty()) return content
-        val damageType = content.damageTypes.firstOrNull()?.id ?: content.weapons.first().damageTypeId
+        val damageType = content.damageTypes.firstOrNull()?.id ?: content.itemCatalogue.bases.firstNotNullOf { it.weapon }.damageTypeId
         val actors = StandardStrategy.actors(damageType).filter { actor -> content.enemies.none { it.id == actor.id } }
         return content.copy(
             resources = StandardStrategy.resources,
@@ -165,7 +177,8 @@ internal object ContentValidation {
 
     fun requireValid(content: AssembledContent) {
         val problems = worldProblems(content) + combatProblems(content) + tabletopProblems(content) +
-            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content)
+            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) +
+            ItemValidation.problems(content.itemCatalogue, content.inserts, content.damageTypes.mapTo(HashSet()) { it.id })
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
 
@@ -199,16 +212,11 @@ internal object ContentValidation {
         val types = content.damageTypes.mapTo(HashSet()) { it.id }
         if (types.isEmpty() && content.weapons.isEmpty() && content.enemies.isEmpty()) return emptyList()
         fun unknown(typeId: String?) = typeId != null && typeId !in types
-        return content.weapons.filter { unknown(it.damageTypeId) }
-            .map { "weapon '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
-            content.enemies.filter { unknown(it.damageTypeId) }
+        // Gear, affixes and inserts are checked with the rest of the items, in ItemValidation.
+        return content.enemies.filter { unknown(it.damageTypeId) }
                 .map { "enemy '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
             content.skills.filter { unknown(it.damageTypeId) }
                 .map { "skill '${it.id}' uses unknown damage type '${it.damageTypeId}'" } +
-            content.affixes.filter { unknown(it.damageTypeId) }
-                .map { "affix '${it.id}' resists unknown damage type '${it.damageTypeId}'" } +
-            content.inserts.filter { unknown(it.damageTypeId) }
-                .map { "insert '${it.id}' names unknown damage type '${it.damageTypeId}'" } +
             content.supports.filter { unknown(it.convertsToDamageTypeId) }
                 .map { "support '${it.id}' converts to unknown damage type '${it.convertsToDamageTypeId}'" }
     }
@@ -316,7 +324,30 @@ data class AssembledContent(
     val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
     /** The rules the loaded packs suggest, before the player changes them. */
     val suggestedRules: com.stratum.core.domain.world.WorldRules = com.stratum.core.domain.world.WorldRules(),
+    /** Gear bases written in full; [weapons] join them in [itemCatalogue]. */
+    val itemBases: List<ItemBase> = emptyList(),
+    val uniques: List<UniqueDefinition> = emptyList(),
+    val itemSets: List<ItemSetDefinition> = emptyList(),
+    val itemNames: List<ItemNamePool> = emptyList(),
+    val baseTiers: List<BaseTier> = emptyList(),
 ) {
+    /**
+     * Everything items are made from: every base, short-form weapons
+     * included, grown into ladders, with the affixes, uniques, sets and
+     * names that go on them. A base written in full wins over a short-form
+     * weapon of the same id.
+     */
+    val itemCatalogue: ItemCatalogue by lazy {
+        val authored = (weapons.map(WeaponBase::toItemBase) + itemBases).associateBy { it.id }.values.toList()
+        ItemCatalogue.of(authored, affixes, uniques, itemSets, itemNames, baseTiers)
+    }
+
+    fun itemBase(id: String): ItemBase? = itemCatalogue.base(id)
+
+    fun unique(id: String): UniqueDefinition? = itemCatalogue.unique(id)
+
+    fun itemSet(id: String): ItemSetDefinition? = itemCatalogue.set(id)
+
     /** Outposts' resources, structures and units, for the questions the engine asks of them. */
     val strategyBook: StrategyBook by lazy { StrategyBook(resources, structures, units) }
 
@@ -390,7 +421,8 @@ data class AssembledContent(
     fun enemiesFor(biomeId: String): List<EnemyDefinition> =
         enemies.filter { it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds }
 
-    val hasCombat: Boolean get() = enemies.isNotEmpty() && weapons.isNotEmpty()
+    /** Something to fight, and something to fight it with: a short-form weapon or a weapon base written in full. */
+    val hasCombat: Boolean get() = enemies.isNotEmpty() && (weapons.isNotEmpty() || itemBases.any { it.weapon != null })
 
     private companion object {
         const val DEFAULT_RARITY_COLOR = 0xFFCFD8DC
