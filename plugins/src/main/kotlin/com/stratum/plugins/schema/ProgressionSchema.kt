@@ -44,15 +44,16 @@ internal data class PassiveNodeSchema(
     val y: Float = 0f,
     val classes: List<String> = emptyList(),
     val description: String = "",
+    val traits: List<String> = emptyList(),
 ) {
     fun toDomain() = PassiveNode(
         id, name, SchemaValues.enum<PassiveKind>(kind, "passive '$id' kind"), modifiers.map { it.toDomain("passive '$id'") },
-        x, y, classes, description,
+        x, y, classes, description, traits,
     )
 
     companion object {
         fun of(n: PassiveNode) = PassiveNodeSchema(
-            n.id, n.name, SchemaValues.name(n.kind), n.modifiers.map(ModifierSchema::of), n.x, n.y, n.classIds, n.description,
+            n.id, n.name, SchemaValues.name(n.kind), n.modifiers.map(ModifierSchema::of), n.x, n.y, n.classIds, n.description, n.traitIds,
         )
     }
 }
@@ -115,15 +116,22 @@ internal data class SupportSchema(
     val color: String = SchemaValues.color(SUPPORT.color),
     val weight: Int = SUPPORT.weight,
     val minItemLevel: Int = SUPPORT.minItemLevel,
+    val requiresTags: List<String> = emptyList(),
+    val addsTags: List<String> = emptyList(),
+    val effects: List<EffectSchema> = emptyList(),
+    val conversions: List<ConversionSchema> = emptyList(),
+    val trigger: TriggerSchema? = null,
 ) {
     fun toDomain() = SupportDefinition(
         id, name, description, modifiers.map { it.toDomain("support '$id'") }, convertsTo, glyph,
-        SchemaValues.color(color, "support '$id' color"), weight, minItemLevel,
+        SchemaValues.color(color, "support '$id' color"), weight, minItemLevel, requiresTags.toSet(), addsTags.toSet(),
+        effects.map { it.toDomain("support '$id'") }, conversions.map { it.toConversion() }, trigger?.toDomain("support '$id'"),
     )
 
     companion object {
         fun of(s: SupportDefinition) = SupportSchema(
             s.id, s.name, s.description, s.modifiers.map(ModifierSchema::of), s.convertsToDamageTypeId, s.glyph, SchemaValues.color(s.color), s.weight, s.minItemLevel,
+            s.requiresTags.toList(), s.addsTags.toList(), s.effects.map(EffectSchema::of), s.conversions.map(ConversionSchema::of), s.trigger?.let(TriggerSchema::of),
         )
     }
 }

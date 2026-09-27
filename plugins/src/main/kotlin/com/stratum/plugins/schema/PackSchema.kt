@@ -55,6 +55,9 @@ internal data class PackSchema(
     val structures: List<StructureSchema> = emptyList(),
     val units: List<UnitSchema> = emptyList(),
     val agents: List<AgentRoleSchema> = emptyList(),
+    val statuses: List<StatusSchema> = emptyList(),
+    val traits: List<TraitSchema> = emptyList(),
+    val flasks: List<FlaskSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -70,6 +73,7 @@ internal data class PackSchema(
         forageRules = forage.map { it.toDomain() }, recipes = recipes.map { it.toDomain() },
         resources = resources.map { it.toDomain() }, structures = structures.map { it.toDomain() }, units = units.map { it.toDomain() },
         agentRoles = agents.map { it.toDomain() },
+        statuses = statuses.map { it.toDomain() }, traits = traits.map { it.toDomain() }, flasks = flasks.map { it.toDomain() },
     )
 
     companion object {
@@ -86,6 +90,7 @@ internal data class PackSchema(
             p.forageRules.map(ForageSchema::of), p.recipes.map(RecipeSchema::of),
             p.resources.map(ResourceSchema::of), p.structures.map(StructureSchema::of), p.units.map(UnitSchema::of),
             p.agentRoles.map(AgentRoleSchema::of),
+            p.statuses.map(StatusSchema::of), p.traits.map(TraitSchema::of), p.flasks.map(FlaskSchema::of),
         )
     }
 }

@@ -2,8 +2,13 @@ package com.stratum.content.igbo
 
 import com.stratum.core.domain.actor.CombatRole
 import com.stratum.core.domain.actor.EnemyDefinition
-import com.stratum.core.domain.actor.SkillDefinition
-import com.stratum.core.domain.actor.SkillShape
+import com.stratum.core.domain.actor.BossPhase
+import com.stratum.core.domain.actor.EnemyRank
+import com.stratum.core.domain.actor.MonsterSkill
+import com.stratum.core.domain.actor.PackMember
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.Stat
+import com.stratum.core.domain.stats.StatModifier
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.combat.DamageTypeDefinition
 import com.stratum.core.domain.item.AffixDefinition
@@ -24,11 +29,12 @@ internal object IgboPackCombat {
 
     // ---- damage types ----------------------------------------------------
 
-    val physical = DamageTypeDefinition("$NS:physical", "Physical", 0xFFCFD8DC, "⚔")
-    val thunder = DamageTypeDefinition("$NS:thunder", "Amadioha's Thunder", 0xFF00E5FF, "⚡")
-    val solar = DamageTypeDefinition("$NS:solar", "Anyanwu's Fire", 0xFFFF6D00, "☀")
-    val venom = DamageTypeDefinition("$NS:venom", "Idemili's Venom", 0xFF00E676, "☣")
-    val spirit = DamageTypeDefinition("$NS:spirit", "Ancestral Spirit", 0xFFB388FF, "✦")
+    // Only bronze and bone are stopped by armour; the gods' damage goes around it. Each leaves its mark.
+    val physical = DamageTypeDefinition("$NS:physical", "Physical", 0xFFCFD8DC, "⚔", ailmentStatusId = "$NS:bleed", ailmentChance = 0.1f)
+    val thunder = DamageTypeDefinition("$NS:thunder", "Amadioha's Thunder", 0xFF00E5FF, "⚡", mitigatedByArmour = false, ailmentStatusId = "$NS:shock", ailmentChance = 0.2f)
+    val solar = DamageTypeDefinition("$NS:solar", "Anyanwu's Fire", 0xFFFF6D00, "☀", mitigatedByArmour = false, ailmentStatusId = "$NS:scorch", ailmentChance = 0.25f)
+    val venom = DamageTypeDefinition("$NS:venom", "Idemili's Venom", 0xFF00E676, "☣", mitigatedByArmour = false, ailmentStatusId = "$NS:poison", ailmentChance = 0.3f)
+    val spirit = DamageTypeDefinition("$NS:spirit", "Ancestral Spirit", 0xFFB388FF, "✦", mitigatedByArmour = false, ailmentStatusId = "$NS:ancestral_grip", ailmentChance = 0.15f)
 
     val damageTypes = listOf(physical, thunder, solar, venom, spirit)
 
@@ -287,6 +293,8 @@ internal object IgboPackCombat {
             spawnWeight = 160,
             bodyColor = 0xFF8C4A3A,
             role = CombatRole.BRUTE,
+            // A brute that is losing calls the others in.
+            skills = listOf(MonsterSkill("$NS:war_cry", healthBelow = 0.6f)),
         ),
         EnemyDefinition(
             id = "$NS:shadow_leopard",
@@ -317,6 +325,7 @@ internal object IgboPackCombat {
             spawnWeight = 110,
             bodyColor = 0xFF00E5FF,
             role = CombatRole.RANGED,
+            skills = listOf(MonsterSkill("$NS:wisp_spark")),
         ),
         EnemyDefinition(
             id = "$NS:marsh_revenant",
@@ -331,6 +340,7 @@ internal object IgboPackCombat {
             spawnWeight = 100,
             bodyColor = 0xFF33691E,
             role = CombatRole.MELEE,
+            skills = listOf(MonsterSkill("$NS:revenant_spit", weight = 60)),
         ),
         EnemyDefinition(
             id = "$NS:catacomb_guardian",
@@ -346,6 +356,7 @@ internal object IgboPackCombat {
             bonusDropChance = 0.2f,
             bodyColor = 0xFFCD7F32,
             role = CombatRole.BRUTE,
+            skills = listOf(MonsterSkill("$NS:guardian_slam")),
         ),
         EnemyDefinition(
             id = "$NS:agbara_priest",
@@ -359,83 +370,24 @@ internal object IgboPackCombat {
             spawnWeight = 25,
             bonusDropChance = 0.35f,
             bodyColor = 0xFFB388FF,
-        ),
-    )
-
-    // ---- skills ----------------------------------------------------------
-
-    val skills = listOf(
-        SkillDefinition(
-            id = "$NS:mma_nkwu_cleave",
-            name = "Mma Nkwu Cleave",
-            description = "A wide arc that catches everything standing too close.",
-            damageTypeId = physical.id,
-            powerMultiplier = 1.4f,
-            resourceCost = 15,
-            cooldownSeconds = 3f,
-            shape = SkillShape.NOVA,
-            range = 3,
-            color = 0xFFCFD8DC,
-        ),
-        SkillDefinition(
-            id = "$NS:ikenga_tremor",
-            name = "Ikenga Tremor",
-            description = "One downward strike. The ground carries the rest.",
-            damageTypeId = solar.id,
-            powerMultiplier = 2.6f,
-            resourceCost = 30,
-            cooldownSeconds = 7f,
-            shape = SkillShape.STRIKE,
-            range = 2,
-            color = 0xFFFF6D00,
-        ),
-        SkillDefinition(
-            id = "$NS:thunder_spear",
-            name = "Amadioha Thunder Spear",
-            description = "A line of charge, delivered without appeal.",
-            damageTypeId = thunder.id,
-            powerMultiplier = 2.1f,
-            resourceCost = 25,
-            cooldownSeconds = 5f,
-            shape = SkillShape.LANCE,
-            range = 7,
-            color = 0xFF00E5FF,
-        ),
-        SkillDefinition(
-            id = "$NS:shockwave_spark",
-            name = "Shockwave Spark",
-            description = "A short discharge that clears breathing room.",
-            damageTypeId = thunder.id,
-            powerMultiplier = 1.2f,
-            resourceCost = 12,
-            cooldownSeconds = 2.5f,
-            shape = SkillShape.NOVA,
-            range = 4,
-            color = 0xFF80D8FF,
-        ),
-        SkillDefinition(
-            id = "$NS:venom_geyser",
-            name = "Idemili Venom Geyser",
-            description = "The ground opens and returns what was poured into it.",
-            damageTypeId = venom.id,
-            powerMultiplier = 1.9f,
-            resourceCost = 22,
-            cooldownSeconds = 6f,
-            shape = SkillShape.NOVA,
-            range = 5,
-            color = 0xFF00E676,
-        ),
-        SkillDefinition(
-            id = "$NS:solar_supernova",
-            name = "Anyanwu Supernova",
-            description = "Everything within reach is judged at once.",
-            damageTypeId = solar.id,
-            powerMultiplier = 3.2f,
-            resourceCost = 45,
-            cooldownSeconds = 12f,
-            shape = SkillShape.NOVA,
-            range = 6,
-            color = 0xFFFFB300,
+            rank = EnemyRank.BOSS,
+            role = CombatRole.SUPPORT,
+            skills = listOf(MonsterSkill("$NS:priest_curse"), MonsterSkill("$NS:priest_mend", weight = 60)),
+            phases = listOf(
+                BossPhase(
+                    name = "The Congregation", healthBelow = 0.6f,
+                    skills = listOf(MonsterSkill("$NS:priest_curse"), MonsterSkill("$NS:agbara_judgement", weight = 80), MonsterSkill("$NS:priest_mend", weight = 40)),
+                    adds = listOf(PackMember("$NS:marsh_revenant", 2)),
+                    announcement = "The priest calls the drowned to his side",
+                ),
+                BossPhase(
+                    name = "Wrath", healthBelow = 0.3f,
+                    skills = listOf(MonsterSkill("$NS:agbara_judgement", weight = 120, cooldownSeconds = 5f), MonsterSkill("$NS:priest_curse")),
+                    enrage = listOf(StatModifier(Stat.ATTACK_SPEED, ModifierKind.INCREASED, 0.3f)),
+                    statusId = "$NS:agbara_wrath",
+                    announcement = "The Agbara stops being patient",
+                ),
+            ),
         ),
     )
 }

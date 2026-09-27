@@ -77,7 +77,8 @@ object IgboContentPack {
             agility = 12,
             insight = 18,
             startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
-            abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark"),
+            abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark", "$NS:ogene_bolt"),
+            traitIds = listOf("$NS:storm_caller"),
             baseStats = CombatStats(
                 maxHealth = 180,
                 attackPower = 18,
@@ -103,7 +104,7 @@ object IgboContentPack {
             agility = 13,
             insight = 17,
             startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
-            abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova"),
+            abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova", "$NS:seed_volley"),
             baseStats = CombatStats(
                 maxHealth = 200,
                 attackPower = 15,
@@ -131,6 +132,7 @@ object IgboContentPack {
             insight = 6,
             startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:ikenga_tremor", "$NS:mma_nkwu_cleave"),
+            traitIds = listOf("$NS:blood_of_ala"),
             baseStats = CombatStats(
                 maxHealth = 300,
                 attackPower = 20,
@@ -250,7 +252,10 @@ object IgboContentPack {
         inserts = IgboPackCombat.inserts,
         weapons = IgboPackCombat.weapons,
         enemies = IgboPackCombat.enemies + IgboPackWorld.people,
-        skills = IgboPackCombat.skills,
+        skills = IgboPackAbilities.skills,
+        statuses = IgboPackAbilities.statuses,
+        traits = IgboPackAbilities.traits,
+        flasks = IgboPackAbilities.flasks,
         rarityStyles = IgboPackCombat.rarityStyles,
         terrain = terrain,
         factions = IgboPackWorld.factions,

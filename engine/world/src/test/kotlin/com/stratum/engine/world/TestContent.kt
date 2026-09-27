@@ -6,7 +6,7 @@ import com.stratum.core.domain.content.ContentPackAssembler
 import com.stratum.core.domain.content.DepositRule
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.SkillDefinition
-import com.stratum.core.domain.actor.SkillShape
+import com.stratum.core.domain.actor.SkillDelivery
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.combat.DamageTypeDefinition
 import com.stratum.core.domain.content.HeroClassDefinition
@@ -194,7 +194,7 @@ object TestContent {
         powerMultiplier = 2f,
         resourceCost = 10,
         cooldownSeconds = 3f,
-        shape = SkillShape.STRIKE,
+        delivery = SkillDelivery.MELEE,
         range = 3,
     )
 
@@ -205,7 +205,7 @@ object TestContent {
         powerMultiplier = 1.5f,
         resourceCost = 20,
         cooldownSeconds = 5f,
-        shape = SkillShape.NOVA,
+        delivery = SkillDelivery.NOVA,
         range = 4,
     )
 
@@ -216,7 +216,7 @@ object TestContent {
         powerMultiplier = 1.8f,
         resourceCost = 15,
         cooldownSeconds = 4f,
-        shape = SkillShape.LANCE,
+        delivery = SkillDelivery.BEAM,
         range = 6,
     )
 

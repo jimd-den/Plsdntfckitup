@@ -62,10 +62,10 @@ internal class Workbench(
         val skill = content.skill(skillId)?.takeIf { skillId in player.skillIds } ?: return player to SupportResult.UnknownSkill
         val support = content.support(supportId) ?: return player to SupportResult.UnknownSupport
         if (player.supportCount(supportId) <= 0) return player to SupportResult.NoneHeld
-        if (!support.fits(skill)) return player to SupportResult.DoesNotFit
         val linked = player.supports[skillId].orEmpty()
         if (supportId in linked) return player to SupportResult.AlreadyLinked
         if (linked.size >= StandardCrafting.MAX_SUPPORTS_PER_SKILL) return player to SupportResult.SkillFull
+        if (!support.fits(skill)) return player to SupportResult.DoesNotFit
         val updated = player.copy(
             supports = player.supports + (skillId to linked + supportId),
             supportBag = player.supportBag.adding(supportId, -1),
