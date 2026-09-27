@@ -73,9 +73,9 @@ internal class TriggerEngine(private val rules: CombatRules) {
     }
 
     /**
-     * Whether a cast caused by another cast -- the explosion a projectile
-     * leaves -- may happen at [depth]. It obeys the same depth and budget as
-     * a trigger, since a skill that casts itself is a trigger by another name.
+     * Whether a cast at [depth] may cause another -- the explosion a
+     * projectile leaves. It obeys the same depth and budget as a trigger,
+     * since a skill that casts itself is a trigger by another name.
      */
     fun allowChainedCast(depth: Int): Boolean {
         if (depth >= rules.triggerDepth || spent >= rules.triggerBudget) return false

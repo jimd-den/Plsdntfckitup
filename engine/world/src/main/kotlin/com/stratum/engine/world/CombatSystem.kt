@@ -359,7 +359,7 @@ internal class CombatSystem(
 
     /** A cast caused by another: bounded by the same depth and budget as a trigger. */
     private fun castFollowUp(battle: Battlefield, casterId: String, side: CombatSide, skillId: String, at: WorldPoint, from: WorldPoint?, depth: Int) {
-        if (!triggers.allowChainedCast(depth + 1)) return
+        if (!triggers.allowChainedCast(depth)) return
         val skill = skillFor(side, skillId) ?: return
         val aim = from?.let { Aim.toward(it, at) } ?: Aim(0f, 1f)
         cast(battle, casterId, side, skill.copy(tags = skill.tags + SkillTags.TRIGGERED), at, aim, at, depth + 1)
