@@ -96,6 +96,8 @@ internal fun HomeScreen(
     worldRules: WorldRules = WorldRules(),
     suggestedRules: WorldRules = WorldRules(),
     onRulesChange: (WorldRules) -> Unit = {},
+    onModelForge: () -> Unit = {},
+    modelCount: Int = 0,
 ) {
     val colors = StratumTheme.colors
     val play: @Composable () -> Unit = {
@@ -113,6 +115,8 @@ internal fun HomeScreen(
             status = if (unpackedCharacterCount > 0) "$unpackedCharacterCount waiting to be packed" else null, badge = unpackedCharacterCount.takeIf { it > 0 }?.toString()),
         TileSpec("🖼", "Sprite forge", "Generate animated sprite sheets for heroes and monsters.", onSprites,
             status = if (spriteCount > 0) "$spriteCount sheets" else null),
+        TileSpec("🗿", "Model forge", "Describe a prop, weapon or statue and AI builds it in 3D. Stand it in the world or rebuild it from blocks.", onModelForge,
+            status = if (modelCount > 0) "$modelCount models" else null, badge = "NEW"),
         TileSpec("⚔", "Build a class", "Choose stats, skills and a starting weapon for a new class.", onBuildClass,
             status = "$classCount classes"),
         TileSpec("🤖", "Agent studio", "A crew of AI agents writes factions, towns, monsters, food and outposts. Every step on the record.", onCrew,

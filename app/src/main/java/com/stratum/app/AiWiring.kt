@@ -131,5 +131,8 @@ class AiWiring(context: Context) {
 
     val modelCatalog = languageModel
 
+    /** Generated 3D models: their provider, their store and the pipeline that makes them usable. */
+    val models = ModelWiring(context, settings, imageModel)
+
     fun isConfigured(): Boolean = settings.isConfigured
 }
