@@ -39,6 +39,15 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
 
     fun healed(amount: Int, at: WorldPoint) = log.add(FeedbackKind.HEAL, "+$amount", at, HEAL)
 
+    /** An attack that missed because the defender's evasion won the roll. */
+    fun evaded(at: WorldPoint) = log.add(FeedbackKind.DODGED, "EVADED", at, DODGE, emphasis = 0.9f)
+
+    /** A status taking hold, named the way the pack names it. */
+    fun status(name: String, at: WorldPoint, color: Long) = log.add(FeedbackKind.STATUS, name, at, color, emphasis = 0.8f)
+
+    /** A boss changing phase: large, and held long enough to read. */
+    fun announce(text: String, at: WorldPoint) = log.add(FeedbackKind.STATUS, text, at, LEVEL, emphasis = 1.6f, lifetime = 2.5f)
+
     fun levelUp(level: Int, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, "LEVEL $level", at, LEVEL, emphasis = 1.9f, lifetime = 1.8f)
 

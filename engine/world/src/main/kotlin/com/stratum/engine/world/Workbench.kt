@@ -1,6 +1,8 @@
 package com.stratum.engine.world
 
 import com.stratum.core.domain.actor.SkillDefinition
+import com.stratum.core.domain.actor.SkillEffect
+import com.stratum.core.domain.combat.CombatRules
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.crafting.CurrencyDefinition
 import com.stratum.core.domain.crafting.StandardCrafting
@@ -28,6 +30,9 @@ sealed interface SupportResult {
     data object SkillFull : SupportResult
 
     data object NotLinked : SupportResult
+
+    /** The support needs a skill tagged differently: a volley on a nova does nothing. */
+    data object DoesNotFit : SupportResult
 }
 
 /** A stack held in the pouch, resolved for display. */
@@ -37,7 +42,11 @@ data class Held<T>(val definition: T, val count: Int)
  * The player's crafting: currency spent on gear, and supports linked to
  * skills. Rules only; the session owns the player it hands in and out.
  */
-internal class Workbench(private val content: AssembledContent, private val crafter: ItemCrafter) {
+internal class Workbench(
+    private val content: AssembledContent,
+    private val crafter: ItemCrafter,
+    private val rules: CombatRules = CombatRules(),
+) {
 
     /** Spends one [currencyId] on the item. A currency that would do nothing is not spent. */
     fun craft(player: PlayerState, instanceId: String, currencyId: String, random: Random): Pair<PlayerState, CraftResult> {
@@ -53,6 +62,7 @@ internal class Workbench(private val content: AssembledContent, private val craf
         val skill = content.skill(skillId)?.takeIf { skillId in player.skillIds } ?: return player to SupportResult.UnknownSkill
         val support = content.support(supportId) ?: return player to SupportResult.UnknownSupport
         if (player.supportCount(supportId) <= 0) return player to SupportResult.NoneHeld
+        if (!support.fits(skill)) return player to SupportResult.DoesNotFit
         val linked = player.supports[skillId].orEmpty()
         if (supportId in linked) return player to SupportResult.AlreadyLinked
         if (linked.size >= StandardCrafting.MAX_SUPPORTS_PER_SKILL) return player to SupportResult.SkillFull
@@ -83,10 +93,21 @@ internal class Workbench(private val content: AssembledContent, private val craf
      * from the tree combine exactly as they read.
      */
     fun tuned(player: PlayerState, skill: SkillDefinition): SkillDefinition {
-        val supports = linkedTo(player, skill.id)
-        val tuned = StatSheet(player.build.modifiers + supports.flatMap { it.modifiers }).tune(skill)
-        val conversion = supports.lastOrNull { it.convertsToDamageTypeId != null }?.convertsToDamageTypeId
-        return if (conversion != null) tuned.copy(damageTypeId = conversion) else tuned
+        val supports = linkedTo(player, skill.id).filter { it.fits(skill) }
+        val tuned = StatSheet(player.build.modifiers + supports.flatMap { it.modifiers }).tune(skill, rules)
+        if (supports.isEmpty()) return tuned
+        val extraEffects = supports.flatMap { it.effects }
+        val withSupports = tuned.copy(
+            tags = tuned.tags + supports.flatMap { it.addsTags },
+            effects = if (extraEffects.isEmpty()) tuned.effects else tuned.resolvedEffects + extraEffects,
+            conversions = tuned.conversions + supports.flatMap { it.conversions },
+        )
+        // A whole-skill conversion turns every damage the skill deals, and the colour of its button with it.
+        val conversion = supports.lastOrNull { it.convertsToDamageTypeId != null }?.convertsToDamageTypeId ?: return withSupports
+        return withSupports.copy(
+            damageTypeId = conversion,
+            effects = withSupports.effects.map { if (it is SkillEffect.Damage) it.copy(damageTypeId = conversion) else it },
+        )
     }
 
     fun linkedTo(player: PlayerState, skillId: String): List<SupportDefinition> =

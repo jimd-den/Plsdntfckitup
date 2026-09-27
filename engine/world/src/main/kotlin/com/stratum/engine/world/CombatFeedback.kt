@@ -47,6 +47,9 @@ enum class FeedbackKind {
 
     /** A tabletop check rolled, read out with its dice. */
     CHECK,
+
+    /** A status taking hold, or a boss announcing a new phase. */
+    STATUS,
 }
 
 /**

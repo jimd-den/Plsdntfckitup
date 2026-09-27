@@ -883,7 +883,7 @@ class PlayViewModel(
         SupportResult.SkillFull -> "That skill holds ${com.stratum.core.domain.crafting.StandardCrafting.MAX_SUPPORTS_PER_SKILL} supports"
         SupportResult.AlreadyLinked -> "Already linked there"
         SupportResult.NoneHeld -> "You hold none of those"
-        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked -> "That does not fit"
+        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked, SupportResult.DoesNotFit -> "That does not fit"
     }
 
     /** Spends currency on the item the anvil is showing. */

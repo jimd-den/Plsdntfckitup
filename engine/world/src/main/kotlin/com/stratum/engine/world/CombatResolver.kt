@@ -2,22 +2,29 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.SkillDefinition
-import com.stratum.core.domain.actor.SkillShape
+import com.stratum.core.domain.actor.SkillDelivery
+import com.stratum.core.domain.actor.SkillTags
+import com.stratum.core.domain.combat.CombatRules
 import com.stratum.core.domain.combat.CombatStats
-import com.stratum.core.domain.combat.DamageCalculator
 import com.stratum.core.domain.combat.DamageResult
+import com.stratum.core.domain.combat.HitAttacker
+import com.stratum.core.domain.combat.HitDefender
+import com.stratum.core.domain.combat.HitResolver
+import com.stratum.core.domain.combat.HitRolls
+import com.stratum.core.domain.actor.SkillEffect
 import com.stratum.core.domain.world.Direction
 import com.stratum.core.domain.world.WorldPoint
 import kotlin.random.Random
 
 /**
- * Applies attacks between the player and monsters.
+ * Instant, stateless attacks between one attacker and a crowd: the pure core
+ * of the fight, with no statuses, projectiles or triggers.
  *
- * Target selection lives here with damage resolution because a skill's shape and
- * its damage are one decision: a nova that picks targets differently from how it
- * damages them is how "it hit something behind me" bugs happen.
+ * The session runs the full fight through [CombatSystem]; this is the same
+ * targeting and the same [HitResolver], with nothing remembered between
+ * calls, for tools and tests that want one exchange and its numbers.
  */
-class CombatResolver {
+class CombatResolver(private val rules: CombatRules = CombatRules()) {
 
     /** A basic swing at whatever is in reach, nearest first. */
     fun playerAttack(
@@ -28,18 +35,17 @@ class CombatResolver {
         damageTypeId: String,
         random: Random,
     ): AttackOutcome {
-        val target = enemies
-            .filter { it.isAlive }
-            .filter { it.position.horizontalDistanceTo(attackerPosition) <= attacker.attackRange + REACH_FORGIVENESS }
-            .minByOrNull { it.position.horizontalDistanceTo(attackerPosition) }
-            ?: return AttackOutcome.NoTarget
-
-        return strike(attacker, listOf(target), damageTypeId, 1f, random)
+        val swing = SkillDefinition(
+            id = CombatSystem.BASIC_ATTACK_ID, name = "Attack", damageTypeId = damageTypeId, powerMultiplier = 1f,
+            delivery = SkillDelivery.MELEE, range = attacker.attackRange, tags = setOf(SkillTags.ATTACK, SkillTags.MELEE),
+        )
+        return castSkill(attacker, attackerPosition, facing, enemies, swing, random)
     }
 
     /**
-     * Casts a skill. The caller has already checked cost and cooldown; this
-     * decides who it reaches and how hard.
+     * Casts a skill that lands at once. The caller has already checked cost
+     * and cooldown; this decides who it reaches and how hard. Deliveries that
+     * land later -- projectiles, zones -- reach nobody here.
      */
     fun castSkill(
         attacker: CombatStats,
@@ -50,67 +56,20 @@ class CombatResolver {
         random: Random,
     ): AttackOutcome {
         val alive = enemies.filter { it.isAlive }
-        val targets = when (skill.shape) {
-            SkillShape.STRIKE -> listOfNotNull(
-                alive.filter { it.position.horizontalDistanceTo(attackerPosition) <= skill.range }
-                    .minByOrNull { it.position.horizontalDistanceTo(attackerPosition) },
-            )
-
-            SkillShape.NOVA -> alive.filter {
-                it.position.horizontalDistanceTo(attackerPosition) <= skill.range
-            }
-
-            SkillShape.LANCE -> alive.filter { enemy ->
-                inLine(attackerPosition, facing, enemy.position, skill.range)
-            }
-        }
-
-        if (targets.isEmpty()) return AttackOutcome.NoTarget
-        return strike(attacker, targets, skill.damageTypeId, skill.powerMultiplier, random)
-    }
-
-    /**
-     * Whether a point lies in the lane the caster is facing.
-     *
-     * The lane is a block wide either side, because demanding pixel-perfect
-     * alignment on an isometric grid with a four-way pad is not a skill test,
-     * it is an input test.
-     */
-    private fun inLine(
-        origin: WorldPoint,
-        facing: Direction,
-        point: WorldPoint,
-        range: Int,
-    ): Boolean {
-        val dx = point.x - origin.x
-        val dy = point.y - origin.y
-
-        val along = dx * facing.dx + dy * facing.dy
-        if (along <= 0f || along > range) return false
-
-        // Distance from the lane's centre line.
-        val across = kotlin.math.abs(dx * facing.dy - dy * facing.dx)
-        return across <= LANE_HALF_WIDTH
-    }
-
-    private fun strike(
-        attacker: CombatStats,
-        targets: List<EnemyInstance>,
-        damageTypeId: String,
-        powerMultiplier: Float,
-        random: Random,
-    ): AttackOutcome {
-        val hits = targets.map { enemy ->
-            val result = DamageCalculator.resolve(
-                attacker = attacker,
-                defender = enemy.stats,
-                damageTypeId = damageTypeId,
-                critRoll = random.nextFloat(),
-                powerMultiplier = powerMultiplier,
-            )
-            EnemyHit(enemy.instanceId, enemy.damaged(result.amount), result)
-        }
-        return AttackOutcome.Hits(hits)
+        val candidates = alive.map { Candidate(it.instanceId, it.position) }
+        val aim = Aim.of(facing.dx.toFloat(), facing.dy.toFloat())
+        val point = SkillTargeting.landingPoint(skill, attackerPosition, aim, candidates)
+        val ids = SkillTargeting.targets(skill, attackerPosition, aim, point, candidates)
+        if (ids.isEmpty()) return AttackOutcome.NoTarget
+        val byId = alive.associateBy { it.instanceId }
+        val hitter = HitAttacker(attacker, evadable = skill.hasTag(SkillTags.ATTACK))
+        return AttackOutcome.Hits(
+            ids.map { id ->
+                val enemy = byId.getValue(id)
+                val result = HitResolver.resolve(hitter, HitDefender(enemy.stats), damageOf(skill, attacker), HitRolls(crit = random.nextFloat()), rules)
+                EnemyHit(id, enemy.damaged(result.amount), result)
+            },
+        )
     }
 
     /**
@@ -128,31 +87,22 @@ class CombatResolver {
     ): EnemyAttackOutcome {
         val results = mutableListOf<DamageResult>()
         val updated = enemies.map { enemy ->
-            if (!enemy.isAlive) return@map enemy
-            if (enemy.attackCooldown > 0f) return@map enemy
+            if (!enemy.isAlive || enemy.attackCooldown > 0f) return@map enemy
             val distance = enemy.position.horizontalDistanceTo(defenderPosition)
-            if (distance > enemy.stats.attackRange + REACH_FORGIVENESS) return@map enemy
-
-            val result = DamageCalculator.resolve(
-                attacker = enemy.stats,
-                defender = defender,
-                damageTypeId = enemy.damageTypeId,
-                critRoll = random.nextFloat(),
+            if (distance > enemy.stats.attackRange + SkillTargeting.REACH_FORGIVENESS) return@map enemy
+            results += HitResolver.resolve(
+                HitAttacker(enemy.stats), HitDefender(defender),
+                mapOf(enemy.damageTypeId to enemy.stats.attackPower.toFloat()), HitRolls(crit = random.nextFloat()), rules,
             )
-            results += result
             enemy.copy(attackCooldown = cooldownFor(enemy))
         }
         return EnemyAttackOutcome(updated, results, results.sumOf { it.amount })
     }
 
-    private companion object {
-        /**
-         * Reach is measured between continuous positions, so a monster standing
-         * in the adjacent block is already about one unit away. Without a little
-         * slack, adjacent never counts as in range.
-         */
-        const val REACH_FORGIVENESS = 0.75f
-        const val LANE_HALF_WIDTH = 1.0f
+    private fun damageOf(skill: SkillDefinition, attacker: CombatStats): Map<String, Float> {
+        val power = attacker.attackPower * skill.powerMultiplier
+        return skill.resolvedEffects.filterIsInstance<SkillEffect.Damage>()
+            .groupBy { it.damageTypeId }.mapValues { (_, parts) -> parts.sumOf { (power * it.share).toDouble() }.toFloat() }
     }
 }
 

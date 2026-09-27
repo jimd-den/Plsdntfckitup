@@ -46,6 +46,8 @@ data class SkillDefinition(
     val zone: ZoneSpec = ZoneSpec(),
     /** For [SkillDelivery.SUMMON]: what answers the call. */
     val summon: SummonSpec? = null,
+    /** "Half of this skill's physical damage is converted to fire", and the like. */
+    val conversions: List<com.stratum.core.domain.combat.DamageConversion> = emptyList(),
 ) {
     init {
         require(charges >= 1) { "skill '$id' needs at least one charge" }
