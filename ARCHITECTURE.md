@@ -20,7 +20,9 @@ wrapped in an ARPG shell, where the content is data rather than code.
         :core:designsystem            :core:domain ◄── :content:igbo
                 │                           ▲
                 └───────────────────────────┤
-                                     :engine:world ──► :engine:settlement, :engine:crowd
+                                     :engine:world ──► :engine:worldgen ──► :engine:settlement
+                                            │                 (-> :core:domain)
+                                            └──► :engine:settlement, :engine:crowd
                                             ▲                 (both -> :core:domain only)
                                      :engine:render ◄── :tools:artpreview
                                                                 │
@@ -49,6 +51,7 @@ Room, OkHttp or Compose exist.
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
 | `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
+| `:engine:worldgen` | Pure Kotlin | The staged world generator: passes over a chunk (climate, shape, surface, carvers, liquids, ores, decoration, trees, structures, towns, spawn markers), their registries, the presets built from them, and the noise they share. |
 | `:engine:settlement` | Pure Kotlin | Towns: site selection on a coarse grid, the layouts (grid, organic, fortress, camp), lot packing, and stamping buildings, roads and walls into any terrain source. |
 | `:engine:crowd` | Pure Kotlin | Crowd AI: flow fields over height steps, a spatial hash, attack tokens, roles, squads and morale. Never sees a block. |
 | `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
@@ -72,7 +75,7 @@ Room, OkHttp or Compose exist.
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
+Not by review. `:core:domain`, `:engine:world`, `:engine:worldgen`, `:engine:render`, `:engine:scene`,
 `:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
 `:legacy:domain` apply only the Kotlin
 JVM plugin, so the Android SDK is not on
@@ -120,15 +123,55 @@ with no network and no Android.
 
 ## Swapping world generation
 
-Terrain has two seams, because there are two different things people want to
-change.
+Terrain has three seams, because there are three different things people
+want to change.
 
 **Describe a different landscape.** A pack ships a `TerrainRecipe`: elevation
-noise layers, a terrace step, material strata. No code, so the AI pack forge or
-a JSON file can author one. `terraceStep` is the important knob — smooth noise
-produces a landscape of one-block steps that reads as texture and cannot be
-walked or built on, while snapping heights to plateaus gives ledges you can see
-and ground you can use.
+noise layers, a terrace step, material strata, and for the staged generators
+its climate, carvers, ores, trees and liquids. No code, so the AI pack forge
+or a JSON file can author one. `terraceStep` is the important knob — smooth
+noise produces a landscape of one-block steps that reads as texture and
+cannot be walked or built on, while snapping heights to plateaus gives
+ledges you can see and ground you can use.
+
+**Rearrange the stages.** The built-in generators other than
+`stratum:layered` and `stratum:tilemap` are pipelines of passes, in
+`:engine:worldgen`, in the order Minecraft stages a chunk: climate and
+biomes, base shape, surface and strata, carvers, liquids, ores, decoration,
+trees, structures, towns, spawn markers. The presets — `stratum:overworld`,
+`stratum:islands`, `stratum:caverns` (also `stratum:underworld`) and
+`stratum:flat` — are only lists of pass ids. A recipe that lists passes
+replaces its preset's list, so a pack reorders, drops, adds or configures a
+stage in data, and a pass registered in code is named like a built-in one:
+
+```kotlin
+StratumWorldgen.passes.register("mypack:lava_lakes") { setup -> MyLavaLakes(setup.options) }
+```
+
+Passes share a `ChunkContext` of per-column arrays (biome, blended height
+parameters, ground height) rather than recomputing or allocating per block,
+and publish services — the biome map, the height field, paths and
+clearings, planned structures — that later passes read. Every service
+answers for any column in the world without generating a chunk, which is
+the rule that keeps the world seam-free: a tunnel, a canopy or a dungeon
+that crosses a border is derived from the seed and the region or cell it
+starts in, never from which chunks were made first, and each chunk draws
+its own part. Seam tests generate the same area in several orders, and
+alone, and compare every block.
+
+Biomes are chosen by climate — two smooth fields, heat and wet, and the
+biome nearest in climate wins — and heights blend between biomes near each
+other in climate, so a border is a slope as wide as the climate takes to
+cross, not a wall. Structures are pack data too: room-and-corridor dungeons
+entered by a stair, and small jigsaw pieces joined at connectors, placed by
+biome, depth, spacing and rarity. What they mark — monster spawns, the boss
+room, loot, the entrance — comes out through `MarkedWorld`, by chunk, for
+the action RPG layer to people.
+
+Chunks must stay cheap on a phone, so cave noise is sampled on a coarse
+lattice and interpolated, as Minecraft does, and a test counts noise
+samples per chunk against a budget. Work, not time: a count cannot be
+flaky.
 
 **Replace the algorithm entirely.** Register a factory and name it in a recipe:
 
@@ -144,9 +187,13 @@ concept of biomes — a dungeon builder, a flat sandbox — does not have to inv
 them. `WorldSession` also takes a generator directly, which is how tests run on
 terrain they control.
 
-An unknown generator id is an error rather than a silent fallback. A pack asking
-for something this build does not have should say so, not quietly hand the
-player a different world.
+Towns are laid over whatever the generator built, by the settlement layer,
+unless the generator builds its own — a pipeline with the
+`stratum:settlements` pass — in which case the session leaves them alone.
+
+An unknown generator, pass or carver id is an error rather than a silent
+fallback. A pack asking for something this build does not have should say
+so, not quietly hand the player a different world.
 
 ## Importing Flame games and Tiled maps
 
