@@ -57,7 +57,10 @@ import com.stratum.feature.forge.SpriteForgeScreen
 import com.stratum.feature.forge.SpriteForgeViewModel
 import com.stratum.feature.forge.SpriteMapperScreen
 import com.stratum.feature.forge.SpriteMapperViewModel
+import com.stratum.feature.forge.ModelForgeScreen
+import com.stratum.feature.forge.ModelForgeViewModel
 import com.stratum.feature.forge.WeaponForgeScreen
+import com.stratum.feature.play.gl.AndroidImageCodec
 import com.stratum.feature.forge.WeaponForgeViewModel
 import com.stratum.feature.hero.ClassForgeScreen
 import com.stratum.feature.hero.ClassForgeViewModel
@@ -70,7 +73,7 @@ import com.stratum.feature.play.PlayViewModel
 import com.stratum.feature.play.SpriteKey
 
 /** Top-level destinations. Deliberately few: the game is the app, not a tab in it. */
-private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW }
+private enum class Destination { HOME, PLAY, TEXTURES, CLASSES, FORGE, SPRITES, POSES, WEAPONS, MAPPER, SETTINGS, STUDIO, LIBRARY, CREW, MODELS }
 
 /**
  * The app shell.
@@ -183,6 +186,17 @@ fun StratumApp(
     val contentWithSprites = remember(content, spriteSheets) {
         content.withSpriteSheets(spriteSheets)
     }
+
+    // Generated 3D models: bumped by the model forge whenever a binding or a
+    // blueprint changes. Prop models are parsed off the main thread; a world
+    // entered before they finish draws those props as sprites until next time.
+    var modelRevision by remember { mutableStateOf(0) }
+    val propModels by produceState(emptyMap<String, com.stratum.engine.scene.PropModel>(), contentWithSprites, modelRevision) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { ai.models.propModels(ai.models.withForgedModels(contentWithSprites)) }.getOrDefault(emptyMap())
+        }
+    }
+    val blueprints = remember(modelRevision) { ai.models.blueprints() }
 
     // Keyed on the chosen class: the player's art is a property of who they are
     // playing, and resolving it without that was the whole bug — every class
@@ -349,6 +363,8 @@ fun StratumApp(
                 onStudio = { destination = Destination.STUDIO },
                 onLibrary = { destination = Destination.LIBRARY },
                 importedCount = importedPacks.size,
+                onModelForge = { destination = Destination.MODELS },
+                modelCount = remember(modelRevision, destination) { ai.models.store.all().size },
                 modifier = modifier,
             )
         }
@@ -378,7 +394,7 @@ fun StratumApp(
                         spriteResolver = spriteResolver,
                         imageModel = ai.imageModel,
                         kitDirectory = forgeDirectory,
-                        kitOverlays = plugins.textureDirectories(),
+                        kitOverlays = plugins.textureDirectories() + ai.models.textureDirectory,
                         quality = graphics.chosen,
                         saveQuality = graphics::choose,
                         loadHero = { (heroClassId ?: contentWithSprites.heroClasses.firstOrNull()?.id)?.let(heroes::load) },
@@ -388,6 +404,8 @@ fun StratumApp(
                             styles.save(prompt)
                             stylePrompt = prompt
                         },
+                        propModels = propModels,
+                        blueprints = blueprints,
                     ),
                 )
                 ImmersiveMode()
@@ -811,7 +829,39 @@ fun StratumApp(
             onSave = ai.settings::save,
             onBack = { destination = Destination.HOME },
             modifier = modifier,
+            modelProviderFor = ai.settings::loadModelProvider,
+            onSaveModelProvider = ai.settings::saveModelProvider,
         )
+
+        Destination.MODELS -> {
+            val modelViewModel: ModelForgeViewModel = viewModel(
+                factory = ModelForgeViewModel.factory(
+                    generate = { brief, observer -> ai.models.generate(brief, observer) },
+                    pipeline = ai.models.pipeline,
+                    storage = ai.models.storage,
+                    propBlocks = { content.registry.all.filter { it.glyph != null } },
+                    allBlocks = { content.registry.all },
+                    providerLabel = { ai.settings.loadModelProvider().provider.displayName },
+                    isProviderConfigured = { ai.settings.isModelProviderConfigured },
+                    encodePng = AndroidImageCodec::encodePng,
+                    onContentChanged = { modelRevision++ },
+                ),
+            )
+            val referencePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+                if (uri != null) {
+                    val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                    val mime = context.contentResolver.getType(uri) ?: "image/png"
+                    if (bytes != null) modelViewModel.setReference(bytes, mime)
+                }
+            }
+            ModelForgeScreen(
+                viewModel = modelViewModel,
+                onBack = { destination = Destination.HOME },
+                onOpenSettings = { destination = Destination.SETTINGS },
+                onPickReference = { referencePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                modifier = modifier,
+            )
+        }
 
         Destination.STUDIO -> studioContent { destination = Destination.HOME }
     }

@@ -308,6 +308,27 @@ class WorldSession(
         return result
     }
 
+    /**
+     * Raises [blueprint] on the ground a few steps in front of the player,
+     * and returns how many blocks went in.
+     *
+     * Placed clear of the player, standing on the surface there, and only
+     * into air, so it can neither bury the hero nor carve away what is
+     * already built. Blocks the loaded packs do not define are skipped.
+     */
+    fun raise(blueprint: com.stratum.core.domain.content.VoxelBlueprint): Int {
+        cancelMining()
+        val reach = maxOf(blueprint.sizeX, blueprint.sizeY) / 2 + BLUEPRINT_CLEARANCE
+        val x = player.feet.x + player.facing.dx * reach
+        val y = player.feet.y + player.facing.dy * reach
+        val ground = streamingWorld.surfaceAt(x, y)
+        if (ground < 0) return 0
+        val occupied = actorCells() + setOf(player.feet, player.feet.above())
+        return blueprint.raise(streamingWorld, BlockPos(x, y, ground + 1)) { pos ->
+            pos !in occupied && streamingWorld.blockAt(pos).isAir
+        }
+    }
+
     /** Where a tap on [picked] would actually put a block, for the ghost preview. */
     fun placementPreviewFor(picked: BlockPos): BlockPos? =
         interaction.placementCellFor(picked, player.blockPos, actorCells())
@@ -1076,6 +1097,9 @@ class WorldSession(
 
     companion object {
         const val SPAWN_SEARCH_RADIUS = 12
+
+        /** Blocks of open ground left between the player and a raised blueprint. */
+        const val BLUEPRINT_CLEARANCE = 2
         const val PICKUP_RADIUS = GroundItems.PICKUP_RADIUS
         const val BASE_DROP_CHANCE = LootDrops.BASE_DROP_CHANCE
         const val INSERT_DROP_CHANCE = LootDrops.INSERT_DROP_CHANCE

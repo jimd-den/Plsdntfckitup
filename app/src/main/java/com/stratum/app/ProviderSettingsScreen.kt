@@ -1,6 +1,7 @@
 package com.stratum.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.stratum.core.data.ai.ProviderConfig
+import com.stratum.core.data.ai.model3d.ModelProvider
+import com.stratum.core.data.ai.model3d.ModelProviderConfig
+import com.stratum.core.designsystem.component.StratumChip
 import com.stratum.core.designsystem.component.ActionEmphasis
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
@@ -43,6 +47,9 @@ fun ProviderSettingsScreen(
     onSave: (ProviderConfig) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The 3D model provider's settings for a provider; null hides the section. */
+    modelProviderFor: ((ModelProvider?) -> ModelProviderConfig)? = null,
+    onSaveModelProvider: (ModelProviderConfig) -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     var apiKey by remember { mutableStateOf(initial.apiKey) }
@@ -183,5 +190,71 @@ fun ProviderSettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        if (modelProviderFor != null) {
+            Spacer(Modifier.height(Space.large))
+            ModelProviderSection(modelProviderFor, onSaveModelProvider)
+        }
+    }
+}
+
+/**
+ * The 3D provider: a separate account, because no mesh service sits behind
+ * the text and image endpoint. Each provider keeps its own key, endpoint and
+ * model, so switching to try one does not lose another.
+ */
+@Composable
+private fun ModelProviderSection(
+    load: (ModelProvider?) -> ModelProviderConfig,
+    onSave: (ModelProviderConfig) -> Unit,
+) {
+    var config by remember { mutableStateOf(load(null)) }
+    var saved by remember { mutableStateOf(false) }
+    SectionLabel("3D model provider")
+    Spacer(Modifier.height(Space.small))
+    StratumPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+            ModelProvider.entries.forEach { provider ->
+                StratumChip(provider.displayName, selected = config.provider == provider, onClick = { config = load(provider); saved = false })
+            }
+        }
+        Spacer(Modifier.height(Space.medium))
+        OutlinedTextField(
+            value = config.apiKey, onValueChange = { config = config.copy(apiKey = it); saved = false },
+            modifier = Modifier.fillMaxWidth(), label = { Text("${config.provider.displayName} API key") },
+            singleLine = true, visualTransformation = PasswordVisualTransformation(),
+        )
+        Spacer(Modifier.height(Space.medium))
+        OutlinedTextField(
+            value = config.modelId, onValueChange = { config = config.copy(modelId = it); saved = false },
+            modifier = Modifier.fillMaxWidth(), label = { Text("Model") },
+            placeholder = { Text(config.provider.defaultModel) },
+            supportingText = {
+                Text(
+                    when (config.provider) {
+                        ModelProvider.MESHY -> "Meshy's ai_model, e.g. latest. Text or picture."
+                        ModelProvider.TRIPO -> "Tripo's model_version. Text or picture."
+                        ModelProvider.FAL -> "A fal model path, e.g. fal-ai/trellis. Picture-only models get a drawn reference."
+                        ModelProvider.REPLICATE -> "owner/name, or owner/name:version for a community model."
+                    },
+                )
+            },
+            singleLine = true,
+        )
+        Spacer(Modifier.height(Space.medium))
+        OutlinedTextField(
+            value = config.baseUrl, onValueChange = { config = config.copy(baseUrl = it); saved = false },
+            modifier = Modifier.fillMaxWidth(), label = { Text("Endpoint") }, singleLine = true,
+        )
+        Spacer(Modifier.height(Space.large))
+        StratumAction(
+            label = if (saved) "Saved" else "Save 3D provider",
+            onClick = {
+                onSave(config.copy(apiKey = config.apiKey.trim(), modelId = config.modelId.trim(), baseUrl = config.baseUrl.trim()))
+                saved = true
+            },
+            emphasis = ActionEmphasis.PRIMARY,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

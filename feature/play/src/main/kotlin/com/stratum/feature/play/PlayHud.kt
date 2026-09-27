@@ -292,6 +292,19 @@ internal fun BuildTray(
             }
         }
         BlockStrip(state, world, onSelectSlot, Modifier.fillMaxWidth())
+        // Structures made in the model forge, raised whole in front of the player.
+        if (state.blueprints.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                items(state.blueprints.size) { index ->
+                    val blueprint = state.blueprints[index]
+                    StratumChip(
+                        label = "⌂ ${blueprint.name} ${blueprint.blocks}",
+                        selected = false,
+                        onClick = { state.onRaiseBlueprint(blueprint.id) },
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -202,6 +202,7 @@ fun PlayScreenContent(
                     spriteFor = state.spriteFor,
                     playerAnimation = state.playerAnimation,
                     animationFor = state.animationFor,
+                    propModels = state.propModels,
                 ),
                 modifier = Modifier.fillMaxSize(),
                 onTapBlock = onTapBlock,

@@ -116,6 +116,8 @@ data class ContentPack(
      * whatever world it is loaded into.
      */
     val structureTemplates: List<com.stratum.core.domain.world.StructureTemplate> = emptyList(),
+    /** 3D models that give props, structures, weapons and monsters a body. */
+    val models: List<ModelDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

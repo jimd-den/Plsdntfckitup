@@ -300,6 +300,8 @@ class SceneGlRenderer(
     /** Terrain from the chunk buffers already on the GPU; actor bodies streamed fresh. */
     private fun drawOpaque(frame: SceneFrame) {
         frame.terrain.forEach { draw(it, static = true) }
+        // Model props change only with the terrain, so they are kept on the GPU like it.
+        frame.models.forEach { draw(it, static = true) }
         frame.actors?.let { draw(it, static = false) }
     }
 
@@ -344,8 +346,9 @@ class SceneGlRenderer(
 
     /** Chunk batches that were remeshed or left the view are freed once they stop being drawn. */
     private fun releaseStale(frame: SceneFrame) {
-        if (staticMeshes.size == frame.terrain.size && frame.terrain.all(staticMeshes::containsKey)) return
-        val live = java.util.Collections.newSetFromMap(IdentityHashMap<MeshBatch, Boolean>()).apply { addAll(frame.terrain) }
+        val kept = frame.terrain + frame.models
+        if (staticMeshes.size == kept.size && kept.all(staticMeshes::containsKey)) return
+        val live = java.util.Collections.newSetFromMap(IdentityHashMap<MeshBatch, Boolean>()).apply { addAll(kept) }
         val stale = staticMeshes.keys.filterNot(live::contains)
         stale.forEach { key ->
             staticMeshes.remove(key)?.let { mesh ->

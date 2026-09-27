@@ -94,6 +94,7 @@ class ContentPackAssembler {
             structures = merger.merge(ContentPack::structures, StructureDefinition::id),
             units = merger.merge(ContentPack::units, UnitDefinition::id),
             agentRoles = merger.merge(ContentPack::agentRoles, com.stratum.core.domain.ai.AgentRoleDefinition::id),
+            models = merger.merge(ContentPack::models, ModelDefinition::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             itemBases = merger.merge(ContentPack::itemBases, ItemBase::id),
             uniques = merger.merge(ContentPack::uniques, UniqueDefinition::id),
@@ -182,7 +183,7 @@ internal object ContentValidation {
                 content.terrain, content.structureTemplates, content.registry::contains,
                 content.biomes.mapTo(HashSet()) { it.id }, content.enemies.mapTo(HashSet()) { it.id },
             ) +
-            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) +
+            content.passiveTree?.problems().orEmpty() + WorldPoliticsValidation.problems(content) + modelProblems(content) +
             ItemValidation.problems(content.itemCatalogue, content.inserts, content.damageTypes.mapTo(HashSet()) { it.id })
         if (problems.isNotEmpty()) throw ContentPackException(problems.joinToString("; "))
     }
@@ -203,6 +204,21 @@ internal object ContentValidation {
         map.referencedBlockIds().filterNot(known).map { "map '${map.id}' places unknown block '$it'" } +
             listOfNotNull(map.biomeId).filter { id -> biomes.none { it.id == id } }
                 .map { "map '${map.id}' belongs to unknown biome '$it'" }
+
+    /**
+     * A model dressing something nobody defined would be loaded, parsed and
+     * then never drawn, which looks exactly like a model that failed to load.
+     */
+    private fun modelProblems(content: AssembledContent): List<String> = content.models.flatMap { model ->
+        val owner = "model '${model.id}'"
+        listOfNotNull(model.blockId).filterNot(content.registry::contains).map { "$owner dresses unknown block '$it'" } +
+            listOfNotNull(model.structureId).filter { id -> content.structures.none { it.id == id } }
+                .map { "$owner raises unknown structure '$it'" } +
+            listOfNotNull(model.weaponId).filter { id -> content.weapons.none { it.id == id } }
+                .map { "$owner dresses unknown weapon '$it'" } +
+            listOfNotNull(model.enemyId).filter { id -> content.enemies.none { it.id == id } }
+                .map { "$owner dresses unknown enemy '$it'" }
+    }
 
     /** Dice that do not parse would fail the first time a player tried the check. */
     private fun tabletopProblems(content: AssembledContent): List<String> =
@@ -327,6 +343,8 @@ data class AssembledContent(
     val units: List<UnitDefinition> = emptyList(),
     /** Studio crew the packs bring; empty means the standard crew. */
     val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
+    /** 3D models the packs bring, by id; see [ModelDefinition]. */
+    val models: List<ModelDefinition> = emptyList(),
     /** The rules the loaded packs suggest, before the player changes them. */
     val suggestedRules: com.stratum.core.domain.world.WorldRules = com.stratum.core.domain.world.WorldRules(),
     /** Gear bases written in full; [weapons] join them in [itemCatalogue]. */
