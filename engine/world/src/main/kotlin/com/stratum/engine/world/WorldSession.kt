@@ -1091,6 +1091,28 @@ class WorldSession(
         return WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
     }
 
+    // ---- the build, explained, and the sandbox ------------------------------------
+
+    internal val inspector = BuildInspector(
+        content, config.rules.combat, profile, { survival.modifiers(it) }, { table.boons }, combat.statuses::of, workbench::linkedTo,
+    )
+
+    /** One of the player's numbers, every source of it, and the formula that made it; see [BuildInspector]. */
+    fun explain(query: com.stratum.core.domain.sandbox.StatQuery): com.stratum.core.domain.sandbox.StatBreakdown = inspector.explain(player, query)
+
+    /** The rules the character breaks now: from the class, the tree and what is worn. */
+    val keystones: Set<com.stratum.core.domain.combat.Keystone> get() = profile.traits(player).keystones
+
+    /** What one use of [skill] costs this character now, paid in life under a keystone that says so. */
+    fun costOf(skill: SkillDefinition): com.stratum.core.domain.actor.SkillCost =
+        com.stratum.core.domain.actor.SkillCost.of(skill, com.stratum.core.domain.combat.Keystone.LIFE_PAYS_COSTS in keystones)
+
+    /** The fought-with stats of [state] as this world resolves them: for comparing a piece of gear against the whole character. */
+    fun statsFor(state: PlayerState): CombatStats = statsWith(state, profile.traits(state).modifiers)
+
+    /** The build sandbox's tools, in a world whose rules allow them; null everywhere else. */
+    val sandbox: SandboxTools? = if (config.rules.sandbox) SandboxTools(this, combat) else null
+
     companion object {
         const val SPAWN_SEARCH_RADIUS = 12
 
