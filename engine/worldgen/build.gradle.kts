@@ -4,4 +4,6 @@ dependencies {
   api(project(":core:domain"))
   // Towns are one of the generator's passes, built by the settlement layer.
   api(project(":engine:settlement"))
+  // The built-in pack, to check the world it actually ships with.
+  testImplementation(project(":content:igbo"))
 }
