@@ -26,6 +26,10 @@ wrapped in an ARPG shell, where the content is data rather than code.
                                                                 │
                                      :engine:scene ◄────────────┘
                                    (3D: -> :core:domain only)
+                                            ▲
+                                     :engine:model  (GLB/OBJ, voxels, sprite bake)
+                                            ▲
+                                  :feature:forge, :app
 
   Importers, beside the engine rather than in it:
 
@@ -54,6 +58,7 @@ Room, OkHttp or Compose exist.
 | `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
 | `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
+| `:engine:model` | Pure Kotlin | Generated 3D models: a guarded GLB and OBJ reader, normalising to blocks, decimation for phones, voxelising into pack blocks, and a software rasteriser that bakes eight-direction sprites. |
 | `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
 | `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
 | `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
@@ -72,7 +77,7 @@ Room, OkHttp or Compose exist.
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
+Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`, `:engine:model`,
 `:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
 `:legacy:domain` apply only the Kotlin
 JVM plugin, so the Android SDK is not on
@@ -626,6 +631,86 @@ An actor is drawn from the best art it has:
 Animated sheets are drawn over the scene rather than inside it, so a character
 standing behind a wall shows through it. That is a known limitation, chosen
 because it reuses the proven sprite code rather than duplicating it on the GPU.
+
+## 3D models from AI endpoints
+
+Image models paint the world; mesh models can now build parts of it. The
+shape is the same as everything else the AI does: a port in the domain, a
+thin adapter in `:core:data`, and the real work in a pure module.
+
+**The port.** `ModelGenerationPort` is shaped like the video port, because
+every mesh provider sells models as jobs: submit, wait a minute or five,
+download. One suspend call hides that; `ModelGenerationObserver` extends the
+shared `GenerationObserver` with job progress (`ModelJobProgress`: queued,
+running, texturing, downloading, and a fraction when the provider gives
+one). The port reports its `ModelCapabilities`, so `GenerateModelUseCase` —
+which owns the prompt, because what a game needs from a mesh is a fact
+about the game — can draw a reference picture with the image model first
+when the configured mesh model only takes pictures. What comes back is
+checked by its bytes (`ModelFormat.sniff`): a 200 carrying an HTML error
+page is refused at the call that caused it.
+
+**The adapters.** `HttpModelGeneration` moves bytes for every provider;
+each provider's REST dialect is a small pure `ModelJobProtocol` that builds
+calls and reads replies, tested against recorded JSON with no network:
+Meshy (text-to-3D as a preview then a chained refine pass; image-to-3D with
+the picture inline), Tripo3D (pictures uploaded first; a nonzero `code` is
+a refusal even on HTTP 200), fal.ai's queue (submit, poll the status URL,
+fetch the response URL, find the GLB in whatever the model returned) and
+Replicate (`owner/name` or `owner/name:version`). The finished mesh is
+downloaded without the API key — it is a signed link on a storage host the
+player never configured — and capped in size.
+
+**Configuring a provider.** Settings has a *3D model provider* section: pick
+Meshy, Tripo3D, fal.ai or Replicate, paste that account's key, and
+optionally change the model id and endpoint. Each provider keeps its own
+key, endpoint and model (`ProviderSettingsStore.loadModelProvider`), so
+trying one does not lose another. Defaults: Meshy `latest`, Tripo
+`v2.5-20250123`, fal `fal-ai/trellis` (picture-only: the image model draws
+the reference), Replicate `firtoz/trellis`.
+
+**The pipeline.** `:engine:model` turns bytes into things the game uses,
+deterministically and with every length in the file checked before it is
+read (chunk sizes, buffer views, accessors, indices, node cycles) and with
+limits on file size, vertices, triangles and texture size, because the file
+came from a network and a phone has little memory. Draco and external files
+are refused by name. Then:
+
+- *normalise*: glTF is Y-up, the world Z-up; the model is turned upright,
+  centred on its cell, grounded at z = 0 and scaled to a height in blocks,
+  held to a footprint so a model that came back lying flat does not become
+  a prop thirty blocks wide;
+- *prop*: colours are sampled from the full mesh (material × texture ×
+  vertex colour, glTF's linear factors converted to display colour), then
+  vertex clustering brings it under about two thousand triangles. The result
+  is a `PropModel` of flat-coloured triangles that `SceneBuilder` emits into
+  one opaque batch per terrain revision — lit, shadowed and fogged by the
+  one lighting equation, kept on the GPU like a chunk, and drawn by both
+  backends through `SceneFrame.opaque` with no new shader;
+- *voxelise*: triangles are sampled densely into a grid, each cell taking
+  the average surface colour, and the inside is filled by flooding the
+  outside; `BlockPalette` maps each cell to the nearest plain building block
+  of the loaded packs (never lights, liquids, props or bedrock), giving a
+  `VoxelBlueprint` that `WorldSession.raise` builds in front of the player,
+  only into air;
+- *bake*: a small software rasteriser with a depth buffer draws the prop
+  from the game's camera in eight directions at one scale, lit like the
+  house style and outlined like the forged sprites. That is the fallback
+  that lets a model feed every path that takes sprites.
+
+**In the game.** Packs name models in `models` (see
+[`docs/PLUGINS.md`](docs/PLUGINS.md)); the model forge (a home tile) makes
+them on the device, keeps them in `ModelAssetStore`, and binds them — *use
+as prop* stands the model in for a prop block wherever that block is,
+*voxelise into blocks* makes a blueprint the build tray offers to raise. A
+forged binding becomes an ordinary `ModelDefinition` beside the packs' own,
+so there is one road from a definition to the renderer. Models bound to a
+monster are baked to `actor:<id>` and drawn by the existing sprite path.
+
+What is not done: plugin archives do not yet carry model files (only
+`asset:` sources resolve), structure and weapon bindings are validated but
+not drawn, raising a blueprint costs nothing, and nothing is rigged or
+animated — these are props, statues and still creatures.
 
 ## A world you cannot get stuck in
 

@@ -282,6 +282,34 @@ cartographer, bestiary, architect, steward, warlord, arbiter.
   "brief": "Write as the Order's chronicle: grim, liturgical, certain.", "requiresApproval": true }]
 ```
 
+## 3D models
+
+A pack can give its props, structures, weapons and monsters a 3D body. Each
+entry in `models` names where the model is and what it dresses; every target
+is optional, and naming one the loaded packs do not define is an error at
+load, like any other unknown id.
+
+```json
+"models": [{ "id": "yourname:idol", "source": "asset:statue_bronze_idol", "name": "Bronze idol",
+  "height": 2.5, "block": "yourname:shrine", "enemy": "yourname:guardian" }]
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `id` | required | The model's id; later packs override it like anything else. |
+| `source` | required | `asset:<id>` for a model made in the model forge on this device; otherwise a path inside the plugin such as `models/idol.glb` (reserved: plugin archives do not carry model files yet). |
+| `name` | `""` | What the player sees. |
+| `height` | `1.5` | How tall it stands, in blocks, once stood upright and grounded (at most 32). |
+| `block` | none | A prop block (one with a glyph) drawn as this model in the 3D view instead of a sprite, lit and shadowed like the terrain. |
+| `structure` | none | An outpost structure the model belongs to. Checked at load; not drawn yet. |
+| `weapon` | none | A weapon base the model belongs to. Checked at load; not drawn yet. |
+| `enemy` | none | A monster drawn with the model's baked sprite (`actor:<enemy id>`). |
+
+Models are binary glTF 2.0 (`.glb`) with their textures inside, or plain OBJ.
+They are parsed, decimated to a couple of thousand triangles, voxelised and
+baked on the device by `:engine:model`; see "3D models from AI endpoints" in
+[`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 ## Other formats
 
 Players can also install a Flame game or a folder of Tiled maps directly;
