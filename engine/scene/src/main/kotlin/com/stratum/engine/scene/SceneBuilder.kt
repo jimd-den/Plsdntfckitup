@@ -154,6 +154,8 @@ class SceneBuilder(
         highlight: com.stratum.core.domain.world.BlockPos? = null,
         /** Combat theatre in progress; see [EffectTrack]. */
         effects: List<ActiveEffect> = emptyList(),
+        /** Projectiles in flight, pulsing ground and wind-ups; see [CombatMark]. */
+        marks: List<CombatMark> = emptyList(),
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
@@ -219,6 +221,7 @@ class SceneBuilder(
         if (settings.atmosphereMotes) motes(camera, time, biome)
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
+        marks.forEach { mark(it, camera, flashes, time.elapsedSeconds) }
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
             ?.takeIf { lighting.heroLight > 0f }
@@ -695,6 +698,73 @@ class SceneBuilder(
     }
 
     /** A soft shape lying on the ground: shadow, ring or halo. */
+    /**
+     * A projectile, a zone or a telegraph, in the same glows and ground decals
+     * the combat theatre uses: a projectile is a hot point with a fading
+     * trail and a little light; a zone is a lit disc with a rim; a wind-up is
+     * its outline on the ground filling towards the moment it lands, which is
+     * what the player reads to roll out of it.
+     */
+    private fun mark(mark: CombatMark, camera: SceneCamera, lights: MutableList<PointLight>, seconds: Float) {
+        val color = (if (mark.hostile) director.direction.palette.hostile else mark.color) or Tint.OPAQUE
+        when (mark.kind) {
+            CombatMarkKind.PROJECTILE -> {
+                val body = mark.radius.coerceAtLeast(MIN_PROJECTILE_GLOW)
+                glow(camera, mark.x, mark.y, mark.z, body * 2.2f, color, PROJECTILE_OPACITY)
+                glow(camera, mark.x, mark.y, mark.z, body, HOT_CORE, PROJECTILE_OPACITY)
+                for (k in 1..PROJECTILE_TRAIL) {
+                    val back = k * TRAIL_STEP
+                    glow(camera, mark.x - mark.dirX * back, mark.y - mark.dirY * back, mark.z, body * (2f - k * 0.3f), color, PROJECTILE_OPACITY * (1f - k / (PROJECTILE_TRAIL + 1f)))
+                }
+                lights += PointLight(mark.x, mark.y, mark.z, color, PROJECTILE_LIGHT, 3f)
+            }
+            CombatMarkKind.ZONE -> {
+                val pulse = 0.94f + 0.06f * sin(seconds * 6f + mark.x + mark.y)
+                decal(mark.x, mark.y, mark.z, mark.radius * pulse, color, ZONE_FILL, Vertex.DISC)
+                decal(mark.x, mark.y, mark.z, mark.radius, color, ZONE_RIM, Vertex.RING)
+            }
+            CombatMarkKind.TELEGRAPH -> telegraph(mark, color)
+        }
+    }
+
+    /** A wind-up's outline and its fill. Cones and lanes are laid out in discs, since a decal is a round mark. */
+    private fun telegraph(mark: CombatMark, color: Long) {
+        val fill = mark.progress.coerceIn(0f, 1f)
+        when (mark.shape) {
+            MarkShape.CIRCLE -> {
+                decal(mark.x, mark.y, mark.z, mark.radius, color, TELEGRAPH_RIM, Vertex.RING)
+                decal(mark.x, mark.y, mark.z, mark.radius, color, TELEGRAPH_AREA, Vertex.DISC)
+                decal(mark.x, mark.y, mark.z, mark.radius * fill, color, TELEGRAPH_FILL, Vertex.DISC)
+            }
+            MarkShape.LANE -> {
+                val step = (mark.halfWidth * 1.5f).coerceAtLeast(MIN_MARK_STEP)
+                val count = (mark.radius / step).toInt().coerceIn(1, MAX_MARK_DISCS)
+                for (i in 0..count) {
+                    val along = mark.radius * i / count
+                    val x = mark.x + mark.dirX * along
+                    val y = mark.y + mark.dirY * along
+                    decal(x, y, mark.z, mark.halfWidth.coerceAtLeast(MIN_MARK_STEP), color, if (along <= mark.radius * fill) TELEGRAPH_FILL else TELEGRAPH_AREA, Vertex.DISC)
+                }
+            }
+            MarkShape.CONE -> {
+                val heading = kotlin.math.atan2(mark.dirY, mark.dirX)
+                val half = Math.toRadians(mark.angleDegrees / 2.0).toFloat()
+                val rings = (mark.radius / CONE_RING).toInt().coerceIn(1, MAX_MARK_DISCS / 2)
+                for (r in 1..rings) {
+                    val distance = mark.radius * r / rings
+                    val spokes = (2 * half * distance / CONE_RING).toInt().coerceIn(1, MAX_MARK_DISCS / 2)
+                    for (k in 0..spokes) {
+                        val angle = heading - half + 2 * half * k / spokes
+                        decal(
+                            mark.x + cos(angle) * distance, mark.y + sin(angle) * distance, mark.z, CONE_RING * 0.6f, color,
+                            if (distance <= mark.radius * fill) TELEGRAPH_FILL else TELEGRAPH_AREA, Vertex.DISC,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun decal(x: Float, y: Float, z: Float, radius: Float, color: Long, opacity: Float, pattern: Float) {
         if (opacity <= 0f) return
         val lift = z + DECAL_LIFT
@@ -812,6 +882,19 @@ class SceneBuilder(
         const val SPRITE_FLASH = 0.9f
 
         const val MAX_EFFECT_LIGHTS = 3
+        const val MIN_PROJECTILE_GLOW = 0.18f
+        const val PROJECTILE_OPACITY = 1.6f
+        const val PROJECTILE_TRAIL = 4
+        const val TRAIL_STEP = 0.18f
+        const val PROJECTILE_LIGHT = 0.6f
+        const val ZONE_FILL = 0.3f
+        const val ZONE_RIM = 0.85f
+        const val TELEGRAPH_RIM = 0.9f
+        const val TELEGRAPH_AREA = 0.14f
+        const val TELEGRAPH_FILL = 0.4f
+        const val MIN_MARK_STEP = 0.35f
+        const val MAX_MARK_DISCS = 40
+        const val CONE_RING = 0.8f
         const val BODY_CENTRE = 0.9f
         const val RING_EFFECT_OPACITY = 1f
         const val RING_BEADS = 20
