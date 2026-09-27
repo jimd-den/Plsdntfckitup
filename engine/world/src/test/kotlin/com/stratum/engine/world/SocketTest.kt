@@ -1,5 +1,6 @@
 package com.stratum.engine.world
 
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.SocketResolver
 import com.stratum.core.domain.item.SocketSet
@@ -102,7 +103,7 @@ class SocketTest {
     /** Arms the player with a socketed weapon and the insert to fill it. */
     private fun WorldSession.prepare(sockets: Int = 2, insertId: String = TestContent.sharpBead.id) {
         val weapon = player.equippedWeapon!!.copy(sockets = SocketSet.of(sockets))
-        player = player.copy(equippedWeapon = weapon).withInsert(insertId)
+        player = player.copy(equipment = player.equipment.with(EquipmentSlot.WEAPON, weapon)).withInsert(insertId)
     }
 
     @Test

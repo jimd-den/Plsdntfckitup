@@ -1,8 +1,11 @@
 package com.stratum.engine.world
 
 import com.stratum.core.domain.item.AffixKind
-import com.stratum.core.domain.item.AffixStat
+import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.item.ItemRarity
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.Stat
+import com.stratum.core.domain.stats.StatSheet
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -51,7 +54,7 @@ class LootRollerTest {
 
     @Test
     fun `rarity determines how many affixes an item carries`() {
-        ItemRarity.entries.forEach { rarity ->
+        ItemRarity.ordered.forEach { rarity ->
             val item = roller.craft(TestContent.club, itemLevel = 20, rarity = rarity, random = Random(7))
             assertEquals(
                 rarity.affixCount,
@@ -124,38 +127,32 @@ class LootRollerTest {
         repeat(100) { seed ->
             val item = roller.craft(TestContent.club, itemLevel = 40, rarity = ItemRarity.RELIC, random = Random(seed.toLong()))
             item.affixes.forEach { roll ->
-                val definition = TestContent.affixes.first { it.id == roll.definitionId }
-                assertTrue(
-                    roll.value >= definition.minValue && roll.value <= definition.maxValue,
-                    "${roll.name} rolled ${roll.value}, outside ${definition.minValue}..${definition.maxValue}",
-                )
+                val tier = TestContent.affixes.first { it.id == roll.definitionId }.tier(roll.tier)!!
+                roll.modifiers.zip(tier.modifiers).forEach { (rolled, range) ->
+                    assertTrue(range.admits(rolled), "${roll.name} rolled ${rolled.value}, outside ${range.min}..${range.max}")
+                }
             }
         }
     }
 
     @Test
-    fun `affixes become the stats the item grants`() {
+    fun `affixes become the modifiers the item grants`() {
         val item = roller.craft(TestContent.club, itemLevel = 20, rarity = ItemRarity.RARE, random = Random(4))
-        val stats = item.toStats()
+        val granted = item.modifiers()
 
-        val expectedAttack = item.averageDamage +
-            item.affixes.filter { it.stat == AffixStat.ATTACK_POWER }.sumOf { it.value.toDouble() }.toInt()
-        assertEquals(expectedAttack, stats.attackPower)
-
-        item.affixes.filter { it.stat == AffixStat.RESISTANCE }.forEach { affix ->
-            val type = affix.damageTypeId!!
-            assertTrue(stats.resistanceTo(type) > 0f, "resistance affix produced no resistance")
-        }
+        item.affixes.flatMap { it.modifiers }.forEach { assertTrue(it in granted, "${it.describe()} was not granted") }
+        val flatDamage = granted.filter { it.stat == Stat.DAMAGE && it.kind == ModifierKind.FLAT }.sumOf { it.value.toDouble() }.toInt()
+        val stats = StatSheet(granted).applyTo(CombatStats(attackPower = item.averageDamage))
+        assertEquals(item.averageDamage + flatDamage, stats.attackPower)
     }
 
     @Test
-    fun `mining speed affixes are reported separately from combat stats`() {
+    fun `mining speed affixes become mining speed rather than attack`() {
         val item = roller.craft(TestContent.pick, itemLevel = 20, rarity = ItemRarity.RARE, random = Random(8))
-        // Mining speed must not silently become attack power.
-        val mining = item.affixes.filter { it.stat == AffixStat.MINING_SPEED }
+        val mining = item.affixes.flatMap { it.modifiers }.filter { it.stat == Stat.MINING_SPEED }
         assertEquals(
             mining.sumOf { it.value.toDouble() }.toFloat(),
-            item.miningSpeedBonus,
+            StatSheet(item.modifiers()).increased(Stat.MINING_SPEED),
             absoluteTolerance = 1e-4f,
         )
     }

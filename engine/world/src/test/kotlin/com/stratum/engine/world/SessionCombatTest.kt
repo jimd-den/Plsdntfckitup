@@ -225,7 +225,7 @@ class SessionCombatTest {
     fun `loot is picked up by walking over it and an upgrade equips itself`() {
         val session = session()
         val weak = session.player.equippedWeapon!!.copy(minDamage = 1, maxDamage = 1)
-        session.player = session.player.copy(equippedWeapon = weak)
+        session.player = session.player.copy(equipment = session.player.equipment.with(com.stratum.core.domain.item.EquipmentSlot.WEAPON, weak))
 
         val strong = LootRoller(TestContent.weapons, TestContent.affixes)
             .craft(TestContent.greatsword, itemLevel = 30, rarity = com.stratum.core.domain.item.ItemRarity.RARE, random = kotlin.random.Random(3))
