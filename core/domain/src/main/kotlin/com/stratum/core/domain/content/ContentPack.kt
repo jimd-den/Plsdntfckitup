@@ -101,6 +101,15 @@ data class ContentPack(
     val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
     /** The studio crew this pack brings: agents that write content in its lore. */
     val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
+    /** Gear of every kind: armour, shields and foci, jewellery, and weapons written in full. */
+    val itemBases: List<com.stratum.core.domain.item.ItemBase> = emptyList(),
+    /** Named items with fixed modifiers, and the sets some of them belong to. */
+    val uniques: List<com.stratum.core.domain.item.UniqueDefinition> = emptyList(),
+    val itemSets: List<com.stratum.core.domain.item.ItemSetDefinition> = emptyList(),
+    /** Words rare items are named from. */
+    val itemNames: List<com.stratum.core.domain.item.ItemNamePool> = emptyList(),
+    /** The rungs stronger bases are grown on; the last pack naming any wins, and none means the standard ladder. */
+    val baseTiers: List<com.stratum.core.domain.item.BaseTier> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

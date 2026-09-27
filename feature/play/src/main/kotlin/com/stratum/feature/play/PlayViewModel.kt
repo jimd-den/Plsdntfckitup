@@ -505,14 +505,22 @@ class PlayViewModel(
         publish(message = describe(session.equip(instanceId)))
     }
 
+    fun unequip(slot: com.stratum.core.domain.item.EquipmentSlot) {
+        publish(message = describe(session.unequip(slot)))
+    }
+
     fun discard(instanceId: String) {
         publish(message = describe(session.discard(instanceId)))
     }
 
     private fun describe(result: EquipResult): String = when (result) {
         is EquipResult.Equipped -> "Equipped ${result.item.name}"
+        is EquipResult.Unequipped -> "Took off ${result.item.name}"
         is EquipResult.Discarded -> "Dropped ${result.item.name}"
         EquipResult.NotInBag -> "That is not in your bag"
+        is EquipResult.TooLowLevel -> "${result.item.name} needs level ${result.requiredLevel}"
+        is EquipResult.WrongSlot -> "${result.item.name} is not worn there"
+        EquipResult.NothingWorn -> "Nothing is worn there"
     }
 
     // ---- the anvil -------------------------------------------------------
@@ -1058,9 +1066,9 @@ data class PlayUiState(
 
     fun canAfford(skill: SkillDefinition): Boolean = player.resource >= skill.resourceCost
 
-    /** Everything the player could craft on or socket, equipped weapon first. */
+    /** Everything the player could craft on or socket, worn gear first. */
     val anvilItems: List<ItemInstance>
-        get() = listOfNotNull(player.equippedWeapon) + player.bag
+        get() = player.equipment.all + player.bag
 
     /**
      * The item the anvil is showing. Falls back rather than showing nothing when

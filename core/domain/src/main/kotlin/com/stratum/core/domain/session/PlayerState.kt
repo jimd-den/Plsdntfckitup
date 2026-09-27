@@ -6,8 +6,11 @@ import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.HeroClassDefinition
 import com.stratum.core.domain.difficulty.Waystone
 import com.stratum.core.domain.faction.Reputation
+import com.stratum.core.domain.item.Equipment
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
+import com.stratum.core.domain.stats.BuildFlag
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.world.BlockPos
@@ -38,7 +41,8 @@ data class PlayerState(
     val experience: Int = 0,
     /** The class's baseline, before gear and levels. */
     val baseStats: CombatStats = CombatStats(),
-    val equippedWeapon: ItemInstance? = null,
+    /** What is worn, by where it is worn. */
+    val equipment: Equipment = Equipment.EMPTY,
     /** Loot picked up but not equipped. */
     val bag: List<ItemInstance> = emptyList(),
     /**
@@ -83,6 +87,20 @@ data class PlayerState(
     val selectedBlockId: String?
         get() = hotbar.getOrNull(selectedSlot)
 
+    /** What is in the main hand. The one piece of gear most of the game asks about. */
+    val equippedWeapon: ItemInstance? get() = equipment.weapon
+
+    /**
+     * Every lasting modifier the character has: the build, and everything
+     * worn with whatever is slotted into it. The one sheet every stat is
+     * read from, so a ring's "increased damage" and a passive's stack
+     * exactly as they read.
+     */
+    fun sheet(inserts: (String) -> InsertDefinition? = { null }): StatSheet = build + equipment.modifiers(inserts)
+
+    /** The rules the character's gear breaks, for combat to read. */
+    val buildFlags: Set<BuildFlag> get() = equipment.flags
+
     /**
      * The stats combat actually uses: the class baseline, plus what levelling
      * granted, plus whatever is equipped. Computed rather than stored so
@@ -92,28 +110,31 @@ data class PlayerState(
         get() = combatStatsWith({ null })
 
     /**
-     * The same numbers, with whatever is slotted into the weapon counted in.
+     * The same numbers, with whatever is slotted into the gear counted in.
      *
      * Inserts arrive as a lookup rather than being stored on the item, so the
      * pack stays the single source of truth for what a rune is worth: rebalance
-     * a rune and every weapon carrying one rebalances with it.
+     * a rune and every item carrying one rebalances with it.
      */
     fun combatStatsWith(inserts: (String) -> InsertDefinition?, damageTypeIds: Collection<String> = emptyList()): CombatStats =
-        build.applyTo(gearedStats(inserts), damageTypeIds)
+        sheet(inserts).applyTo(armedStats(), damageTypeIds)
 
-    private fun gearedStats(inserts: (String) -> InsertDefinition?): CombatStats {
+    /**
+     * The baseline the sheet multiplies: the class and its levels, holding
+     * the weapon. The weapon's hit is a base rather than a modifier, so an
+     * "increased damage" ring scales the blade rather than adding to it.
+     */
+    private fun armedStats(): CombatStats {
         val levelled = baseStats.copy(
             maxHealth = baseStats.maxHealth + Progression.healthBonusFor(level),
             attackPower = baseStats.attackPower + Progression.attackBonusFor(level),
         )
         val weapon = equippedWeapon ?: return levelled
-        val fromWeapon = weapon.toStats(inserts)
-        val combined = levelled + fromWeapon
-        // Attack speed is a base of 1 plus bonuses; the weapon replaces the
-        // base rather than adding to it, or a fast weapon would also inherit
-        // the fists it replaced.
-        return combined.copy(
-            attackSpeed = weapon.baseAttackSpeed + fromWeapon.attackSpeed,
+        // Attack speed and reach are the weapon's own rather than added to
+        // the fists it replaced, or a fast weapon would inherit both.
+        return levelled.copy(
+            attackPower = levelled.attackPower + weapon.averageDamage,
+            attackSpeed = weapon.attackSpeed,
             attackRange = weapon.attackRange,
         )
     }
@@ -124,13 +145,13 @@ data class PlayerState(
     fun maxHealthWith(inserts: (String) -> InsertDefinition?): Int =
         combatStatsWith(inserts).maxHealth
 
-    /** The resource pool with the build's modifiers counted in. */
-    val resourceCeiling: Int get() = build.apply(Stat.MAX_RESOURCE, maxResource.toFloat()).roundToInt()
+    /** The resource pool with the build's and the gear's modifiers counted in. */
+    val resourceCeiling: Int get() = sheet().apply(Stat.MAX_RESOURCE, maxResource.toFloat()).roundToInt()
 
     /** Points earned by levelling and not yet spent on the tree. */
     val unspentPassivePoints: Int get() = (Progression.passivePointsFor(level) - passives.size).coerceAtLeast(0)
 
-    val toolTierWithGear: Int get() = maxOf(toolTier, equippedWeapon?.toolTier ?: 0)
+    val toolTierWithGear: Int get() = maxOf(toolTier, equipment.all.maxOfOrNull { it.toolTier } ?: 0)
 
     val experienceForNextLevel: Int get() = Progression.experienceForNextLevel(level)
 
@@ -147,31 +168,40 @@ data class PlayerState(
         copy(health = (health + amount).coerceAtMost(maxHealthWithGear))
 
     /**
-     * Equips an item, moving whatever was held into the bag rather than
-     * destroying it, and tops health up to the new maximum so a health affix is
-     * felt immediately.
+     * Equips an item in [into], or wherever it goes, moving whatever it
+     * displaced into the bag rather than destroying it -- both hands' worth,
+     * when a two-handed weapon goes on -- and clamps health to the new
+     * maximum. Returns this unchanged when the item cannot be worn there.
      */
-    fun equipping(item: ItemInstance): PlayerState {
-        val previous = equippedWeapon
+    fun equipping(item: ItemInstance, into: EquipmentSlot? = null): PlayerState {
+        val change = equipment.equipping(item, into) ?: return this
         val updated = copy(
-            equippedWeapon = item,
-            bag = (bag - item) + listOfNotNull(previous),
+            equipment = change.equipment,
+            bag = bag.filterNot { it.instanceId == item.instanceId } + change.removed,
         )
+        return updated.copy(health = health.coerceAtMost(updated.maxHealthWithGear))
+    }
+
+    /** Takes off whatever is worn in [slot] and bags it. */
+    fun unequipping(slot: EquipmentSlot): PlayerState {
+        val change = equipment.removing(slot)
+        val updated = copy(equipment = change.equipment, bag = bag + change.removed)
         return updated.copy(health = health.coerceAtMost(updated.maxHealthWithGear))
     }
 
     fun collecting(item: ItemInstance): PlayerState = copy(bag = bag + item)
 
     /** Replaces an item wherever it is held, so slotting edits the thing in hand. */
-    fun replacing(item: ItemInstance): PlayerState = when {
-        equippedWeapon?.instanceId == item.instanceId -> copy(equippedWeapon = item)
-        else -> copy(bag = bag.map { if (it.instanceId == item.instanceId) item else it })
-    }
+    fun replacing(item: ItemInstance): PlayerState =
+        equipment.replacing(item)?.let { copy(equipment = it) }
+            ?: copy(bag = bag.map { if (it.instanceId == item.instanceId) item else it })
 
     /** The item with this id, equipped or bagged. */
     fun itemById(instanceId: String): ItemInstance? =
-        equippedWeapon?.takeIf { it.instanceId == instanceId }
-            ?: bag.firstOrNull { it.instanceId == instanceId }
+        equipment.itemById(instanceId) ?: bag.firstOrNull { it.instanceId == instanceId }
+
+    /** Whether the character is experienced enough to wear [item]. */
+    fun canWear(item: ItemInstance): Boolean = level >= item.requiredLevel
 
     fun currencyCount(currencyId: String): Int = currency[currencyId] ?: 0
 
@@ -195,10 +225,21 @@ data class PlayerState(
         )
     }
 
-    /** True when the item beats what is held on raw damage. */
+    /**
+     * True when picking [item] up should put it straight on: it fills a place
+     * nothing is worn, or it is a weapon that hits harder than the one in hand.
+     * Anything subtler than that is a decision, and decisions belong in the
+     * bag. Never true for something the character cannot wear yet, or for a
+     * two-handed weapon that would take a shield off to get there.
+     */
     fun isUpgrade(item: ItemInstance): Boolean {
-        val current = equippedWeapon ?: return true
-        return item.toStats().attackPower > current.toStats().attackPower
+        if (!canWear(item)) return false
+        val slot = equipment.targetFor(item)
+        val current = equipment[slot] ?: return !(item.twoHanded && equipment[EquipmentSlot.OFFHAND] != null) &&
+            !(slot == EquipmentSlot.OFFHAND && equippedWeapon?.twoHanded == true)
+        if (!item.isWeapon) return false
+        if (item.twoHanded && equipment[EquipmentSlot.OFFHAND] != null) return false
+        return item.averageDamage > current.averageDamage
     }
 
     val isAlive: Boolean get() = health > 0

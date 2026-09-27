@@ -84,7 +84,7 @@ internal class Workbench(private val content: AssembledContent, private val craf
      */
     fun tuned(player: PlayerState, skill: SkillDefinition): SkillDefinition {
         val supports = linkedTo(player, skill.id)
-        val tuned = StatSheet(player.build.modifiers + supports.flatMap { it.modifiers }).tune(skill)
+        val tuned = StatSheet(player.sheet().modifiers + supports.flatMap { it.modifiers }).tune(skill)
         val conversion = supports.lastOrNull { it.convertsToDamageTypeId != null }?.convertsToDamageTypeId
         return if (conversion != null) tuned.copy(damageTypeId = conversion) else tuned
     }

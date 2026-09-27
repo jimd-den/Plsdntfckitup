@@ -7,17 +7,11 @@ import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.actor.SkillShape
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.combat.DamageTypeDefinition
-import com.stratum.core.domain.item.AffixDefinition
-import com.stratum.core.domain.item.AffixKind
-import com.stratum.core.domain.item.AffixStat
-import com.stratum.core.domain.item.EquipmentSlot
-import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
-import com.stratum.core.domain.item.WeaponBase
 import kotlinx.serialization.Serializable
 
-// The fight half of a pack: damage, stats, gear, monsters and powers.
+// The fight half of a pack: damage, stats, monsters and powers. Gear is in ItemSchema.
 
 private val DAMAGE = DamageTypeDefinition(id = "", name = "")
 private val STATS = CombatStats()
@@ -47,90 +41,6 @@ internal data class StatsSchema(
 
     companion object {
         fun of(s: CombatStats) = StatsSchema(s.maxHealth, s.attackPower, s.armour, s.critChance, s.critMultiplier, s.attackSpeed, s.attackRange, s.resistances, s.lifeSteal)
-    }
-}
-
-private val WEAPON = WeaponBase(id = "", name = "", damageTypeId = "")
-
-@Serializable
-internal data class WeaponSchema(
-    val id: String,
-    val name: String,
-    val description: String = "",
-    val slot: String = SchemaValues.name(WEAPON.slot),
-    val minDamage: Int = WEAPON.minDamage,
-    val maxDamage: Int = WEAPON.maxDamage,
-    val attackSpeed: Float = WEAPON.attackSpeed,
-    val attackRange: Int = WEAPON.attackRange,
-    val damageType: String,
-    val toolTier: Int = WEAPON.toolTier,
-    val armour: Int = WEAPON.armour,
-    val glyph: String = WEAPON.glyph,
-    val minItemLevel: Int = WEAPON.minItemLevel,
-    val weight: Int = WEAPON.weight,
-) {
-    fun toDomain() = WeaponBase(
-        id, name, description, SchemaValues.enum<EquipmentSlot>(slot, "weapon '$id' slot"), minDamage, maxDamage, attackSpeed,
-        attackRange, damageType, toolTier, armour, glyph, minItemLevel, weight,
-    )
-
-    companion object {
-        fun of(w: WeaponBase) = WeaponSchema(
-            w.id, w.name, w.description, SchemaValues.name(w.slot), w.minDamage, w.maxDamage, w.attackSpeed, w.attackRange,
-            w.damageTypeId, w.toolTier, w.armour, w.glyph, w.minItemLevel, w.weight,
-        )
-    }
-}
-
-@Serializable
-internal data class AffixSchema(
-    val id: String,
-    val name: String,
-    val kind: String,
-    val stat: String,
-    val min: Float,
-    val max: Float,
-    val damageType: String? = null,
-    val minItemLevel: Int = 1,
-    val weight: Int = 100,
-) {
-    fun toDomain() = AffixDefinition(
-        id, name, SchemaValues.enum<AffixKind>(kind, "affix '$id' kind"), SchemaValues.enum<AffixStat>(stat, "affix '$id' stat"),
-        min, max, damageType, minItemLevel, weight,
-    )
-
-    companion object {
-        fun of(a: AffixDefinition) = AffixSchema(a.id, a.name, SchemaValues.name(a.kind), SchemaValues.name(a.stat), a.minValue, a.maxValue, a.damageTypeId, a.minItemLevel, a.weight)
-    }
-}
-
-private val INSERT = InsertDefinition(id = "", name = "", stat = AffixStat.ATTACK_POWER, value = 0f)
-
-@Serializable
-internal data class InsertSchema(
-    val id: String,
-    val name: String,
-    val description: String = "",
-    val stat: String,
-    val value: Float,
-    val damageType: String? = null,
-    val convertsDamageType: Boolean = INSERT.convertsDamageType,
-    val tier: Int = INSERT.tier,
-    val glyph: String = INSERT.glyph,
-    val color: String = SchemaValues.color(INSERT.color),
-    val minItemLevel: Int = INSERT.minItemLevel,
-    val weight: Int = INSERT.weight,
-) {
-    fun toDomain() = InsertDefinition(
-        id, name, description, SchemaValues.enum<AffixStat>(stat, "insert '$id' stat"), value, damageType, convertsDamageType, tier,
-        glyph, SchemaValues.color(color, "insert '$id' color"), minItemLevel, weight,
-    )
-
-    companion object {
-        fun of(i: InsertDefinition) = InsertSchema(
-            i.id, i.name, i.description, SchemaValues.name(i.stat), i.value, i.damageTypeId, i.convertsDamageType, i.tier, i.glyph,
-            SchemaValues.color(i.color), i.minItemLevel, i.weight,
-        )
     }
 }
 

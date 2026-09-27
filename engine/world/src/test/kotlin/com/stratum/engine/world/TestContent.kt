@@ -116,19 +116,19 @@ object TestContent {
         weight = 100,
     )
 
-    val lateAffix = AffixDefinition(
+    val lateAffix = AffixDefinition.legacy(
         "test:of_depths", "of Depths", AffixKind.SUFFIX, AffixStat.MAX_HEALTH,
         40f, 90f, minItemLevel = 20,
     )
 
     val affixes = listOf(
-        AffixDefinition("test:sharp", "Sharp", AffixKind.PREFIX, AffixStat.ATTACK_POWER, 2f, 8f),
-        AffixDefinition("test:heavy", "Heavy", AffixKind.PREFIX, AffixStat.MAX_HEALTH, 5f, 20f),
-        AffixDefinition("test:keen", "Keen", AffixKind.PREFIX, AffixStat.CRIT_CHANCE, 0.02f, 0.08f),
-        AffixDefinition("test:pitted", "Pitted", AffixKind.PREFIX, AffixStat.MINING_SPEED, 0.1f, 0.5f),
-        AffixDefinition("test:plated", "Plated", AffixKind.PREFIX, AffixStat.ARMOUR, 1f, 6f),
-        AffixDefinition("test:of_embers", "of Embers", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.1f, 0.3f, damageTypeId = fire.id),
-        AffixDefinition("test:of_blood", "of Blood", AffixKind.SUFFIX, AffixStat.LIFE_STEAL, 0.02f, 0.1f),
+        AffixDefinition.legacy("test:sharp", "Sharp", AffixKind.PREFIX, AffixStat.ATTACK_POWER, 2f, 8f),
+        AffixDefinition.legacy("test:heavy", "Heavy", AffixKind.PREFIX, AffixStat.MAX_HEALTH, 5f, 20f),
+        AffixDefinition.legacy("test:keen", "Keen", AffixKind.PREFIX, AffixStat.CRIT_CHANCE, 0.02f, 0.08f),
+        AffixDefinition.legacy("test:pitted", "Pitted", AffixKind.PREFIX, AffixStat.MINING_SPEED, 0.1f, 0.5f),
+        AffixDefinition.legacy("test:plated", "Plated", AffixKind.PREFIX, AffixStat.ARMOUR, 1f, 6f),
+        AffixDefinition.legacy("test:of_embers", "of Embers", AffixKind.SUFFIX, AffixStat.RESISTANCE, 0.1f, 0.3f, damageTypeId = fire.id),
+        AffixDefinition.legacy("test:of_blood", "of Blood", AffixKind.SUFFIX, AffixStat.LIFE_STEAL, 0.02f, 0.1f),
         lateAffix,
     )
 
@@ -137,24 +137,20 @@ object TestContent {
     val sharpBead = InsertDefinition(
         id = "test:sharp_bead",
         name = "Sharp Bead",
-        stat = AffixStat.ATTACK_POWER,
-        value = 7f,
+        modifiers = listOf(AffixStat.ATTACK_POWER.modifier(7f)),
     )
 
     val emberShard = InsertDefinition(
         id = "test:ember_shard",
         name = "Ember Shard",
-        stat = AffixStat.ATTACK_POWER,
-        value = 3f,
-        damageTypeId = fire.id,
-        convertsDamageType = true,
+        modifiers = listOf(AffixStat.ATTACK_POWER.modifier(3f)),
+        convertsToDamageTypeId = fire.id,
     )
 
     val deepBead = InsertDefinition(
         id = "test:deep_bead",
         name = "Deep Bead",
-        stat = AffixStat.MAX_HEALTH,
-        value = 30f,
+        modifiers = listOf(AffixStat.MAX_HEALTH.modifier(30f)),
         minItemLevel = 20,
     )
 

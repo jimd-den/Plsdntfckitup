@@ -2,6 +2,8 @@ package com.stratum.core.domain.session
 
 import com.stratum.core.domain.difficulty.Waystone
 import com.stratum.core.domain.faction.Reputation
+import com.stratum.core.domain.item.Equipment
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.ItemInstance
 
 /**
@@ -18,7 +20,7 @@ data class HeroSave(
     val level: Int = 1,
     val experience: Int = 0,
     val passives: Set<String> = emptySet(),
-    val equippedWeapon: ItemInstance? = null,
+    val equipment: Equipment = Equipment.EMPTY,
     val bag: List<ItemInstance> = emptyList(),
     val insertBag: Map<String, Int> = emptyMap(),
     /** Crafting currency by id. */
@@ -35,6 +37,21 @@ data class HeroSave(
     /** Epoch millis, for sorting a roster. */
     val savedAt: Long = 0L,
 ) {
+    /** What is in the main hand, for the parts of the game that only ask about that. */
+    val equippedWeapon: ItemInstance? get() = equipment.weapon
+
+    /**
+     * The saved gear, with [player]'s starting weapon in hand when the save
+     * held none -- unless that weapon needs both hands and the saved off hand
+     * is full, since equipping it would silently take the shield off.
+     */
+    private fun keepingStarterWeapon(player: PlayerState): Equipment {
+        val starter = player.equippedWeapon ?: return equipment
+        if (equipment.weapon != null) return equipment
+        if (starter.twoHanded && equipment[EquipmentSlot.OFFHAND] != null) return equipment
+        return equipment.with(EquipmentSlot.WEAPON, starter)
+    }
+
     /**
      * [player] -- freshly spawned in a new world -- carrying this hero. The
      * starting weapon is kept only when the save held none.
@@ -43,7 +60,7 @@ data class HeroSave(
         level = level,
         experience = experience,
         passives = passives,
-        equippedWeapon = equippedWeapon ?: player.equippedWeapon,
+        equipment = keepingStarterWeapon(player),
         bag = bag,
         insertBag = insertBag,
         currency = currency,
@@ -61,7 +78,7 @@ data class HeroSave(
             level = player.level,
             experience = player.experience,
             passives = player.passives,
-            equippedWeapon = player.equippedWeapon,
+            equipment = player.equipment,
             bag = player.bag,
             insertBag = player.insertBag,
             currency = player.currency,

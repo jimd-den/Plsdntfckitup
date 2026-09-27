@@ -37,9 +37,10 @@ import com.stratum.core.designsystem.theme.Cut
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.designsystem.theme.safeContent
-import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
+import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.world.World
 import kotlin.math.roundToInt
 
@@ -59,6 +60,7 @@ fun SatchelOverlay(
     onOpenAnvil: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onUnequip: (EquipmentSlot) -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     val equipped = state.player.equippedWeapon
@@ -102,6 +104,11 @@ fun SatchelOverlay(
             EquippedPanel(state = state, equipped = equipped)
 
             Spacer(Modifier.height(Space.medium))
+            SectionLabel("Worn")
+            Spacer(Modifier.height(Space.small))
+            WornList(state = state, onUnequip = onUnequip)
+
+            Spacer(Modifier.height(Space.medium))
             StratumDivider()
             Spacer(Modifier.height(Space.medium))
 
@@ -109,7 +116,6 @@ fun SatchelOverlay(
             Spacer(Modifier.height(Space.small))
             BagList(
                 state = state,
-                equipped = equipped,
                 onEquip = onEquip,
                 onDiscard = onDiscard,
             )
@@ -142,7 +148,7 @@ private fun EquippedPanel(state: PlayUiState, equipped: ItemInstance?) {
         color = Color(state.rarityColor(equipped)),
     )
     Text(
-        text = "${equipped.minDamage}–${equipped.maxDamage} damage · item level ${equipped.itemLevel}" +
+        text = "${equipped.baseLine} · item level ${equipped.itemLevel}" +
             if (equipped.socketCount > 0) " · ${equipped.sockets.used}/${equipped.socketCount} sockets" else "",
         style = MaterialTheme.typography.labelSmall,
         color = colors.inkMuted,
@@ -181,10 +187,36 @@ private fun EquippedPanel(state: PlayUiState, equipped: ItemInstance?) {
  * The bag. Each row carries its own compare line and its own two actions, so
  * nothing needs a long press or a second screen to act on.
  */
+/** Every place gear is worn, with what is there and a way to take it off. */
+@Composable
+private fun WornList(state: PlayUiState, onUnequip: (EquipmentSlot) -> Unit) {
+    val colors = StratumTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(Space.tight)) {
+        EquipmentSlot.entries.forEach { slot ->
+            val item = state.player.equipment[slot]
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.small),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = slot.label, style = MaterialTheme.typography.labelSmall, color = colors.inkMuted, modifier = Modifier.weight(0.35f))
+                Text(
+                    text = item?.let { "${it.glyph} ${it.name}" } ?: "—",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = item?.let { Color(state.rarityColor(it)) } ?: colors.inkMuted,
+                    modifier = Modifier.weight(0.65f),
+                )
+                if (item != null) {
+                    StratumAction(label = "Off", onClick = { onUnequip(slot) }, emphasis = ActionEmphasis.QUIET)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun BagList(
     state: PlayUiState,
-    equipped: ItemInstance?,
     onEquip: (String) -> Unit,
     onDiscard: (String) -> Unit,
 ) {
@@ -217,7 +249,7 @@ private fun BagList(
                         color = Color(state.rarityColor(item)),
                     )
                     Text(
-                        text = compareLine(item, equipped, state::insertOrNull),
+                        text = compareLine(state.player, item, state::insertOrNull),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.inkMuted,
                     )
@@ -238,21 +270,21 @@ private fun BagList(
 }
 
 /**
- * How a bagged item stacks up against what is held.
+ * How the character would change wearing a bagged item in place of whatever
+ * it would replace -- the whole character, so a ring's "increased damage"
+ * shows as the damage it really adds.
  *
  * Only the lines that actually moved are printed: a list of six stats where five
  * read "0" is a list the player learns to skip.
  */
 private fun compareLine(
+    player: PlayerState,
     item: ItemInstance,
-    equipped: ItemInstance?,
     inserts: (String) -> InsertDefinition?,
 ): String {
-    val mine = item.toStats(inserts)
-    val theirs = equipped?.toStats(inserts) ?: CombatStats(
-        maxHealth = 0, attackPower = 0, armour = 0,
-        critChance = 0f, critMultiplier = 0f, attackSpeed = 0f, attackRange = 0,
-    )
+    if (!player.canWear(item)) return "${item.slot.name.lowercase()} · needs level ${item.requiredLevel}"
+    val theirs = player.combatStatsWith(inserts)
+    val mine = player.collecting(item).equipping(item).combatStatsWith(inserts)
 
     val parts = buildList {
         delta("attack", mine.attackPower - theirs.attackPower)?.let(::add)
@@ -262,7 +294,7 @@ private fun compareLine(
         delta("crit", crit, suffix = "%")?.let(::add)
         if (item.socketCount > 0) add("${item.socketCount} sockets")
     }
-    return if (parts.isEmpty()) "Same as what you hold" else parts.joinToString(" · ")
+    return (listOf(item.slot.name.lowercase()) + parts.ifEmpty { listOf("same as what you wear") }).joinToString(" · ")
 }
 
 private fun delta(label: String, amount: Int, suffix: String = ""): String? =

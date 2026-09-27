@@ -22,7 +22,7 @@ object PromptComposer {
 
     /** Sections whose ids other sections point at, listed so agents reference what exists instead of inventing it. */
     val referenced = listOf(
-        "blocks", "biomes", "factions", "enemies", "damageTypes", "skills", "weapons",
+        "blocks", "biomes", "factions", "enemies", "damageTypes", "skills", "weapons", "itemBases", "itemSets",
         "consumables", "needs", "resources", "structures", "units",
     )
 

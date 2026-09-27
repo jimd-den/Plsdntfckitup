@@ -13,6 +13,7 @@ import com.stratum.core.domain.crafting.CurrencyDefinition
 import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.difficulty.Difficulty
 import com.stratum.core.domain.difficulty.Waystone
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
@@ -107,7 +108,7 @@ class WorldSession(
 
     /** Knockback, so a hit moves the thing it lands on. */
     private val impacts = ImpactField(streamingWorld)
-    private val lootRoller = LootRoller(content.weapons, content.affixes, content.inserts)
+    private val lootRoller = LootRoller.of(content)
     private val drops = LootDrops(content, lootRoller, config.seaLevel, difficulty)
     private val workbench = Workbench(content, ItemCrafter(lootRoller))
     private val ground = GroundItems()
@@ -268,7 +269,7 @@ class WorldSession(
 
     /** Applies mining effort to a block, continuing a dig already under way on it. */
     fun mine(target: BlockPos, deltaSeconds: Float): MineResult {
-        val request = MineRequest(player.blockPos, target, player.toolTier, deltaSeconds, mining.effortOn(target))
+        val request = MineRequest(player.blockPos, target, player.toolTier, deltaSeconds * player.sheet(::insertOrNull).multiplier(Stat.MINING_SPEED), mining.effortOn(target))
         val result = interaction.mine(request)
         when (result) {
             is MineResult.InProgress -> mining.record(result.progress)
@@ -368,7 +369,7 @@ class WorldSession(
         // reach before the monsters around them take their swing.
         clock.advance(deltaSeconds)
         player = survival.advance(player, deltaSeconds, clock, currentBiome)
-        val pace = (player.build + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED)
+        val pace = (player.sheet(::insertOrNull) + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED)
         player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
         streamingWorld.focusOn(player.blockPos)
 
@@ -458,9 +459,16 @@ class WorldSession(
 
     // ---- the satchel and the anvil ------------------------------------------
 
-    /** Equips something from the bag; what was held goes back into it. */
-    fun equip(instanceId: String): EquipResult {
-        val (updated, result) = gear.equip(player, instanceId)
+    /** Equips something from the bag, in [slot] or wherever it goes; what was worn there goes back into it. */
+    fun equip(instanceId: String, slot: EquipmentSlot? = null): EquipResult {
+        val (updated, result) = gear.equip(player, instanceId, slot)
+        player = updated
+        return result
+    }
+
+    /** Takes off whatever is worn in [slot], into the bag. */
+    fun unequip(slot: EquipmentSlot): EquipResult {
+        val (updated, result) = gear.unequip(player, slot)
         player = updated
         return result
     }
@@ -756,7 +764,7 @@ class WorldSession(
     }
 
     /** The build and the world's rewards together: what a kill here pays this character. */
-    private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers + ruleRewards
+    private val earnings: StatSheet get() = player.sheet(::insertOrNull) + difficulty.rewards.modifiers + ruleRewards
 
     /** The world rules' loot and experience dials, as the modifiers they are. */
     private val ruleRewards = listOfNotNull(
@@ -996,8 +1004,8 @@ class WorldSession(
      * Common, so the first upgrade is an upgrade.
      */
     private fun armed(player: PlayerState): PlayerState {
-        val base = heroClass?.startingWeaponId?.let(content::weapon)
-            ?: content.weapons.minByOrNull { it.minItemLevel }
+        val base = heroClass?.startingWeaponId?.let(content::itemBase)
+            ?: content.itemCatalogue.bases.filter { it.weapon != null && it.family == null }.minByOrNull { it.minItemLevel }
             ?: return player
         return player.equipping(lootRoller.craft(base, itemLevel = 1, rarity = ItemRarity.COMMON, random = random))
     }
