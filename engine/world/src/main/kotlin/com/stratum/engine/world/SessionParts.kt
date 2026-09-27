@@ -81,6 +81,7 @@ internal class SessionParts(
         combat, CrowdControl(world, director, reachOf = { encounters.fightingReach(it) }), LootDrops(content, lootRoller, config.seaLevel, difficulty),
         ground, politics, progression, survival, flashes, impacts, random,
     )
+    val inspector = BuildInspector(content, config.rules.combat, profile, survivalRules::modifiers, { table.boons }, combat.statuses::of, workbench::linkedTo)
     val fight = FightSystem(state, content, combat, profile, gear, encounters, politics, animator) { motion.isInvulnerable }
 
     /** The region under a column: the generator's answer, else the packs' first, else a placeholder. */

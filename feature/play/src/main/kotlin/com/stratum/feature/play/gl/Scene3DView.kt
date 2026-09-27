@@ -84,6 +84,10 @@ data class Scene3DInput(
     val quality: QualityTier? = null,
     /** Prop blocks drawn as 3D models instead of sprites, by block id. */
     val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Things in flight, burning ground and wind-ups, drawn as the 2D canvas draws them. */
+    val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
+    val zones: List<com.stratum.engine.world.Zone> = emptyList(),
+    val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
 )
 
 /**
@@ -153,6 +157,7 @@ fun Scene3DView(
             ghostsAffordable = input.buildAffordable,
             highlight = input.highlight,
             effects = theatre.track.active,
+            marks = combatMarksOf(input.projectiles, input.zones, input.telegraphs),
         )
         renderer.submit(frame)
         surface?.requestRender()

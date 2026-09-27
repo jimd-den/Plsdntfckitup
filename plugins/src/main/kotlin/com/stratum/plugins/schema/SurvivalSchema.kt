@@ -102,17 +102,18 @@ internal data class RulesSchema(
     val experienceMultiplier: Float = RULES.experienceMultiplier,
     val deathPenalty: Float = RULES.deathPenalty,
     val combat: CombatRulesSchema? = null,
+    val sandbox: Boolean = RULES.sandbox,
 ) {
     fun toDomain() = WorldRules(
         SchemaValues.enum<SurvivalMode>(survival, "rules survival"), townDensity, startInTown, monsterDensity, raids, dayLengthMinutes,
-        lootMultiplier, experienceMultiplier, deathPenalty, combat?.toDomain() ?: com.stratum.core.domain.combat.CombatRules(),
+        lootMultiplier, experienceMultiplier, deathPenalty, combat?.toDomain() ?: com.stratum.core.domain.combat.CombatRules(), sandbox,
     )
 
     companion object {
         fun of(r: WorldRules) = RulesSchema(
             SchemaValues.name(r.survival), r.townDensity, r.startInTown, r.monsterDensity, r.raids, r.dayLengthMinutes,
             r.lootMultiplier, r.experienceMultiplier, r.deathPenalty,
-            r.combat.takeIf { it != com.stratum.core.domain.combat.CombatRules() }?.let(CombatRulesSchema::of),
+            r.combat.takeIf { it != com.stratum.core.domain.combat.CombatRules() }?.let(CombatRulesSchema::of), r.sandbox,
         )
     }
 }

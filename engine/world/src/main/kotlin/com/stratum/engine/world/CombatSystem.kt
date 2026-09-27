@@ -3,12 +3,16 @@ package com.stratum.engine.world
 import com.stratum.core.domain.actor.EffectTarget
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.PendingCast
+import com.stratum.core.domain.actor.SkillCost
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.actor.SkillDelivery
 import com.stratum.core.domain.actor.SkillEffect
 import com.stratum.core.domain.actor.SkillTags
 import com.stratum.core.domain.combat.CombatRules
+import com.stratum.core.domain.combat.DamageDealt
 import com.stratum.core.domain.combat.DamageResult
+import com.stratum.core.domain.combat.DamageSource
+import com.stratum.core.domain.combat.DamageSourceKind
 import com.stratum.core.domain.combat.HitAttacker
 import com.stratum.core.domain.combat.HitDefender
 import com.stratum.core.domain.combat.HitResolver
@@ -22,6 +26,7 @@ import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.status.StatusApplication
+import com.stratum.core.domain.status.DotTick
 import com.stratum.core.domain.status.StatusBehaviour
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.World
@@ -73,6 +78,13 @@ internal class CombatSystem(
     private var lastLifeFraction = 1f
     private var dotTaken = 0
 
+    /**
+     * Told about every piece of damage the player's side deals, as it lands:
+     * each hit and each tick of damage over time, with what dealt it. For a
+     * damage meter or a log; combat does not care whether anyone listens.
+     */
+    var onDealt: ((DamageDealt) -> Unit)? = null
+
     // ---- the player acting ---------------------------------------------------
 
     fun playerStunned(player: PlayerState): Boolean =
@@ -100,15 +112,12 @@ internal class CombatSystem(
         if (playerStunned(player)) return AttackReport.Stunned
         if (pendingPlayer != null) return AttackReport.NotReady
         if (!player.cooldowns.isReady(skill)) return AttackReport.OnCooldown
-        val lifePays = profile.traits(player).has(Keystone.LIFE_PAYS_COSTS)
-        val resourceCost = if (lifePays) 0 else skill.resourceCost
-        val lifeCost = skill.lifeCost + if (lifePays) skill.resourceCost else 0
-        if (player.resource < resourceCost) return AttackReport.NotEnoughResource
-        if (lifeCost > 0 && player.health <= lifeCost) return AttackReport.NotEnoughResource
+        val cost = SkillCost.of(skill, profile.traits(player).has(Keystone.LIFE_PAYS_COSTS))
+        if (!cost.affordable(player.resource, player.health)) return AttackReport.NotEnoughResource
         // Paid whether or not anything is standing there, so a skill cannot be spammed to scout for free.
         battle.player = player.copy(
-            resource = player.resource - resourceCost,
-            health = player.health - lifeCost,
+            resource = player.resource - cost.resource,
+            health = player.health - cost.life,
             cooldowns = player.cooldowns.started(skill),
         )
         triggers.beginAction()
@@ -389,6 +398,7 @@ internal class CombatSystem(
         val enemyHit = EnemyHit(enemyId, struck, result)
         battle.hits += enemyHit
         showHit(enemyHit, from)
+        onDealt?.invoke(dealt(battle, casterId, skill, enemyId, result))
         if (result.wasEvaded || (result.wasBlocked && result.amount == 0)) return
         if (casterId == PLAYER) leech(battle, result.healedAttacker)
         result.inflicted.forEach { applyStatus(battle, enemyId, it) }
@@ -549,7 +559,9 @@ internal class CombatSystem(
         statuses.advance(deltaSeconds).forEach { (actorId, ticks) ->
             val defender = if (actorId == PLAYER) profile.defender(battle.player, statuses.of(PLAYER))
             else battle.enemy(actorId)?.takeIf { it.isAlive }?.let(::monsterDefender) ?: return@forEach
-            val raw = ticks.sumOf { HitResolver.dot(it.amount, it.damageTypeId, defender, rules, book).toDouble() }.toFloat()
+            val resolved = ticks.map { it to HitResolver.dot(it.amount, it.damageTypeId, defender, rules, book) }
+            val raw = resolved.sumOf { it.second.toDouble() }.toFloat()
+            if (actorId != PLAYER) onDealt?.let { listener -> resolved.forEach { (tick, amount) -> ailmentDealt(battle, actorId, tick, amount)?.let(listener) } }
             val carried = (dotCarry[actorId] ?: 0f) + raw
             val whole = carried.toInt()
             dotCarry[actorId] = carried - whole
@@ -830,6 +842,32 @@ internal class CombatSystem(
         slain = battle.enemies.filter { !it.isAlive },
         skill = skill,
     )
+
+    /** One hit of the player's side, named for the meter: the swing, a skill, a triggered cast, or a minion's blow. */
+    private fun dealt(battle: Battlefield, casterId: String, skill: SkillDefinition, targetId: String, result: DamageResult): DamageDealt {
+        val source = when {
+            casterId != PLAYER -> {
+                val minion = battle.enemy(casterId)
+                val definition = minion?.let { director.definition(it.definitionId) }
+                DamageSource(DamageSourceKind.MINION, definition?.id ?: casterId, definition?.name ?: minion?.name ?: casterId)
+            }
+            skill.id == BASIC_ATTACK_ID -> DamageSource(DamageSourceKind.ATTACK, skill.id, skill.name)
+            SkillTags.TRIGGERED in skill.tags -> DamageSource(DamageSourceKind.TRIGGER, skill.id, skill.name)
+            else -> DamageSource(DamageSourceKind.SKILL, skill.id, skill.name)
+        }
+        return DamageDealt(
+            source, targetId, result.amount.toFloat(), result.packets.mapValues { it.value.toFloat() },
+            critical = result.wasCritical, evaded = result.wasEvaded, blocked = result.wasBlocked,
+        )
+    }
+
+    /** A tick of damage over time the player's side inflicted, or null for one somebody else did. */
+    private fun ailmentDealt(battle: Battlefield, targetId: String, tick: DotTick, amount: Float): DamageDealt? {
+        val source = tick.sourceId ?: return null
+        if (source != PLAYER && battle.enemy(source)?.factionId != Factions.PLAYER) return null
+        val name = book[tick.statusId]?.name ?: tick.statusId
+        return DamageDealt(DamageSource(DamageSourceKind.AILMENT, tick.statusId, name), targetId, amount, mapOf(tick.damageTypeId to amount), overTime = true)
+    }
 
     /** The number, the flash and the shove of one hit. */
     private fun showHit(hit: EnemyHit, from: WorldPoint) {

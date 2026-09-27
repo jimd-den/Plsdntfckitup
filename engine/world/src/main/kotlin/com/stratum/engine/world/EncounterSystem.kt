@@ -49,12 +49,14 @@ internal class EncounterSystem(
     private val markerEncounters = MarkerEncounters(content, regionAt)
 
     /**
-     * Places a monster deliberately, at the rank its definition gives it.
-     * The director fills the world on its own; this is for when the world
-     * should contain something specific.
+     * Places a monster deliberately, at [rank] -- the rank its definition
+     * gives it unless the caller names one. The director fills the world on
+     * its own; this is for when the world should contain something specific,
+     * and it is the one road a placed monster takes, whether a level author,
+     * a dungeon's boss room or the sandbox put it there.
      */
-    fun spawn(definition: EnemyDefinition, position: WorldPoint): EnemyInstance =
-        director.instantiate(definition, position, state.player.level, random, rank = definition.rank).also { state.enemies = state.enemies + it }
+    fun spawn(definition: EnemyDefinition, position: WorldPoint, rank: EnemyRank = definition.rank): EnemyInstance =
+        director.instantiate(definition, position, state.player.level, random, rank = rank).also { state.enemies = state.enemies + it }
 
     /**
      * A hand-authored level's enemies wait where its author put them, standing

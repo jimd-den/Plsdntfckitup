@@ -6,7 +6,7 @@ import com.stratum.core.domain.passive.PassiveTree
 import com.stratum.engine.world.Held
 
 /** The three pages of the hero panel: where the build grows, what it casts, and where it goes next. */
-enum class HeroTab(val label: String) { TREE("Tree"), SKILLS("Skills"), WORLDS("Worlds") }
+enum class HeroTab(val label: String) { TREE("Tree"), SKILLS("Skills"), STATS("Stats"), WORLDS("Worlds") }
 
 /** Everything the hero panel draws. Grouped so the play screen gains one field, not twelve. */
 data class HeroPanelState(
@@ -24,4 +24,8 @@ data class HeroPanelState(
     /** The world tier this world runs at, and the waystone mods it opened with. */
     val tier: Int = 0,
     val worldMods: List<WaystoneMod> = emptyList(),
+    /** The number the stats page is explaining, and its explanation. */
+    val query: com.stratum.core.domain.sandbox.StatQuery = com.stratum.core.domain.sandbox.StatQuery(com.stratum.core.domain.sandbox.ExplainedStat.DAMAGE),
+    val breakdown: com.stratum.core.domain.sandbox.StatBreakdown? = null,
+    val damageTypes: List<NamedChoice> = emptyList(),
 )

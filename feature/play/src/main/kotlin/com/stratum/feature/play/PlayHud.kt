@@ -164,6 +164,8 @@ internal data class ArcButton(
     val cooldown: Float = 0f,
     val enabled: Boolean = true,
     val active: Boolean = false,
+    /** Charges ready, a life cost, a flask's uses: the one number the thumb needs before pressing. */
+    val badge: String? = null,
 )
 
 /**
@@ -198,6 +200,7 @@ internal fun ActionCluster(
                 cooldown = button.cooldown,
                 enabled = button.enabled,
                 emphasis = if (button.active) GameEmphasis.ACTIVE else GameEmphasis.NORMAL,
+                badge = button.badge,
                 // Centred on the big button's centre, then pushed out along the arc.
                 modifier = Modifier.offset(
                     x = (dx.dp - (PRIMARY_BUTTON - ARC_BUTTON) / 2),

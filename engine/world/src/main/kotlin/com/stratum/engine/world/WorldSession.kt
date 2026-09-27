@@ -1,10 +1,18 @@
 package com.stratum.engine.world
 
+import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyInstance
+import com.stratum.core.domain.actor.EnemyRank
+import com.stratum.core.domain.actor.SkillCost
+import com.stratum.core.domain.actor.SkillDefinition
+import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.combat.Keystone
 import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.difficulty.Difficulty
+import com.stratum.core.domain.sandbox.StatBreakdown
+import com.stratum.core.domain.sandbox.StatQuery
 import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
@@ -281,6 +289,29 @@ class WorldSession private constructor(private val parts: SessionParts) :
     }
 
     private fun playerMotionState() = ActorAnimator.PlayerMotionState(isAlive = player.isAlive, isRolling = isRolling, isMoving = motion.input != WorldPoint.ZERO)
+
+    internal val inspector: BuildInspector get() = parts.inspector
+
+    /** One of the player's numbers, every source of it, and the formula that made it; see [BuildInspector]. */
+    fun explain(query: StatQuery): StatBreakdown = inspector.explain(player, query)
+
+    /** The rules the character breaks now: from the class, the tree and what is worn. */
+    val keystones: Set<Keystone> get() = parts.profile.traits(player).keystones
+
+    /** What one use of [skill] costs this character now, paid in life under a keystone that says so. */
+    fun costOf(skill: SkillDefinition): SkillCost = SkillCost.of(skill, Keystone.LIFE_PAYS_COSTS in keystones)
+
+    /** The fought-with stats of [state] as this world resolves them: for comparing a piece of gear against the whole character. */
+    fun statsFor(state: PlayerState): CombatStats = parts.profile.statsWith(state, parts.profile.traits(state).modifiers)
+
+    /** [state] refilled to its own ceilings, counted as they are for the player: for tools that remake the character. */
+    internal fun refilled(state: PlayerState): PlayerState = parts.profile.restored(state)
+
+    /** Places a monster at [rank] through the same path a dungeon's boss takes: for tools that call a specific fight. */
+    internal fun spawnAt(definition: EnemyDefinition, position: WorldPoint, rank: EnemyRank): EnemyInstance = encounters.spawn(definition, position, rank)
+
+    /** The build sandbox's tools, in a world whose rules allow them; null everywhere else. */
+    val sandbox: SandboxTools? = if (config.rules.sandbox) SandboxTools(this, combat) else null
 
     companion object {
         const val PICKUP_RADIUS = GroundItems.PICKUP_RADIUS

@@ -605,6 +605,32 @@ The first five flasks loaded are the belt.
 The *Unbound* preset lifts all of them, for building something broken on
 purpose.
 
+### A build sandbox
+
+`"rules": { "sandbox": true }` suggests a world for making builds rather
+than playing them: free respecs, any base, unique or set piece at any item
+level and rarity (and rerolled), currency, support gems and levels on
+demand, training dummies with chosen defences that never fight back, any
+monster or boss called in, a damage meter, and a breakdown of every number
+by source. The *Sandbox* preset is one; the caps can be lifted in the world
+itself. A sandbox never writes its hero back to the player's save.
+
+Builds are shared as a small JSON blob a plugin could hold, or as the same
+JSON behind `STRATUM-BUILD-1:` in URL-safe base64:
+
+```json
+{ "format": "stratum.build", "version": 1, "name": "Glass", "heroClassId": "yourname:warrior", "level": 42,
+  "passives": ["yourname:might", "yourname:oath"],
+  "gear": { "WEAPON": { "base": "yourname:maul", "itemLevel": 60, "rarity": "rare", "name": "Storm Bite",
+    "affixes": [{ "id": "yourname:keen", "tier": 3, "modifiers": [{ "stat": "damage", "kind": "increased", "value": 0.4 }] }] },
+    "RING_LEFT": { "base": "yourname:jade_ring", "itemLevel": 50, "rarity": "set", "unique": "yourname:left" } },
+  "supports": { "yourname:fireball": ["yourname:ember"] } }
+```
+
+Gear is a recipe against the loaded packs -- base, item level, rarity, the
+unique it is -- with its rolled numbers written out; a piece whose base or
+unique is not loaded is left out and named, never guessed.
+
 ## Worlds with their own lore
 
 Everything that makes a world a *setting* -- who lives there, where they

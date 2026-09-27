@@ -36,4 +36,16 @@ class WorldDialsTest {
         val rules = RulesPresets.conqueror.rules
         assertEquals(rules, GameSetup.worldConfig(seed = 1L, rules = rules).rules)
     }
+
+    @Test
+    fun `the sandbox and the caps are dials of their own`() {
+        val sandbox = RulesPresets.sandbox.rules
+        assertEquals("On", WorldDials.sandbox.selected(sandbox).label)
+        assertEquals("Bounded", WorldDials.caps.selected(sandbox).label)
+        assertEquals("Unbound", WorldDials.caps.selected(RulesPresets.unbound.rules).label)
+        val lifted = WorldDials.caps.write(sandbox, true)
+        assertEquals(com.stratum.core.domain.combat.CombatRules.UNBOUND, lifted.combat)
+        assertEquals(true, lifted.sandbox)
+        assertEquals(true, summaryOf(lifted).contains("sandbox"))
+    }
 }
