@@ -1,5 +1,12 @@
 package com.stratum.feature.forge
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import com.stratum.core.domain.sprite.AnimationClip
+import com.stratum.core.domain.sprite.SpriteSheet
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -120,6 +127,7 @@ fun PoseForgeScreen(
         onRoleChange = viewModel::selectRole,
         onFramesChange = viewModel::selectFrames,
         onAwayViewChange = viewModel::toggleAwayView,
+        onDrawFromClipChange = viewModel::setDrawsFromClip,
         onCellSizeChange = viewModel::selectCellSize,
         onDrawReference = viewModel::drawReferencePose,
         onBuildAnimations = viewModel::buildAnimations,
@@ -135,6 +143,10 @@ fun PoseForgeScreen(
         onForgetCharacter = viewModel::forgetCharacter,
         onExportSheet = viewModel::exportSheet,
         onExportPoses = viewModel::exportPoses,
+        onExportReference = viewModel::exportReference,
+        onFrameRateChange = viewModel::setFrameRate,
+        onBasePromptChange = viewModel::editBasePrompt,
+        onResetBasePrompt = viewModel::resetBasePrompt,
         onDismiss = viewModel::dismissMessage,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
@@ -153,6 +165,7 @@ fun PoseForgeContent(
     onRoleChange: (CharacterRole) -> Unit = {},
     onFramesChange: (AnimationState, Int) -> Unit = { _, _ -> },
     onAwayViewChange: (Boolean) -> Unit = {},
+    onDrawFromClipChange: (Boolean) -> Unit = {},
     onCellSizeChange: (Int) -> Unit = {},
     onDrawReference: () -> Unit = {},
     onBuildAnimations: () -> Unit = {},
@@ -163,6 +176,10 @@ fun PoseForgeContent(
     onForgetCharacter: (String) -> Unit = {},
     onExportSheet: () -> Unit = {},
     onExportPoses: () -> Unit = {},
+    onExportReference: () -> Unit = {},
+    onFrameRateChange: (Int) -> Unit = {},
+    onBasePromptChange: (String) -> Unit = {},
+    onResetBasePrompt: () -> Unit = {},
     onGuideModeChange: (PoseGuideMode) -> Unit = {},
     onGuideStyleChange: (PoseGuideStyle) -> Unit = {},
     onClearImported: (PoseStep) -> Unit = {},
@@ -246,7 +263,8 @@ fun PoseForgeContent(
         Spacer(Modifier.height(Space.medium))
         CharacterPanel(
             state, onSubjectChange, onStyleChange, onScopeChange, onRoleChange,
-            onFramesChange, onAwayViewChange,
+            onFramesChange, onAwayViewChange, onDrawFromClipChange, onBasePromptChange,
+            onResetBasePrompt,
         )
 
         Spacer(Modifier.height(Space.medium))
@@ -262,7 +280,10 @@ fun PoseForgeContent(
         )
 
         Spacer(Modifier.height(Space.medium))
-        SheetPanel(state, sheetImage, onCellSizeChange, onBuildSheet, onExportSheet, onExportPoses)
+        SheetPanel(
+            state, sheetImage, onCellSizeChange, onBuildSheet, onExportSheet, onExportPoses,
+            onExportReference, onFrameRateChange,
+        )
 
         Spacer(Modifier.height(Space.huge))
     }
@@ -364,6 +385,9 @@ private fun CharacterPanel(
     onRoleChange: (CharacterRole) -> Unit,
     onFramesChange: (AnimationState, Int) -> Unit,
     onAwayViewChange: (Boolean) -> Unit,
+    onDrawFromClipChange: (Boolean) -> Unit,
+    onBasePromptChange: (String) -> Unit,
+    onResetBasePrompt: () -> Unit,
 ) {
     val colors = StratumTheme.colors
 
@@ -424,6 +448,38 @@ private fun CharacterPanel(
             singleLine = false,
         )
 
+        // The prompt the reference is drawn from, shown rather than hidden.
+        // Every frame of every animation is an edit of that one drawing, so
+        // whatever the prompt gets wrong is inherited forty times -- and while
+        // it was private, a character that came back wrong could only be
+        // regenerated and hoped over, never corrected.
+        Spacer(Modifier.height(Space.small))
+        OutlinedTextField(
+            value = state.basePrompt,
+            onValueChange = onBasePromptChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(if (state.basePromptEdited) "Reference prompt (edited)" else "Reference prompt") },
+            enabled = !state.busy,
+            singleLine = false,
+            maxLines = 8,
+        )
+        Spacer(Modifier.height(Space.small))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+            StratumAction(
+                label = "Reset prompt",
+                onClick = onResetBasePrompt,
+                emphasis = ActionEmphasis.QUIET,
+                enabled = !state.busy && state.basePromptEdited,
+            )
+        }
+        Spacer(Modifier.height(Space.small))
+        Text(
+            text = "The reference is the one drawing every pose is edited from. Clearing " +
+                "this field puts the built-in prompt back, so an edit can always be undone.",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
+        )
+
         Spacer(Modifier.height(Space.medium))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
             PoseScope.entries.forEach { scope ->
@@ -466,6 +522,50 @@ private fun CharacterPanel(
                 onClick = { onAwayViewChange(true) },
             )
         }
+        // The other way of drawing a row, offered rather than chosen for you:
+        // the two fail in opposite directions and neither is simply better.
+        Spacer(Modifier.height(Space.medium))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.small),
+        ) {
+            Text(
+                text = "Drawn as",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+                modifier = Modifier.width(SIDE_LABEL),
+            )
+            StratumChip(
+                label = "Separate frames",
+                selected = !state.drawsFromClip,
+                onClick = { onDrawFromClipChange(false) },
+            )
+            StratumChip(
+                label = "One clip",
+                selected = state.drawsFromClip,
+                onClick = { onDrawFromClipChange(true) },
+            )
+        }
+        Spacer(Modifier.height(Space.small))
+        Text(
+            text = if (state.drawsFromClip) {
+                "One video an animation, cut at the frame rate. The frames cannot " +
+                    "disagree about the costume or the scale, because they were never " +
+                    "drawn apart -- but a clip follows no stick figure, so the poses " +
+                    "between the ends are the model's idea of the movement rather than " +
+                    "the authored ones. Clips cost about ten times a still and cannot be " +
+                    "bought shorter than four seconds, and only the opening holds its " +
+                    "facing, so the rest is paid for and discarded."
+            } else {
+                "One generation a frame, each under its own stick figure, so every pose " +
+                    "is the authored one. What it cannot promise is that the frames agree " +
+                    "with each other: measured on real output, one frame of a walk came " +
+                    "back wearing a cape the others did not have."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
+        )
+
         Spacer(Modifier.height(Space.small))
         Text(
             text = if (state.drawsAwayView) {
@@ -775,6 +875,28 @@ private fun AnimationPanel(
                             },
                         )
                     }
+                    // The frames past what the script can describe.
+                    //
+                    // A row cut from a clip is as long as the clip and the
+                    // frame rate make it -- nineteen at twenty-four a second --
+                    // and the script stops at twelve. Drawn only to the script
+                    // this row showed twelve dots however long it really was,
+                    // so a nineteen frame cycle and a twelve frame one looked
+                    // identical and seven paid-for frames were invisible.
+                    //
+                    // No tap: there is no step behind them, so there is no
+                    // guide and no instruction to redraw one against. They are
+                    // re-made by cutting the clip again, which is free.
+                    val onDisk = state.rowLengths[animation] ?: 0
+                    for (index in steps.size until onDisk) {
+                        PoseDot(
+                            label = "${index + 1}",
+                            drawn = true,
+                            failed = false,
+                            active = false,
+                            onClick = {},
+                        )
+                    }
                 }
             }
         }
@@ -879,6 +1001,8 @@ private fun SheetPanel(
     onBuildSheet: () -> Unit,
     onExportSheet: () -> Unit,
     onExportPoses: () -> Unit,
+    onExportReference: () -> Unit,
+    onFrameRateChange: (Int) -> Unit,
 ) {
     val colors = StratumTheme.colors
 
@@ -900,6 +1024,28 @@ private fun SheetPanel(
                     label = "${pixels}px",
                     selected = state.cellSize == pixels,
                     onClick = { onCellSizeChange(pixels) },
+                )
+            }
+        }
+
+        // The rate rather than a count. How many cells a row ends up with
+        // falls out of the rate and the length of the clip, which is also what
+        // lets one clip be re-cut into a different sheet for nothing.
+        Spacer(Modifier.height(Space.small))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.small),
+        ) {
+            Text(
+                text = "Frame rate",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+            )
+            PoseForgeViewModel.FRAME_RATES.forEach { fps ->
+                StratumChip(
+                    label = "$fps fps",
+                    selected = state.frameRate == fps,
+                    onClick = { onFrameRateChange(fps) },
                 )
             }
         }
@@ -929,6 +1075,40 @@ private fun SheetPanel(
             }
         }
 
+        // The sheet played back, row by row, at the rate each clip carries.
+        //
+        // A grid of cells and a running animation are not the same thing to
+        // look at, and until now the forge only ever showed the grid: a row of
+        // twelve near-identical stills and a row that is genuinely a walk cycle
+        // read exactly alike, which is the one question this screen exists to
+        // answer. Cut from the packed sheet rather than from the poses, so what
+        // plays here is what the game will draw, at the speed the game will
+        // draw it.
+        val sheet = state.savedSheet
+        if (sheet != null && sheetImage != null) {
+            Spacer(Modifier.height(Space.medium))
+            Text(
+                text = "Playing",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+            )
+            Spacer(Modifier.height(Space.small))
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.small),
+            ) {
+                sheet.clips.forEach { clip ->
+                    RowPlayer(clip = clip, sheet = sheet, image = sheetImage)
+                }
+            }
+            Spacer(Modifier.height(Space.small))
+            Text(
+                text = "Each row at its own frame rate. A row that looks still is still.",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.inkMuted,
+            )
+        }
+
         Spacer(Modifier.height(Space.medium))
         StratumAction(
             label = "Build sheet",
@@ -954,6 +1134,15 @@ private fun SheetPanel(
                 onClick = onExportPoses,
                 emphasis = ActionEmphasis.QUIET,
                 enabled = !state.busy && state.drawn.isNotEmpty(),
+            )
+            // The reference is in neither of the other two: it is not a frame
+            // and it is not in the sheet, and it is the drawing the whole
+            // character depends on.
+            StratumAction(
+                label = "Export reference",
+                onClick = onExportReference,
+                emphasis = ActionEmphasis.QUIET,
+                enabled = !state.busy && state.hasReference,
             )
         }
         Spacer(Modifier.height(Space.small))
@@ -1006,3 +1195,71 @@ private const val WIDTH_OF_LABEL = 0.3f
 
 /** Wide enough for the longest animation name, so the chip rows line up. */
 private val SIDE_LABEL = 72.dp
+
+
+/**
+ * One animation, playing.
+ *
+ * Small on purpose -- a row of them fits across the screen, and the question
+ * being asked is "is this moving and does it loop", which does not need size.
+ * Each cell is cropped straight out of the packed sheet, so nothing here can
+ * disagree with what the game draws.
+ */
+@Composable
+private fun RowPlayer(
+    clip: AnimationClip,
+    sheet: SpriteSheet,
+    image: ImageBitmap,
+) {
+    val colors = StratumTheme.colors
+    var frame by remember(clip, sheet.id) { mutableIntStateOf(0) }
+
+    LaunchedEffect(clip, sheet.id) {
+        if (clip.frameCount <= 0) return@LaunchedEffect
+        while (true) {
+            delay(clip.frameDurationMs.coerceAtLeast(MIN_FRAME_MS).toLong())
+            frame = (frame + 1) % clip.frameCount
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(
+            modifier = Modifier
+                .width(PLAYER_WIDTH)
+                .height(PLAYER_HEIGHT),
+        ) {
+            val cell = clip.firstFrame + frame
+            val column = cell % sheet.columns
+            val row = cell / sheet.columns
+            val srcLeft = column * sheet.frameWidth
+            val srcTop = row * sheet.frameHeight
+            if (srcLeft + sheet.frameWidth > image.width) return@Canvas
+            if (srcTop + sheet.frameHeight > image.height) return@Canvas
+            drawImage(
+                image = image,
+                srcOffset = IntOffset(srcLeft, srcTop),
+                srcSize = IntSize(sheet.frameWidth, sheet.frameHeight),
+                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                filterQuality = FilterQuality.None,
+            )
+        }
+        Text(
+            text = clip.state.name.lowercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
+        )
+        // The two numbers that say what kind of row this is. Nineteen frames at
+        // twenty-four is a cut clip; six at nine is a hand-drawn set.
+        Text(
+            text = "${clip.frameCount}f · ${1000 / clip.frameDurationMs.coerceAtLeast(1)}fps",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.inkMuted,
+        )
+    }
+}
+
+private val PLAYER_WIDTH = 64.dp
+private val PLAYER_HEIGHT = 96.dp
+
+/** Below this a row would spin faster than the screen can show it. */
+private const val MIN_FRAME_MS = 16

@@ -20,7 +20,26 @@ data class BasePoseRequest(
     val styleDirection: String = "",
     val canvas: Int = DEFAULT_CANVAS,
     val modelId: String? = null,
+    /**
+     * The prompt to send instead of the built one.
+     *
+     * The reference is the one generation everything else is an edit of, so
+     * every frame of every animation inherits whatever it got wrong — and the
+     * things it gets wrong are specific and personal. A costume detail the
+     * default wording does not reach, a style the default style line fights,
+     * a camera the subject needs held differently. Regenerating blind and
+     * hoping is the only recourse when the prompt cannot be seen.
+     *
+     * Null means use [BasePosePrompt.of], which is also what the editor shows
+     * when it opens: the default is visible, editable, and always what you get
+     * back by clearing the field. An override that silently replaced an
+     * unseeable default would be worse than no override at all.
+     */
+    val promptOverride: String? = null,
 ) {
+    /** What will actually be sent, default or edited. */
+    val prompt: String get() = promptOverride?.takeIf { it.isNotBlank() } ?: BasePosePrompt.of(this)
+
     companion object {
         /**
          * Large enough that every later step is a downscale.
@@ -87,7 +106,21 @@ class GenerateBasePoseUseCase(
         return Result.success(generated)
     }
 
-    private fun buildPrompt(request: BasePoseRequest): String = buildString {
+    private fun buildPrompt(request: BasePoseRequest): String = request.prompt
+}
+
+/**
+ * The reference prompt, written down where it can be read.
+ *
+ * Public because the screen shows it. It used to be a private builder, which
+ * meant the one prompt everything else inherits from was the one nobody could
+ * look at: a character that came back wrong could only be regenerated, never
+ * corrected, because the words that produced it were not anywhere a person
+ * could see.
+ */
+object BasePosePrompt {
+
+    fun of(request: BasePoseRequest): String = buildString {
         appendLine("A character reference sheet: one figure, drawn once, in a T-pose.")
         appendLine()
         appendLine("The character: ${request.subject}.")
@@ -115,11 +148,10 @@ class GenerateBasePoseUseCase(
         appendLine(BACKGROUND)
     }
 
-    private companion object {
-        const val DEFAULT_STYLE =
-            "High detail 2D game character art, clean flat colours, bold readable silhouette, " +
-                "strong dark outline."
-    }
+    /** Shown in the editor as the starting point, and restored by clearing it. */
+    const val DEFAULT_STYLE =
+        "High detail 2D game character art, clean flat colours, bold readable silhouette, " +
+            "strong dark outline."
 }
 
 /**
@@ -194,6 +226,13 @@ class GeneratePoseFrameUseCase(
             appendLine("elbow and knee, the same lean of the body, the same height off the")
             appendLine("ground. The large dot marks the hand that holds a weapon; close that")
             appendLine("hand into a grip.")
+            appendLine()
+            // Without this the diagram is ambiguous about depth at a
+            // three-quarter angle, and the two halves of a walk come back as
+            // the same stride drawn twice.
+            appendLine("In IMAGE 2 the black arm and leg are on the near side of the body,")
+            appendLine("towards the camera, and the grey arm and leg are on the far side,")
+            appendLine("away from it. Draw them on those sides.")
             appendLine()
             appendLine("In words, the pose is: ${request.step.instruction}.")
         } else {

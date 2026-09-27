@@ -201,102 +201,113 @@ data class PoseScript(val steps: List<PoseStep>) {
          */
         private fun authored(state: AnimationState): List<String> = when (state) {
             AnimationState.IDLE -> listOf(
-                "standing at rest, weight settled evenly on both feet, arms relaxed at the " +
-                    "sides, shoulders down",
-                "the same stance, the very start of a breath in: chest a fraction fuller, " +
-                    "shoulders barely lifted. Feet, hands and weight identical",
-                "breathing in: chest lifted, shoulders up and a little back, head a hair " +
-                    "higher. Feet identical",
-                "further in: chest fuller still, spine very slightly straighter, shoulders " +
-                    "near their highest. Feet identical",
-                "nearly the top of the breath: chest almost full, chin a fraction up, " +
-                    "shoulders high. Feet and hands identical",
-                "the top of the breath: chest at its fullest, shoulders at their highest, " +
-                    "head very slightly back. Feet and hands identical",
-                "holding: the same full chest, shoulders beginning to ease, head level again",
-                "starting to breathe out: chest falling a little, shoulders coming down",
-                "breathing out: chest noticeably lower, shoulders settling, arms hanging " +
-                    "a fraction looser",
+                "standing at rest, weight settled evenly on both feet, arms relaxed at " +
+                    "the sides, shoulders down",
+                "the same stance, the very start of a breath in: chest a fraction " +
+                    "fuller, shoulders barely lifted. Feet and weight identical",
+                "breathing in: chest lifted, shoulders up and a little out, weight " +
+                    "beginning to settle onto one hip. Feet identical",
+                "further in: chest fuller still, spine very slightly straighter, the " +
+                    "hip taking more of the weight. Feet identical",
+                "nearly the top of the breath: chest almost full, shoulders high and " +
+                    "out, most of the weight on the one hip. Feet identical",
+                "a fraction from the top: chest at very nearly its fullest, chin a hair " +
+                    "up",
+                "the top of the breath: chest at its fullest, shoulders at their " +
+                    "highest and widest, head very slightly back, weight fully on the one " +
+                    "hip. Feet identical",
+                "the first of the breath out: chest beginning to fall, shoulders " +
+                    "starting down",
+                "breathing out: chest noticeably lower, shoulders settling, the weight " +
+                    "beginning to come back off the hip. Feet identical",
                 "further out: chest almost settled, shoulders nearly down, head level",
-                "nearly at rest: shoulders down, chest settled, the smallest lift still left",
+                "nearly at rest: shoulders down, chest settled, weight almost even " +
+                    "again, the smallest lift still left",
                 "a hair above the first frame, so the loop closes without a jump",
             )
             AnimationState.WALK -> listOf(
-                "mid-stride contact: left leg forward with the heel touching the ground, " +
-                    "right leg straight back with the toes still down, right arm swung " +
-                    "forward and left arm back",
-                "just past contact: weight rolling onto the left foot, right leg lifting " +
-                    "at the toe, body beginning to drop",
-                "passing position: the right leg swinging through directly under the body " +
-                    "with the knee bent, standing on the left leg, body at its lowest, arms " +
-                    "close to the sides",
-                "past the pass: right knee driving forward, left heel starting to lift, " +
-                    "body beginning to rise",
-                "reaching: the right leg swung forward at full extension just before the " +
-                    "heel lands, body at its highest, left arm reaching forward, right arm back",
-                "the reach falling: right heel about to touch, body coming down onto it, " +
-                    "left leg fully extended behind",
-                "mid-stride contact the other way: right leg forward with the heel touching " +
-                    "the ground, left leg straight back with the toes down, left arm swung " +
-                    "forward and right arm back",
-                "just past contact: weight rolling onto the right foot, left leg lifting at " +
-                    "the toe, body beginning to drop",
-                "passing position again: the left leg swinging through under the body with " +
-                    "the knee bent, standing on the right leg, body at its lowest, arms close " +
-                    "to the sides",
-                "past the pass: left knee driving forward, right heel starting to lift, body " +
-                    "beginning to rise",
-                "reaching again: the left leg swung forward at full extension just before " +
-                    "the heel lands, body at its highest, right arm reaching forward, left " +
-                    "arm back",
-                "the reach falling: left heel about to touch, body coming down onto it, " +
-                    "right leg fully extended behind",
+                "mid-stride contact: left leg forward with the heel touching the ground " +
+                    "and the leg nearly straight, right leg straight back with the toes " +
+                    "still down, right arm swung forward and left arm back",
+                "just past contact: weight rolling onto the left foot, right heel " +
+                    "beginning to lift",
+                "the down: the whole weight over the left leg with its knee bent taking " +
+                    "the landing, right leg pushing off behind with the heel already up, " +
+                    "body at its lowest point of the stride",
+                "pushing off: the right toe leaving the ground, the left knee " +
+                    "straightening, body starting to rise",
+                "passing: the right leg swinging through directly under the body with " +
+                    "the shin folded back behind the knee, standing tall and straight on " +
+                    "the left leg, body at its highest, arms close to the sides",
+                "the right leg reaching forward with the knee opening, heel about to " +
+                    "land, body beginning to come down",
+                "mid-stride contact the other way: right leg forward with the heel " +
+                    "touching the ground and the leg nearly straight, left leg straight " +
+                    "back with the toes down, left arm swung forward and right arm back",
+                "just past contact: weight rolling onto the right foot, left heel " +
+                    "beginning to lift",
+                "the down the other way: the whole weight over the right leg with its " +
+                    "knee bent taking the landing, left leg pushing off behind with the " +
+                    "heel up, body at its lowest",
+                "pushing off: the left toe leaving the ground, the right knee " +
+                    "straightening, body starting to rise",
+                "passing again: the left leg swinging through under the body with the " +
+                    "shin folded back behind the knee, standing tall on the right leg, body " +
+                    "at its highest, arms close to the sides",
+                "the left leg reaching forward with the knee opening, heel about to " +
+                    "land, body beginning to come down",
             )
             AnimationState.ATTACK -> listOf(
-                "the start of the wind-up: weight shifting onto the back foot, torso " +
-                    "beginning to turn away, weapon arm lifting",
-                "wind-up: weight dropped onto the back foot, torso twisted away from the " +
-                    "target, weapon drawn back high behind the shoulder",
-                "the top of the wind-up: torso turned as far as it goes, weapon at its " +
-                    "highest and furthest back, front foot light",
-                "the swing beginning: torso rotating forward, weapon coming over and down " +
-                    "past the shoulder, front foot planting",
-                "the swing at speed: weapon halfway down its arc, torso square to the " +
-                    "target, weight driving forward",
-                "impact: weight fully forward over the front foot, arms extended, weapon at " +
-                    "the far end of its arc where it would strike",
+                "the top of the wind-up: weight dropped onto the back foot, torso " +
+                    "turned as far away from the target as it goes, weapon at its highest " +
+                    "and furthest back behind the shoulder",
+                "the wind-up breaking: the weapon arm starting to fall, torso still " +
+                    "turned away, weight still back",
+                "the swing starting down: weapon coming over and past the shoulder, " +
+                    "torso beginning to rotate forward, front foot planting",
+                "the swing gathering: weapon past the head, arms straightening, weight " +
+                    "starting forward",
+                "the swing at speed: weapon halfway down its arc with the arms nearly " +
+                    "straight, torso square to the target, weight driving forward",
+                "the last of the acceleration: weapon nearly level, the body fully " +
+                    "committed forward",
+                "impact: weight fully forward over the front foot, arms extended, " +
+                    "weapon at the far end of its arc where it would strike",
                 "just past impact: weapon continuing past the strike, shoulders carried " +
                     "round by it, weight still forward",
-                "recovery: weapon carried low and across the body, shoulders squaring back " +
-                    "up, weight returning to centre",
-                "further into recovery: weapon low at the far side, torso almost square, " +
-                    "weight coming back over both feet",
-                "settling: weapon held low at the side, shoulders level, still leaning very " +
-                    "slightly forward",
-                "almost still: weight even, arms low in front of the body, shoulders square",
+                "follow-through: weapon carried low and across the body, the elbows " +
+                    "folding as the arms slow, weight starting back over both feet",
+                "further into recovery: weapon low at the far side, torso almost " +
+                    "square, weight coming back over both feet",
+                "settling: weapon held low at the side, shoulders level, still leaning " +
+                    "very slightly forward",
                 "the end of the follow-through: standing nearly square, arms low and " +
                     "relaxed across the front of the body, knees softly bent",
             )
             AnimationState.SPECIAL -> listOf(
-                "beginning to gather: knees softening, arms starting to draw in towards the " +
-                    "chest, head lowering",
-                "gathering: crouched slightly, both arms drawn in towards the chest, head " +
+                "gathering: crouched, both arms drawn in tight across the chest, head " +
                     "down, body coiled",
-                "fully coiled: crouched lower, arms tight to the chest, head furthest down",
-                "beginning to rise: knees starting to straighten, arms starting to open",
-                "rising: straightening upward, arms sweeping outward and up, head lifting, " +
-                    "heels leaving the ground",
-                "nearly at full height: arms wide and climbing, chest opening, on the toes",
-                "release: arms thrown wide and forward at full extension, chest open, head " +
-                    "back, at the peak of the effort",
+                "the coil beginning to release: knees starting to straighten, arms " +
+                    "starting to open",
+                "rising: straightening upward, arms sweeping outward and up, head " +
+                    "lifting, heels leaving the ground",
+                "nearly at full height: arms wide and climbing, chest opening, on the " +
+                    "toes",
+                "release: arms thrown wide at full extension, chest open, head back, at " +
+                    "the peak of the effort",
                 "the peak holding: arms still wide, body at full stretch, head back",
-                "follow-through: arms falling, body settling back down onto both feet, " +
-                    "shoulders dropping",
-                "the last of it: arms nearly at the sides, head coming back level, weight " +
-                    "settling evenly",
-                "almost standing: arms low, shoulders coming square, knees straightening",
-                "standing out of it: upright again, arms at the sides, shoulders square, a " +
-                    "fraction of the effort still in the stance",
+                "follow-through: arms falling from the peak, body settling back down " +
+                    "onto both feet, shoulders dropping",
+                "the last of it: arms coming in towards the sides, head coming back " +
+                    "level",
+                "almost standing: arms low, shoulders coming square, knees " +
+                    "straightening",
+                "nearly settled: weight even, arms nearly at the sides, shoulders " +
+                    "square",
+                "standing out of it: upright again, arms at the sides, shoulders " +
+                    "square, a fraction of the effort still in the stance",
+                "settled: standing square with the weight even, arms relaxed at the " +
+                    "sides",
             )
             AnimationState.HURT -> listOf(
                 "the instant of impact: head snapped back, chest caved in, both arms flung " +
@@ -346,7 +357,8 @@ data class PoseScript(val steps: List<PoseStep>) {
                     "the ground",
                 "collapsing: fallen onto the side, limbs folding, no longer supporting any " +
                     "weight",
-                "rolling onto the front, one arm trapped under the body, the other flung out",
+                "sprawled face down on the ground, limbs fallen away from the body, no " +
+                    "longer supporting any weight",
                 "lying still on the ground, face down, limbs slack and splayed, completely " +
                     "motionless",
                 "the body settling a little flatter, one arm having fallen further out from " +

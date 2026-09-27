@@ -55,6 +55,8 @@ data class WorldConfig(
     val surfaceVariation: Int = 4,
     val caveDensity: Float = 0.42f,
     val oreRichness: Float = 1f,
+    /** How this world plays: survival, towns, raids, the length of a day. */
+    val rules: WorldRules = WorldRules(),
 ) {
     init {
         require(simulationRadius >= 0) { "simulationRadius cannot be negative" }

@@ -35,9 +35,30 @@ class WeaponPosingTest {
     }
 
     @Test
-    fun `a swing reads the same whether the attack came back as four frames or six`() {
+    fun `a swing reads the same whether the attack came back as six frames or twelve`() {
+        // This used to check a four frame clip against a six frame one and
+        // assert their *last* frames matched, on the reasoning that both end
+        // at the end of the swing. That held only while frames were stretched
+        // across an open span, which is what cost a twelve frame walk the step
+        // from its last frame back to its first. Frames are spaced `index *
+        // poses / count` now, so a shorter clip is a coarser sampling of the
+        // same swing rather than the same swing squashed -- four frames land
+        // between the authored poses and no longer coincide with six.
+        //
+        // What still has to hold, and is the thing the name means, is that
+        // asking for more frames draws the same swing with new frames between
+        // the old ones. Twelve against six is the case the pipeline actually
+        // offers, and it is also the ratio at which the drawn pose has to keep
+        // lining up with the sentence sent alongside it.
         assertEquals(attack(0).rotationDegrees, attack(0, of = 6).rotationDegrees, 0.001f)
-        assertEquals(attack(3).rotationDegrees, attack(5, of = 6).rotationDegrees, 0.001f)
+        (0 until 6).forEach { frame ->
+            assertEquals(
+                attack(frame, of = 6).rotationDegrees,
+                attack(frame * 2, of = 12).rotationDegrees,
+                0.001f,
+                "frame $frame of six is not frame ${frame * 2} of twelve",
+            )
+        }
     }
 
     @Test

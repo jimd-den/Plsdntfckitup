@@ -83,6 +83,39 @@ class PoseLibrary(context: Context) {
     fun hasReference(setId: String): Boolean = File(setDir(setId), REFERENCE).isFile
 
     /**
+     * Keeps the clip an animation was cut from.
+     *
+     * The clip is the expensive artefact, not the frames. It costs about ten
+     * times a single still and it holds far more than the sheet takes out of
+     * it -- four seconds at twenty-four frames is nearly a hundred pictures,
+     * of which a twelve frame row uses ten. Throwing it away after one pass
+     * means paying again to change the frame rate, and changing the frame rate
+     * is the one thing a person will want to do twice.
+     *
+     * Kept per character rather than per run, so re-cutting is free and the
+     * sheet can be rebuilt at a different rate without the model being asked
+     * anything at all.
+     */
+    fun saveClip(setId: String, key: String, bytes: ByteArray) {
+        File(writableDir(setId), clipName(key)).writeBytes(bytes)
+        refresh()
+    }
+
+    fun clip(setId: String, key: String): ByteArray? = read(File(setDir(setId), clipName(key)))
+
+    fun hasClip(setId: String, key: String): Boolean = File(setDir(setId), clipName(key)).isFile
+
+    /** Which animations have a clip on disk, so a sheet can say what it can re-cut. */
+    fun clipKeysIn(setId: String): Set<String> =
+        setDir(setId).listFiles { file -> file.name.endsWith(CLIP_SUFFIX) }
+            .orEmpty()
+            .map { it.name.removeSuffix(CLIP_SUFFIX) }
+            .toSet()
+
+    private fun clipName(key: String): String =
+        "${key.replace(NON_FILE_SAFE, "_")}$CLIP_SUFFIX"
+
+    /**
      * Sets on disk that have something in them, most recently worked on first.
      *
      * Empty folders are skipped rather than listed. New ones are no longer
@@ -118,6 +151,14 @@ class PoseLibrary(context: Context) {
     private companion object {
         const val DIRECTORY = "pose_sets"
         const val SUFFIX = ".png"
+
+        /**
+         * Distinct from the frame suffix so a clip is never mistaken for a
+         * pose. [keysIn] lists what is already drawn and a run resumes from
+         * it; a clip counted among them would be read as a finished frame and
+         * the frame it stands for would never be generated.
+         */
+        const val CLIP_SUFFIX = ".mp4"
         const val REFERENCE = "reference.png"
         val NON_FILE_SAFE = Regex("[^A-Za-z0-9._-]")
     }

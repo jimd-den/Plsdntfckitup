@@ -20,7 +20,24 @@ wrapped in an ARPG shell, where the content is data rather than code.
         :core:designsystem            :core:domain ◄── :content:igbo
                 │                           ▲
                 └───────────────────────────┤
-                                     :engine:world
+                                     :engine:world ──► :engine:settlement, :engine:crowd
+                                            ▲                 (both -> :core:domain only)
+                                     :engine:render ◄── :tools:artpreview
+                                                                │
+                                     :engine:scene ◄────────────┘
+                                   (3D: -> :core:domain only)
+
+  Importers, beside the engine rather than in it:
+
+    :plugins ──► :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
+          ▲                                        ▲
+        :app (registers them)          :core:data (keeps archives)
+                                                   ▲
+                                   :feature:library (-> :core:domain only)
+
+  The studio crew, beside the plugin format it writes:
+
+    :feature:forge ──► :agents ──► :plugins, :core:domain
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -32,11 +49,22 @@ Room, OkHttp or Compose exist.
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
 | `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
-| `:content:igbo` | Pure Kotlin | The built-in content pack. Data only. |
+| `:engine:settlement` | Pure Kotlin | Towns: site selection on a coarse grid, the layouts (grid, organic, fortress, camp), lot packing, and stamping buildings, roads and walls into any terrain source. |
+| `:engine:crowd` | Pure Kotlin | Crowd AI: flow fields over height steps, a spatial hash, attack tokens, roles, squads and morale. Never sees a block. |
+| `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
+| `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
+| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
+| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
+| `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
+| `:importer:flame` | Pure Kotlin | Flame games: their Tiled levels, and characters from Aseprite, TexturePacker and Dart. |
+| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
+| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
 | `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
-| `:feature:play` | Android library | The isometric renderer and the play screen. |
+| `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
 | `:feature:forge` | Android library | AI pack generation and its preview. |
+| `:feature:library` | Android library | The Plugins screen: install, order, switch, remove and share plugins. |
 | `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
 | `:legacy:data` | Android library | The original engine's Room and network layer. |
 | `:feature:studio` | Android library | The original creator studio screens. |
@@ -44,8 +72,10 @@ Room, OkHttp or Compose exist.
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:content:igbo` and
-`:legacy:domain` apply only the Kotlin JVM plugin, so the Android SDK is not on
+Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
+`:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
+`:legacy:domain` apply only the Kotlin
+JVM plugin, so the Android SDK is not on
 their compile classpath and `import android.*` fails to compile.
 
 `./gradlew architectureCheck` closes the loophole around that: it fails the
@@ -117,6 +147,672 @@ terrain they control.
 An unknown generator id is an error rather than a silent fallback. A pack asking
 for something this build does not have should say so, not quietly hand the
 player a different world.
+
+## Importing Flame games and Tiled maps
+
+A player can bring in a level and its characters from another engine: a
+`.zip` of a Flame game, or of plain Tiled maps. What comes out is an ordinary
+`ContentPack` -- blocks, one region, the maps, sprite sheets and a playable
+hero -- so an imported game goes through the same assembly, validation,
+generation and rendering as the built-in pack, and is layered over it the
+same way. Whatever the import does not bring, such as monsters or weapons,
+comes from the packs underneath.
+
+**Ports in the domain, formats beside it.** `:core:domain` defines what an
+import is: an `ImportSource` (a read-only tree of files), a `ProjectImporter`,
+an `ImporterRegistry` that asks each importer in turn, and `ImportProjectUseCase`.
+Importers never decode an image. They describe art as `ImageRegion`s -- this
+rectangle of that file -- and an `ImportedAssetWriter` on each platform cuts
+it: Android crops bitmaps into app storage, the JVM tool writes PNGs. That is
+what lets the formats be pure Kotlin and tested without a bitmap.
+
+**A level is a stack, and the importer decides the heights.** Tiled has no
+depth: a floor, a hedge and a roof are three layers drawn in order.
+`TileMap` holds layers at an elevation and thickness, and `LayerRoles` decides
+them -- from the layer's own `elevation`, `thickness` and `solid` properties
+first, then from the names Flame RPGs conventionally use. The bottom layer is
+the floor; `walls` stand two blocks high; decoration becomes scenery drawn as
+standing sprites, the way the engine draws its own; anything that draws
+*over* the player in 2D is left out, because in 3D it would bury the camera.
+Collision rectangles on an object layer become a barrier.
+`TileMapTerrainGenerator`, registered as `stratum:tilemap`, builds chunks
+from the stack and walls in the map's edge. The map is centred on its player
+spawn, and enemy markers become fights where the author put them.
+
+**Characters without running Dart.** Aseprite and TexturePacker atlases are
+read directly. Most Flame games cut sheets in code instead, so
+`DartAnimationScanner` reads `SpriteAnimationData.sequenced(...)` and
+`SpriteSheet(...).createAnimation(...)` when their arguments are literals,
+following an image loaded into a variable. An animation built from computed
+values is reported, not guessed. Each character becomes one grid sheet with a
+clip per engine state, matched by the words in its animation names.
+
+**Nothing silent.** Every import returns warnings for what it understood but
+could not honour: a hidden layer, an image layer, a flipped tile, an
+animation it could not read, a map that failed. One bad map is left out and
+named; it does not fail the project.
+
+**Kept as the archive, not as a pack.** The app stores the `.zip` the player
+picked and re-imports it at launch. Importers are deterministic, so the pack
+comes back with the same ids, and there is no second pack format to keep in
+step with every field a pack can have. Only the cut art is stored.
+
+**Checked against real projects.** `./gradlew :tools:artpreview:importPreview`
+imports a project on the JVM, prints what came of it and renders its level.
+Run on Flame's `flame_tiled` example and on Bonfire's example game, it found
+map ids and tileset names that collided across folders, games built on
+Bonfire that were not recognised, and a texture-library bug where every tile
+past the 1024th was read as a ground map. Each has a test now.
+
+## Plugins and mods
+
+Everything the engine does not ship arrives as a plugin: a `.stratum` zip
+holding `plugin.json` (id, semantic version, author, SPDX license, plugin API
+level, dependencies), `pack.json` (an ordinary content pack) and art. Plugins
+are data, never code: nothing a player installs can run on their phone, and a
+plugin written in a text editor is as capable as one written by the engine's
+authors. The author's guide is [`docs/PLUGINS.md`](docs/PLUGINS.md).
+
+**A public format with its own schema.** `pack.json` is not the domain's
+classes serialised. It is `:plugins`' own schema, mapped both ways, so the
+engine can rename internals without breaking anyone's plugin. Its defaults
+are read from the domain's default values, so they are defined once. The whole
+built-in pack round-trips through it unchanged, which is the test that the
+schema is complete. Mistakes are reported by the field they are in.
+
+**Load order is the player's; the resolver only enforces what must be
+true.** `PluginResolver` keeps the player's order, moves a dependency ahead of
+what needs it, and leaves out -- with a reason shown in the Plugins screen --
+any plugin whose dependency is missing, switched off, the wrong version,
+refused or circular, or that needs a newer plugin API. What it leaves out,
+it leaves out whole, and nothing else stops loading. The built-in pack is
+known to the resolver, so a plugin can depend on it.
+
+**One registry for every format.** `Importers.standard()` tries a Stratum
+plugin, then a Flame game, then Tiled maps. Every import carries a manifest,
+derived from its pack when the project had none, so imported games are
+ordered, switched and removed exactly like plugins.
+
+**Tabletop rules are content.** A pen-and-paper system becomes a plugin
+through `checks`: dice notation (`2d6+3`, `4d6kh3`, `2d20kh1`), an attribute
+and a difficulty, with a `Boon` that changes real combat stats for a while on
+success and a bane on a natural one. `WorldSession.attemptCheck` rolls them
+from the session's seeded dice; running boons feed `playerStats`, which every
+swing reads. `examples/plugins/nri-chronicles` is the legacy tabletop
+rulebook rebuilt this way, and a test keeps it loading.
+
+## Scaling from a bare-bones phone to a flagship
+
+`RenderSettings` is every cost the renderer can trade away, as one value:
+render scale, shadow map size and filter, the high-range target, point
+lights, view and streaming radius, texture budget, litter, motes and target
+frame rate. Four presets, LOW to ULTRA. HIGH is exactly what the game drew
+before tiers existed; LOW is a 2 GB phone with no shadow map, a 60% render
+scale and 30 fps.
+
+- **Choosing.** `DeviceClassifier` picks a starting tier from memory, cores,
+  GL limits and known-weak GPUs, and `fittedTo` removes anything the device
+  cannot do. The player can override it from the Style panel; Auto keeps the
+  device's choice.
+- **Holding the frame rate.** `FrameGovernor` watches the median frame of
+  each window and lowers the render scale when frames run long, giving it back
+  after two calm windows. The median, because one hitch must not make the
+  picture pump.
+- **Not remeshing the world.** Terrain is meshed per chunk
+  (`ChunkMeshCache`) and each chunk's mesh is kept until it or a neighbour
+  changes, so a dug block remeshes nine chunks rather than every chunk in
+  view, and the GPU keeps each chunk's buffer until it changes.
+- **Texture memory.** Tile layers are sized to the tier's budget, and the
+  library refuses a tile rather than overflow into the ground-map range.
+
+The GL side reads the tier's settings; the CPU side (`SceneBuilder`) reads the
+same value for view radius, lights, litter and motes, so the two halves of
+the pipeline agree. The renderer settles the final settings on the GL thread,
+where the GPU's limits can be read, and reports them back.
+
+## The session is an orchestrator
+
+`WorldSession` owns the player and decides the order things happen in a
+tick. It does not hold the rules. Each concern keeps its own state and rules
+in its own part: `PlayerMotion` (movement, the roll), `MiningProgress`,
+`BuildSession` (tool, ghost preview, commit), `GroundItems` and `LootDrops`,
+`PlayerGear` (equip and sockets, as pure functions over `PlayerState`),
+`ActorAnimator`, and `SessionCues` (every floating number, named for what
+happened). The player is passed through them and handed back, because it is
+the one thing they all touch. Adding a system means adding a part and one
+line to the tick, not another two hundred lines to the session.
+
+## Progression: one modifier formula for everything
+
+Every lasting change to a character is a `StatModifier` of one of three
+kinds, combined the way Path of Exile teaches players to read them:
+`(base + flat) × (1 + Σ increased) × Π (1 + more)`. `StatSheet` applies them
+to combat stats and answers for everything else a build can change: skill
+damage, cost, cooldown recovery, area, movement, experience, and the
+quantity and rarity of loot. Passives, supports, world tiers and waystone
+mods are all just lists of modifiers, so they stack predictably and a
+tooltip can never disagree with the fight.
+
+- **The passive tree** (`core.domain.passive`) is a graph pack data can
+  describe: small nodes, notables, keystones, and a start per class. A node
+  can be taken only next to one already taken; `PassiveBuild.pathTo` finds
+  the cheapest route, so a phone player taps the notable they want and the
+  path is bought in one go. Refunds are free when nothing depends on the
+  node. A pack with combat and no tree gets `PassiveTreeGenerator`'s: about
+  nine hundred nodes in six themed directions, gated rings, one keystone per
+  theme. Two points a level.
+- **Crafting** (`core.domain.crafting`): currency applies one of the
+  engine's verbs (`imbue`, `reforge`, `ascend`, `temper`, `annul`, `socket`,
+  `scour`) using the same affix pool as drops. Packs name the currency; the
+  verbs stay the same everywhere, so the system is learnable once.
+- **Supports** link to a skill, three at most, and tune only that skill;
+  the session casts `Workbench.tuned(skill)`, the build and the supports
+  resolved together.
+- **World tiers and waystones** (`core.domain.difficulty`): `Difficulty` is a
+  tier plus mods, giving a monster sheet and a reward sheet. Tiers are
+  open-ended; felling a champion at the hardest tier reached opens the next.
+- **Heroes persist** (`HeroSave`): level, passives, gear, pouch, supports,
+  waystones and highest tier go into every new world; the world does not.
+  `FileHeroSaveStore` in `:core:data` writes one JSON file per hero,
+  atomically, and skips a corrupt file rather than failing on it. A saved
+  allocation is pruned against whatever tree is loaded now, so a character
+  survives a plugin update.
+
+Currency, supports and waystones go straight into the pouch when a monster
+dies. Gear still lands on the ground, because choosing gear is a decision
+and picking up a pebble in a crowd, with a thumb, is not.
+
+## A handheld's interface, not a toolbar's
+
+The play screen is the world, edge to edge, in portrait or landscape; the
+activity handles rotation itself, so turning the phone re-lays out the HUD
+without dropping the GL context or the fight. The HUD floats inside the safe
+area and uses the round `GameButton` from the design system: a glyph to find
+it by, a word to learn it by, a badge when something inside wants doing, a
+sweep for a cooldown.
+
+- **Left thumb:** the stick, with Build (showing the block in hand) above it.
+- **Right thumb:** one big button for what the current mode is for -- Strike,
+  or Done while building -- and the rest fanned around it on rings sized so no
+  two buttons or labels touch (`clusterOffsets`).
+- **Top:** vitals in the corner, and the dock -- Bag, Anvil, Hero, Table,
+  Style, View -- under it in portrait or beside it in landscape.
+- **Build mode** swaps the fan for a tray of shapes and blocks.
+
+Play view models are scoped to the play screen (`ScopedViewModels`), not the
+activity, so leaving play saves the hero and frees the world, and the next
+visit starts a fresh one. Home is laid out as a title menu: the hero and one
+button to play, a seven-line how-to-play whose glyphs match the HUD, and every
+creation tool as a tile that says what it does and what state it is in.
+
+The **texture forge** is its own screen: describe a look, choose regions,
+paint, and watch a progress bar and a gallery fill as textures arrive.
+`TextureForgeRunner` is shared with the Style panel in play, skips what an
+earlier run already painted, and writes to the per-style folder play reads,
+so a painted style is worn the next time it is played.
+
+## Why the look is data
+
+The renderer used to decide what the world looked like. Ground eight levels
+down was fifty-five per cent as bright, a ledge cast at twenty-two per cent
+black, the player was a cream circle with a bronze ring — all of it constants,
+inside a composable, for every pack, forever.
+
+Those constants were not wrong. They were unreachable. A content pack could
+restyle its blocks but not its *world*; a player could not restyle anything; and
+a look nobody can change is a look nobody can direct.
+
+`ArtDirection` is that knowledge as one value: a palette, a lighting rule, a
+contrast contract, a shape language, weather, and the words handed to image
+models. `WorldArtDirector` is the seam that answers with it, per block, per
+prop, per actor, per region:
+
+```kotlin
+interface WorldArtDirector {
+    fun terrainStyleFor(cue: TerrainCue): TerrainStyle
+    fun propStyleFor(cue: PropCue): PropStyle?
+    fun actorStyleFor(actor: ActorPresentation): ActorStyle
+    fun atmosphereFor(biome: BiomeDefinition?, time: WorldTime): AtmosphereStyle
+    fun effectsFor(cue: CombatCue): List<VisualEffect>
+}
+```
+
+The renderer keeps the questions it is good at — where a thing lands on screen,
+what order to draw in, how to get pixels down fast — and has no opinion about
+what a sacred grove looks like.
+
+## The contrast contract
+
+The problem worth naming: in a field of isometric voxels, terrain, trees, ore,
+loot and monsters all tend to end up in the same band of colour and the same
+band of brightness. Nothing is *wrong*, and the eye has nowhere to land. It
+reads as a pleasant prototype rather than as somewhere dangerous.
+
+Contrast is treated as a budget. Terrain is charged for it and actors are paid
+it, and `ContrastContract` is that transaction written down:
+
+- terrain is desaturated and its brightness squeezed into a band,
+- ore, loot and anything interactable is *boosted* past the ground,
+- actors are drawn larger than the grid says they are, because a person who is
+  literally one block wide is a speck and a speck cannot be cared about,
+- every actor gets a contact shadow, a dark contour and a lit rim, which is what
+  stops the cast looking pasted onto the terrain,
+- rank is announced on the floor, in a ring, not in more furniture around the
+  health bar.
+
+`ArtDirection.enforcePlayable()` clamps every style to those bounds before it
+reaches the renderer, whatever produced it. A style may be garish, washed out,
+nearly black or nearly white. It may not hide the thing about to kill you.
+
+## Promptable worlds
+
+A style comes from a sentence. `StyleLexicon` reads one offline: it holds a few
+dozen `StyleTrait`s — moods like *dark*, *kawaii*, *toxic*, *frozen*, and
+rendering manners like *inked*, *woodblock*, *chiaroscuro*, *painterly* — and
+each one is a small edit to the house style. They compose, so "dark kawaii
+woodblock" is three edits rather than a fourth preset somebody had to author.
+
+Two properties matter more than the trait list:
+
+- **Order does not count.** Traits apply in lexicon order, not typing order, so
+  "kawaii dark" and "dark kawaii" are the same world. A prompt is a description,
+  not a program, and players do not order adjectives.
+- **The seed does.** The same words with the same seed are the same world every
+  time; with a different seed they are recognisably the same style in a
+  different place. That is what makes a reroll a reroll rather than a reskin.
+
+Words the lexicon cannot serve are *returned*, not ignored — they are the most
+useful output of the call. `StyleBriefUseCase` hands them to a language model
+along with the style so far, and gets back the same record, clamped on the way
+in. That is the one thing a model is genuinely better at than a lookup table:
+knowing that a painter's manner means broken complementary colour and a restless
+stroke.
+
+The offline path always works — no key, no network, no latency, no cost — and
+the model is an upgrade to it rather than a replacement, so the game is playable
+while the request is still in flight and stays playable if it fails.
+
+## Worlds with their own politics, bodies and holdings
+
+Four systems were added so a pack can be a *setting* rather than a
+reskin, and each is split the same way: the rules are pure data and pure
+functions in `:core:domain`, the work that touches the world lives in an
+engine module, and the session only orchestrates.
+
+- **Factions and reputation** (`core/domain/faction`). A `FactionBook`
+  answers one question -- is this body hostile to the player -- from
+  stances, relations and the player's standing. Everything else (towns,
+  guards, raids, followers) asks it rather than keeping its own opinion.
+- **Settlements** (`:engine:settlement`). `SettlementTerrain` wraps any
+  terrain source: towns are decided per site cell from the seed alone, so
+  a chunk stamped today and one stamped next week agree, and the order
+  chunks load in cannot move a wall. Layouts are a registry of small
+  strategies; a plugin picks one by id and supplies the blocks and
+  buildings.
+- **Crowds** (`:engine:crowd`). One flow field per target, rebuilt at most
+  four times a second, serves every chaser; a spatial hash keeps
+  separation linear; attack tokens cap how many swing at once, and the
+  rest circle by role. The brain takes agents and returns intents, and
+  `CrowdControl` in `:engine:world` is the only code that knows both
+  blocks and squads.
+- **Survival and strategy** (`core/domain/survival`, `core/domain/strategy`).
+  `Survival` and `Colony` are functions from state to state -- drain,
+  eat, produce, build, raid -- tested without a world. `SurvivalSystem`
+  and `RealmSystem` in `:engine:world` apply them to a session and report
+  events; followers are ordinary enemies of the player's faction, moved
+  by the same crowd brain under an order.
+
+`WorldRules` sets the pressure on all of it -- how harsh needs are, how
+many towns and monsters, whether raids come -- chosen per world on the
+home screen, starting from what the packs suggest.
+
+## The agent studio
+
+`:agents` writes a content pack with a crew of model-backed roles. A role
+is plugin data (`AgentRoleDefinition`): the pack sections it writes, the
+roles it waits for, a standing brief, whether a person must approve it.
+`CrewPlan` orders them; `PromptComposer` asks each for its sections,
+showing one entry of each from the loaded packs as the pattern -- so the
+examples are the live schema, never a stale copy -- and listing the ids it
+may reference. `DraftCheck` holds each reply to the plugin standard: it
+must decode as plugin JSON, stay inside its sections and namespace, and
+assemble on the loaded packs. A failure is retried with the problems
+quoted back; an approval gate suspends until the person approves, revises
+with a note, or skips (and whoever depended on it is skipped too).
+
+Nothing is off the record. `StudioJournal` keeps every prompt, reply,
+problem, review note and timing, streams to the screen as it changes, and
+renders as markdown. The finished pack installs as an ordinary plugin
+that names its dependency, so it can be shared, disabled or deleted like
+anything else.
+
+## Why the renderer draws into a sink
+
+`WorldFrameRenderer` walks a read-only `World` and emits primitives to a
+`FrameSink`. Two backends implement it: `ComposeFrameSink` on a phone, and
+`ImageFrameSink` in `:tools:artpreview`, which writes PNGs.
+
+That is what makes the look reviewable. `./gradlew :tools:artpreview:artPreview`
+renders the same scene at every built-in style, from the same seed and the same
+camera, in a couple of seconds, with no device and no emulator. A style is a few
+dozen numbers, and the only honest way to know whether a change to them helped
+is to look at it beside the one before.
+
+It is a sink rather than a list of draw objects because it runs sixty times a
+second on a phone: a frame is tens of thousands of primitives, and allocating a
+description of each one costs more than drawing it.
+
+## What the AI is asked for, and what it is not
+
+Generated terrain is the expensive answer to a question the voxel grammar has
+already answered. The model is asked for *bounded ingredients* instead, and
+never for the final image of an acre.
+
+| Tier | Examples | How it is made |
+| --- | --- | --- |
+| Systemic | Blocks, tile variants, ore, grass, ordinary trees | Never generated. Procedural colour plus a silhouette family plus a deterministic variant per instance. Thousands exist and they must agree with each other, which rules do well and independent generations do badly. |
+| Prop | Shrines, ruins, landmark trees, arenas | One generation each at most, usually one per *region*. The landmark is the asset; the generator's placement rules do the rest. |
+| Hero | The player, elites, bosses, weapons | Generated from one curated reference so it is the same character every time, posed from motion data rather than from independent prompts, and accepted by a person before it ships. |
+
+`BiomeArtKit` is the region's ingredient list — a few ground swatches, a few
+prop silhouettes, one landmark, one weather. It is *derived* from rules a pack
+already has rather than authored, so a pack a model invented ninety seconds ago
+is art directed exactly as well as the one that shipped with the game.
+
+`ArtBible` assembles prompts by holding everything fixed but one noun. Camera,
+palette, edge treatment and prohibitions all come from the style record. Ask for
+a tree, a rock and a shrine in three freely written prompts and you get three
+objects from three different games; hold the rest still and you get a set.
+
+Props are drawn as vector silhouettes rather than glyphs. A world of emoji
+trees is one identical tree two hundred times, which reads as a repeating
+texture, and the shapes belong to whichever font the device shipped rather than
+to this game. Eight families with eight variants each cover everything a pack
+can scatter, and every instance is a different individual.
+
+## Why the world is 3D, and still made of sprites
+
+The 2D isometric canvas could fake depth but not light: no shadow could fall
+across a terrace, no torch could light the wall behind it, and a character
+could only ever be pasted onto the ground. The play screen now draws a real
+3D scene through a camera that looks down at about fifty degrees through a
+narrow lens from a long way back — the Diablo and Hades camera — so the grid
+still reads as a grid while walls get tops, terraces cast, and braziers light
+what is around them.
+
+The terrain is voxels meshed into triangles, with only visible faces emitted
+and ambient occlusion at every corner. Occlusion is what makes a voxel world
+look solid; without it every inside corner is lit like open ground.
+
+Scenery is not modelled. Trees, reeds, braziers and crystals are painted
+sprites standing in the lit world and turned to face the lens — exactly what
+Diablo II and Hades do, and exactly the kind of asset an image model is good
+at. A sprite in front of a character is faded with an ordered dither (no
+sorting, no depth-write problems), because a player who cannot see their own
+character behind a tree cannot see what is attacking them either.
+
+The camera is what the scene is drawn *through*; taps are resolved by casting
+a ray back out through the same camera and walking it cell by cell
+(`ScenePicker`), so the block under the finger is the block that gets dug.
+
+## Two renderers, one lighting equation
+
+`SceneBuilder` produces a `SceneFrame`: terrain, sprites, bodies, ground
+decals, glows, point lights and the sun's shadow projection, in one vertex
+layout. Two backends draw it:
+
+- `SceneGlRenderer` in `:feature:play`, OpenGL ES 3: a sun shadow map, the
+  scene into a high-range target, and one tone-mapping pass.
+- `SceneRasterizer` in `:tools:artpreview`, on the CPU, supersampled.
+
+Both implement `ShadingModel` — hemisphere ambient, sun with 3x3 PCF shadows,
+point lights, rim light on actors, distance and height fog, filmic shoulder,
+saturation and vignette. The GLSL is a line-for-line port of the Kotlin, and
+the shaders are compiled and linked as GLSL ES 3.00 in headless WebGL2 as a
+check. `./gradlew :tools:artpreview:scenePreview` renders every style from one
+camera, so a change to the look is judged by looking at it.
+
+The director now answers two new questions: what a surface *is*
+(`surfaceFor`, albedo and texture key, no light baked in) and what the light
+*does* (`lightingFor`). The 2D path keeps working unchanged.
+
+Two pieces of the lighting model exist because the first version got them
+wrong. Fog is measured from the point the camera looks at, not the lens: the
+camera sits thirty-odd blocks back, and fog measured from the eye started
+before the first thing on screen. And every style gives the hero a light
+radius, Diablo's answer to dark styles: the darkness stays everywhere except
+around the one thing the player must be able to see.
+
+## The asset forge
+
+`ForgePlanner` reads any content pack and orders a small kit: the ground and
+cliff faces of each region, the walls a player can build, and one sprite per
+kind of prop — a dozen or so images for a region, never one per block. Each
+prompt is the style's words, the block's own colour stated as dominant, the
+prop's silhouette family in plain words, and the prohibitions. Sprites are
+drawn on flat magenta and cut out by flood fill from the border, so purple
+*on* the object survives.
+
+`AssetForge` calls whatever `ImageModelPort` is wired in — OpenRouter with
+`meta/muse-image` in the app and in the `forgeKit` tool — cleans each image
+up for its role (square, downscale, seamless in two separate axis passes;
+key, de-spill, trim), rejects images that are flat key colour or featureless
+and retries them, and never fails a whole kit for one bad image.
+
+On a phone, the Style panel's *Forge art* button does this for whatever the
+player typed, into app storage, and the world repaints as each image lands.
+Four kits ship in the pack: house, dark, hades and kawaii. Styles without a
+kit borrow the house kit and differ by light, fog and grade alone — which is
+itself worth seeing: the neon preview is the house kit.
+
+One lesson is recorded in the code: Muse Image answers in WebP by default,
+and the JVM WebP plugin decoded some of those as a flat green channel — which
+looked exactly like a bad generation. The JVM client now asks for PNG.
+
+## Characters in 3D
+
+An actor is drawn from the best art it has:
+
+1. An animated sprite sheet made in the sprite forge. The 3D view projects the
+   actor's feet and head through its camera and draws the current frame at
+   that size over the scene, with the same code the 2D canvas uses — clips,
+   procedural motion, weapon rig, mirroring and hit flash all come along. The
+   scene still lays its contact shadow and rank ring on the real ground.
+2. Otherwise, a still sprite from the asset forge (`actor:<class or enemy id>`),
+   drawn as a depth-correct, shadow-casting billboard in both renderers and
+   mirrored when it walks towards screen-left.
+3. Otherwise, the low-poly stand-in body.
+
+Animated sheets are drawn over the scene rather than inside it, so a character
+standing behind a wall shows through it. That is a known limitation, chosen
+because it reuses the proven sprite code rather than duplicating it on the GPU.
+
+## A world you cannot get stuck in
+
+The Igbo world used to be built from three-block terraces with a one-block
+step, so every terrace edge was a one-way drop and any pit a player dug was a
+trap. Three changes, each covered by tests:
+
+- Holding into a ledge up to three blocks tall climbs it after a moment
+  (`PlayerMotion.CLIMB_UP`). Thin walls cannot be climbed; that would make
+  building one pointless.
+- Biome height offsets are blended smoothly across borders, which used to be
+  sheer walls as tall as the difference between two regions' biases.
+- The pack's terrain uses one-block steps. `WalkableTerrainTest` checks the
+  real generator on several seeds: no step taller than a climb, and fewer than
+  one border in a hundred needing one.
+
+Walking into a column whose chunk is not loaded is refused rather than read as
+air, which would drop the player to the bottom of the world.
+
+Painted ground no longer repeats visibly: every textured pixel is blended with
+a rotated, rescaled second sample by a slow world-space noise, and a second
+noise varies its brightness (`ShadingModel.detile`, ported to the shader).
+
+## Walls a third of a block thick
+
+`BlockShape.WALL` is a pane a third of a block thick that joins neighbouring
+walls and solid cubes, so dragging a line makes a wall and a corner makes an
+L with nothing to rotate. Collision uses the same boxes the mesher draws
+(`BlockShapes`), so a player can walk along the inside of their own wall. The
+`ERASE` build tool removes a dragged region and hands the blocks back.
+
+`BlockShape.FLOOR` is paving: a slab an eighth of a block thick that is not
+solid and lies in the air cell above the ground. Laying it never raises the
+floor or turns a doorway into a step, and dragging floor across grass paves
+the grass (the build plan is lifted one level). Tiles that touch drop their
+shared edges, so a courtyard is one surface with a lip only at its border.
+
+## Variety: several of everything
+
+A world where every tree is the same tree reads as machine-made faster than
+anything else. The forge plans three individuals of each ground and each
+prop (`ForgePlanner.variants`), keyed `key`, `key#1`, `key#2`, so a kit
+forged before variants existed still loads.
+
+- **Props** pick an individual by a hash of their cell
+  (`TextureLibrary.variantsOf`), then vary in size and mirror, so neighbours
+  differ and the same tree is the same tree every time you pass it.
+- **Ground** weaves its three paintings together. Each ground-top vertex
+  carries its two sister layers (`Vertex.VARIANT_A/B`), and the shader leans
+  towards each in slow patches several blocks across
+  (`ShadingModel.variants`), on top of the detile blend. One field, three
+  paintings, no seams.
+- **Litter** — fallen leaves, pebbles, flowers, roots — is forged as
+  `detail:<biome>` cut-outs and laid flat on about one open ground cell in six,
+  at a turn and size of its own (`TerrainMesher` records the spots; the scene
+  lays the quads). Only on the region's own surface block, so paths, paving
+  and walls stay clean.
+
+## A visual hierarchy, or it looks like noise
+
+Every screen of Diablo or Hades is ranked: a quiet floor, calm scenery that
+frames the space, and only then the loud layer — characters, monsters, loot
+and spell effects, the things a player must read in a fraction of a second.
+Saturated colour and glow are spent on that layer and nowhere else. Without
+the ranking, every painted asset competes and the result reads as noise
+however good each piece is. Three rules enforce it:
+
+- **The floor is quiet.** Painted floors keep only part of their contrast
+  (`SceneLighting.floorDetail`, pulled towards the painting's own average —
+  its one-pixel mip on the GPU) and part of their saturation; walls keep a
+  little more, because cliffs also say where you can walk
+  (`ShadingModel.calm`, ported to the shader). Litter is sparse.
+- **Scenery frames, it does not fill.** The pack clusters scatter strongly
+  (`scatterClustering`, `scatterClusterScale`) into groves and nearly bare
+  clearings a few screens across: fights happen in glades, not in thickets.
+- **Scenery does not glow.** Forge prompts for tiles, props and litter carry
+  `ArtBible.SCENERY_RULE` and `FLOOR_RULE` and ask for no accent colour, and
+  they name a region rather than quoting its description: "thick with emerald
+  spirit mist" put a glowing wisp on every tree. Light sources are the one
+  exception, because a lit brazier is a landmark.
+
+## Ground maps: one large painting instead of a small tile
+
+A small tile repeats every two blocks and the eye finds the grid however good
+the painting is. So each region's ground and each path block also get a
+`GROUND_MAP`: one large painting from the image model covering
+`GroundMap.BLOCKS` (16) blocks a side, laid across the tops of those blocks
+as a single surface and repeated only every sixteen. Inside that span it
+holds real variety — a worn trail, a mossy hollow, a scatter of stones.
+
+- **Asked for as one place, not a texture.** Called a "seamless tileable
+  texture", the model paints a small motif and repeats it inside the frame,
+  so sixteen blocks repeated every four. The prompt asks for one continuous
+  painting with a stated, non-repeating layout instead.
+- **Wrapped without copies.** The tile seam pass blends most of an image with
+  its half-shifted self, which on a large map duplicated every feature.
+  `Pixels.seamlessWide` cross-fades only a narrow band where opposite edges
+  meet, so nothing is copied.
+- **Kept large on the GPU.** Maps live at `TextureLibrary.MAP_BASE` and up
+  and in their own 1024-texel array beside the 512-texel tile array, so the
+  detail they exist for is not resampled away. Tile variants are skipped where
+  a map is laid; the detile blend and floor calming still apply.
+- `refinishKit` re-runs post-processing on the raw originals the forge kept,
+  so a change like this costs nothing to apply to existing kits.
+
+## Composition: roads, set pieces, and where fights happen
+
+Noise makes a texture, not a place. `BiomeComposition` lets a pack say what a
+region's paths and landmarks are made of; the generator decides where they go,
+one column at a time from world coordinates, so chunks still generate in any
+order without seams.
+
+- **Paths** follow the 0.5 contour of a slow noise field: a contour never ends
+  abruptly or crosses itself. The field's value divided by its slope is the
+  distance to the contour, so a road keeps its width through bends; scenery is
+  kept back from its verge.
+- **Landmarks** — a centrepiece, a ring around it, a paved pad — sit one per
+  cell of a fixed 44-block grid, never nearer a cell edge than the largest
+  clearing, so a column only ever consults its own cell. Of several candidate
+  spots in a cell the one nearest a path wins, so roads run through set
+  pieces. A site is used only in open ground, its pad is levelled, and
+  scenery is kept out of its clearing. In the Igbo grove: an Ofo shrine on
+  laterite paving between four braziers.
+- The forge plans art for whatever a region's paths and landmarks use.
+
+`CompositionTest` checks the real pack: shrines exist, stand on level pads with
+their four braziers, and paths are a thread through the grove with nothing
+growing on them.
+
+## One handedness, and a screen-relative stick
+
+The 2D projection draws world +x down-right and +y down-left on screen. A true
+camera looking north-west over a right-handed world shows the mirror image,
+so the 3D view first shipped mirrored against every rule written for the 2D
+one: pushed right, the hero walked left; characters faced away from where
+they walked; the upper-left sun lit from the upper right. `SceneCamera`
+flips screen X in its projection so both views share one handedness, and
+its `right` is the on-screen right.
+
+The stick was also fed in as world axes — right meant east, which on an
+isometric screen is down-right. `IsometricProjection.screenToWorldDirection`
+turns the stick's screen vector into a ground direction first, so up walks up
+the screen. `ScreenDirectionTest` pins stick, 2D and 3D together by where a
+step actually lands on screen, and fails with the mirror removed.
+
+## Scenery is painted from the camera's angle
+
+The 3D camera looks down at `IsometricCamera.SCENE_ELEVATION_DEGREES` (52),
+and `SceneCamera` takes its default from there. Prop prompts state that angle
+in degrees and in consequences for each shape family — a tree's crown seen
+from above and dominating, its trunk foreshortened; a brazier's rim a wide
+ellipse. Asked only for "a high three-quarter angle", the model painted trees
+from eye level, and side-on trunks stood up in a world seen from above.
+
+## Sprite shadows
+
+A camera-facing card seen from the sun casts a sliver or a slab — in the
+preview, literally a rectangle beside every tree. Sprites therefore do not
+cast into the shadow map. Each lays its own silhouette on the ground instead:
+a decal (`Vertex.SPRITE_SHADOW`) that samples the sprite's alpha, stretched
+away from the sun and longer the lower it is, darker at the foot than at the
+tip. The Diablo II and Hades answer; one quad per sprite, identical in both
+backends. Terrain and walls still cast through the shadow map.
+
+## A larger map
+
+The game loads nine by nine chunks around the player (144 blocks across, up
+from 80) and meshes 56 blocks around the camera, so the loaded edge stays far
+past the fog.
+
+## Combat theatre
+
+The art director already described each moment of combat as data
+(`effectsFor(CombatCue)` returns rings, flashes, debris, beams, arcs,
+afterimages, ground glows and shakes). `EffectTrack` in `engine:scene` plays
+them: pure, clocked by the caller, capped so a crowded fight drops its oldest
+effect rather than its newest. `SceneBuilder` turns each one into additive
+glows and soft decals, and the brightest few also become short-lived point
+lights, so a hit lights the ground around it. The camera's aim takes
+`EffectTrack.shake()`; picking uses the same camera, so a tap during a shake
+still lands where the finger is.
+
+On the phone, `CombatTheatre` reads what the engine already reports — every
+new `FeedbackMark` (hit, crit, block, dodge, heal, kill, loot, level-up) and
+every change of the hero's animation into attack, special or roll — and turns
+each into a cue. Nothing new is threaded through the engine. A struck
+character's painted sprite blanches for a moment through its emissive term.
 
 ## Why sprites have two models
 
@@ -417,6 +1113,12 @@ configuration: `stratum.jvm`, `stratum.android.library` and
 ./gradlew test                  # every module's unit tests
 ./gradlew architectureCheck     # boundary enforcement
 ./gradlew :app:assembleRelease  # the signed APK CI attaches to each pull request
+
+# Import a Flame game or Tiled project and render its level, no device needed
+./gradlew :tools:artpreview:importPreview --args="path/to/game build/import-preview [map]"
+
+# Check a plugin folder loads and pack it into a .stratum file
+./gradlew :tools:artpreview:packPlugin --args="examples/plugins/nri-chronicles build/nri-chronicles.stratum"
 ```
 
 Release builds are always signed; see `SIGNING.md` for which key and how to

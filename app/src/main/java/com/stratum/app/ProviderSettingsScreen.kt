@@ -48,6 +48,7 @@ fun ProviderSettingsScreen(
     var apiKey by remember { mutableStateOf(initial.apiKey) }
     var model by remember { mutableStateOf(initial.model) }
     var imageModel by remember { mutableStateOf(initial.imageModel) }
+    var videoModel by remember { mutableStateOf(initial.videoModel) }
     var baseUrl by remember { mutableStateOf(initial.baseUrl) }
     var saved by remember { mutableStateOf(false) }
 
@@ -126,6 +127,31 @@ fun ProviderSettingsScreen(
                 singleLine = true,
             )
             Spacer(Modifier.height(Space.medium))
+            // Its own field because video models are not in the model list at
+            // all: /models reports text, image and audio as the only output
+            // modalities, and the video models live behind /videos/models with
+            // their own durations, sizes and prices. Everything below was
+            // measured against real generations rather than read off a page.
+            OutlinedTextField(
+                value = videoModel,
+                onValueChange = { videoModel = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Video model") },
+                placeholder = { Text("bytedance/seedance-1-5-pro") },
+                supportingText = {
+                    Text(
+                        "Generates a clip the sheet is cut from, pinned to a first and last " +
+                            "drawing. seedance-1-5-pro is the default and the cheapest that " +
+                            "takes both ends: ~$0.10 a 4s clip without audio, which is half " +
+                            "the price of leaving audio on for a soundtrack the sheet throws " +
+                            "away. Nothing sells a clip shorter than 4s, and a walk cycle is " +
+                            "about a second, so only the opening holds its facing -- past " +
+                            "that the character turns to show its back.",
+                    )
+                },
+                singleLine = true,
+            )
+            Spacer(Modifier.height(Space.medium))
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it; saved = false },
@@ -147,6 +173,7 @@ fun ProviderSettingsScreen(
                             apiKey = apiKey.trim(),
                             model = model.trim().ifBlank { initial.model },
                             imageModel = imageModel.trim().ifBlank { initial.imageModel },
+                            videoModel = videoModel.trim().ifBlank { initial.videoModel },
                             baseUrl = baseUrl.trim().ifBlank { initial.baseUrl },
                         ),
                     )

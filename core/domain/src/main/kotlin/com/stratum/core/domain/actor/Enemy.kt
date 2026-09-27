@@ -27,7 +27,48 @@ data class EnemyDefinition(
     val bonusDropChance: Float = 0f,
     val bodyColor: Long = 0xFF8A3B3B,
     val spriteSetId: String? = null,
+    /** Whose side it is on; null for wild things, which are hostile to everyone. */
+    val factionId: String? = null,
+    /** How it fights in a crowd. See [CombatRole]. */
+    val role: CombatRole = CombatRole.MELEE,
 )
+
+/**
+ * What a monster does in a group, which is what makes a pack a fight rather
+ * than a queue. Melee surround, ranged keep their distance, support hangs
+ * back behind the line, swarmers rush, brutes push through.
+ */
+enum class CombatRole {
+    MELEE,
+    RANGED,
+    SUPPORT,
+    SWARMER,
+    BRUTE,
+}
+
+/** One kind of monster in a pack, and how many. */
+data class PackMember(val enemyId: String, val count: Int = 1) {
+    init {
+        require(count >= 1) { "A pack member of $count is not a member" }
+    }
+}
+
+/**
+ * A group that spawns and fights together: a leader and the ones who follow
+ * it. Kill the leader and the rest may break -- see morale in the crowd AI.
+ */
+data class EnemyPackDefinition(
+    val id: String,
+    val name: String,
+    val leaderId: String? = null,
+    val members: List<PackMember> = emptyList(),
+    /** Biome ids it appears in. Empty means anywhere. */
+    val spawnBiomeIds: List<String> = emptyList(),
+    /** Relative frequency against single spawns and other packs. */
+    val weight: Int = 100,
+) {
+    val size: Int get() = members.sumOf { it.count } + if (leaderId != null) 1 else 0
+}
 
 /**
  * Rank scales an enemy without a pack having to define three copies of it.
@@ -78,6 +119,13 @@ data class EnemyInstance(
      */
     val facingX: Float = 0f,
     val facingY: Float = 1f,
+    val factionId: String? = null,
+    val role: CombatRole = CombatRole.MELEE,
+    /** The pack it spawned with, so the crowd AI can move it as one. */
+    val squadId: String? = null,
+    val isLeader: Boolean = false,
+    /** Where it lives, for a settlement's garrison: it returns here when it loses interest. */
+    val home: WorldPoint? = null,
 ) {
     val isAlive: Boolean get() = health > 0 && state != EnemyState.DEAD
 

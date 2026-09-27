@@ -37,10 +37,15 @@ enum class PoseGuideMode(val label: String) {
 /** How a guide is drawn. */
 enum class PoseGuideStyle(val label: String) {
     /**
-     * Flat black lines on white.
+     * Black lines on white, with the far side of the body in grey.
      *
      * Legible to a chat image model, and unmistakably a diagram rather than
      * art — which is what stops a model returning a tidied-up stick figure.
+     *
+     * The grey is the one concession, and it is not decoration. Flat black
+     * throughout leaves a three-quarter figure with no way to say which arm
+     * and which leg are nearer the camera, and the two halves of a walk come
+     * back as the same stride drawn twice.
      */
     DIAGRAM("Plain diagram"),
 

@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      Both orientations, and turning the phone does not restart the activity:
+      Compose re-lays out for the new shape, and the world, its GL context and
+      the fight in progress carry on untouched.
+    -->
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -27,6 +32,8 @@
         android:theme="@style/Theme.MyApplication">
         <activity
             android:name="com.stratum.app.MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
+            android:screenOrientation="fullUser"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.MyApplication">

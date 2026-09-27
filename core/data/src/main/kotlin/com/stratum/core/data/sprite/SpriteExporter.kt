@@ -83,6 +83,32 @@ object SpriteExporter {
         return exportBytes(context, bytes, "${slug(setName)}_poses.zip", "application/zip")
     }
 
+    /**
+     * The reference drawing, on its own.
+     *
+     * Worth its own way out because it is not an animation frame and is not in
+     * the sheet, and it is the one image the whole character is an edit of. A
+     * person redrawing this character later, or taking it to another tool,
+     * wants the T-pose rather than forty action poses — and until now the only
+     * thing that could leave the app was the sheet the reference is absent
+     * from.
+     */
+    fun exportReference(context: Context, setName: String, bytes: ByteArray): File? =
+        exportBytes(context, bytes, "${slug(setName)}_reference.png", "image/png")
+
+    /**
+     * The clip an animation was cut from.
+     *
+     * The frames are a sampling of this, and a coarse one: a four second clip
+     * holds nearly a hundred pictures and a twelve frame row takes ten. Anyone
+     * who wants the motion rather than the sheet — to re-cut it at another
+     * rate, to look at what the sampling missed, or to take it into an editor
+     * that can do better than a fixed grid — needs the clip itself, and it is
+     * the most expensive thing the pipeline produces.
+     */
+    fun exportClip(context: Context, setName: String, key: String, bytes: ByteArray): File? =
+        exportBytes(context, bytes, "${slug(setName)}_${slug(key)}.mp4", MIME_VIDEO)
+
     /** Hands the file to whatever the person picked, via the app's file provider. */
     fun share(context: Context, file: File, mimeType: String, title: String) {
         runCatching {
@@ -136,6 +162,9 @@ object SpriteExporter {
             }
         }
     }
+
+    /** What a share sheet needs to offer the right apps for a clip. */
+    const val MIME_VIDEO = "video/mp4"
 
     private const val EXPORTS = "exports"
     private const val MAX_NAME = 48

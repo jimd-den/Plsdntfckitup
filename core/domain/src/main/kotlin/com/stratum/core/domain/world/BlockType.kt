@@ -46,6 +46,13 @@ data class BlockType(
     val topColor: Long = 0xFF9E9E9E,
     val sideColor: Long = 0xFF6E6E6E,
     val accentColor: Long = 0xFF000000,
+    /**
+     * What part of the cell it fills. See [BlockShape].
+     *
+     * Anything other than a cube should also set [isOpaque] to false: a thin
+     * wall does not hide the cell behind it, and the renderer culls by opacity.
+     */
+    val shape: BlockShape = BlockShape.CUBE,
 ) {
     val isAir: Boolean get() = id == AIR_ID
 

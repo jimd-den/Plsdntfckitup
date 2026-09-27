@@ -46,6 +46,13 @@ object TestContent {
         dropId = "test:ingot",
     )
     val leaves = BlockType(id = "test:leaves", displayName = "Leaves", hardness = 0.2f, isOpaque = false)
+    val wall = BlockType(
+        id = "test:wall",
+        displayName = "Wall",
+        hardness = 0.5f,
+        isOpaque = false,
+        shape = com.stratum.core.domain.world.BlockShape.WALL,
+    )
 
     val plains = BiomeDefinition(
         id = "test:plains",
@@ -237,7 +244,7 @@ object TestContent {
         id = "test",
         name = "Engine Test Pack",
         author = "test",
-        blocks = listOf(soil, stone, sand, torch, ore, leaves),
+        blocks = listOf(soil, stone, sand, torch, ore, leaves, wall),
         biomes = listOf(plains, highlands),
         heroClasses = listOf(digger),
         damageTypes = listOf(physical, fire),

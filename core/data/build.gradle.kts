@@ -8,6 +8,7 @@ android { namespace = "com.stratum.core.data" }
 
 dependencies {
   api(project(":core:domain"))
+  implementation(project(":importer:common"))
 
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.room.runtime)

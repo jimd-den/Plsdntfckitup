@@ -25,6 +25,9 @@ object BuildPlanner {
             BuildTool.FLOOR -> floor(from, to, to.z)
             BuildTool.WALLS -> walls(from, to, height)
             BuildTool.ROOM -> room(from, to, height)
+            // Erasing works on the region the drag covers, top to bottom of the
+            // walls you would have built there: a mistake is usually a wall.
+            BuildTool.ERASE -> box(from, to, height)
         }
         return positions.distinct().take(MAX_PLAN_SIZE)
     }
@@ -36,6 +39,18 @@ object BuildPlanner {
      * makes a staircase that is neither a wall nor a path, and nobody drags
      * perfectly straight on a phone.
      */
+    /** Every cell in the box the drag spans, from the anchor's level up. */
+    private fun box(from: BlockPos, to: BlockPos, height: Int): List<BlockPos> {
+        val baseZ = min(from.z, to.z)
+        return buildList {
+            for (z in baseZ until baseZ + height) {
+                for (y in min(from.y, to.y)..max(from.y, to.y)) {
+                    for (x in min(from.x, to.x)..max(from.x, to.x)) add(BlockPos(x, y, z))
+                }
+            }
+        }
+    }
+
     private fun line(from: BlockPos, to: BlockPos): List<BlockPos> {
         val dx = to.x - from.x
         val dy = to.y - from.y
@@ -136,4 +151,17 @@ enum class BuildTool(val label: String, val needsDrag: Boolean) {
     FLOOR("Floor", true),
     WALLS("Walls", true),
     ROOM("Room", true),
+
+    /**
+     * Removes what the drag covers and hands it back.
+     *
+     * Digging one cell at a time is right for mining and wrong for undoing a
+     * wall you placed in the wrong spot: fixing a mistake should cost the same
+     * one gesture that made it.
+     */
+    ERASE("Erase", true),
+    ;
+
+    /** Whether committing this tool removes blocks rather than placing them. */
+    val removes: Boolean get() = this == ERASE
 }

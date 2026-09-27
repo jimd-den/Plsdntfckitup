@@ -1,6 +1,8 @@
 package com.stratum.content.igbo
 
+import com.stratum.core.domain.content.BiomeComposition
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.content.Landmark
 import com.stratum.core.domain.content.DepositRule
 import com.stratum.core.domain.content.ScatterRule
 
@@ -38,11 +40,23 @@ internal object IgboPackBiomes {
         heightBias = 1,
         roughness = 0.7f,
         scatter = listOf(
-            ScatterRule(IgboPackBlocks.irokoCanopy.id, chance = 0.055f, height = 1),
-            ScatterRule(IgboPackBlocks.palmReed.id, chance = 0.05f, height = 1),
+            ScatterRule(IgboPackBlocks.irokoCanopy.id, chance = 0.045f, height = 1),
+            ScatterRule(IgboPackBlocks.palmReed.id, chance = 0.03f, height = 1),
         ),
         deposits = listOf(bronzeVein, ironVein),
         ambientLight = 11,
+        // A red-earth path winds through the grove to Ofo shrines standing in
+        // paved clearings, braziers either side.
+        composition = BiomeComposition(
+            pathBlockId = IgboPackBlocks.redEarth.id,
+            pathWidth = 2.2f,
+            landmark = Landmark(
+                centreBlockId = IgboPackBlocks.ofoShrine.id,
+                ringBlockId = IgboPackBlocks.bronzeBrazier.id,
+                floorBlockId = IgboPackBlocks.lateritePaving.id,
+            ),
+        ),
+        temperature = 0.62f,
     )
 
     val ozoCourtyard = BiomeDefinition(
@@ -59,6 +73,20 @@ internal object IgboPackBiomes {
         ),
         deposits = listOf(bronzeVein.copy(chance = 0.16f)),
         ambientLight = 14,
+        composition = BiomeComposition(
+            pathBlockId = IgboPackBlocks.graniteStone.id,
+            pathWidth = 3f,
+            landmark = Landmark(
+                centreBlockId = IgboPackBlocks.nsibidiSeal.id,
+                ringBlockId = IgboPackBlocks.bronzeBrazier.id,
+                floorBlockId = IgboPackBlocks.lateritePaving.id,
+                floorRadius = 4,
+                ringRadius = 4,
+                clearRadius = 7,
+                chance = 0.85f,
+            ),
+        ),
+        temperature = 0.7f,
     )
 
     val thunderPeak = BiomeDefinition(
@@ -76,6 +104,17 @@ internal object IgboPackBiomes {
             ironVein,
         ),
         ambientLight = 8,
+        composition = BiomeComposition(
+            pathBlockId = IgboPackBlocks.ashSand.id,
+            landmark = Landmark(
+                centreBlockId = IgboPackBlocks.stormCrystal.id,
+                ringBlockId = IgboPackBlocks.stormCrystal.id,
+                ringRadius = 2,
+                ringCount = 3,
+                clearRadius = 4,
+            ),
+        ),
+        temperature = 0.3f,
     )
 
     val bronzeCatacombs = BiomeDefinition(
@@ -92,6 +131,7 @@ internal object IgboPackBiomes {
         ),
         deposits = listOf(bronzeVein.copy(chance = 0.22f, clusterSize = 5), ironVein),
         ambientLight = 5,
+        temperature = 0.4f,
     )
 
     val mistMarsh = BiomeDefinition(
@@ -109,6 +149,7 @@ internal object IgboPackBiomes {
         ),
         deposits = listOf(ironVein.copy(chance = 0.18f)),
         ambientLight = 9,
+        temperature = 0.5f,
     )
 
     val all = listOf(sacredGrove, ozoCourtyard, thunderPeak, bronzeCatacombs, mistMarsh)

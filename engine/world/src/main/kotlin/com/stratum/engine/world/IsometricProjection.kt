@@ -188,9 +188,23 @@ data class IsometricProjection(
         return true
     }
 
-    private companion object {
+    companion object {
+        /**
+         * A direction on screen — x right, y down, as a thumbstick reports it
+         * — as a direction on the ground, with its length kept.
+         *
+         * Screen right is world (+x, -y) and screen down is world (+x, +y) in
+         * this projection (and in the 3D camera, which shares its handedness),
+         * so the stick is a 45 degree turn away from world axes. Fed in as
+         * world axes directly, pushing right walked the hero down-right.
+         */
+        fun screenToWorldDirection(screenX: Float, screenY: Float): WorldPoint =
+            WorldPoint((screenX + screenY) * HALF_SQRT2, (screenY - screenX) * HALF_SQRT2, 0f)
+
+        private const val HALF_SQRT2 = 0.70710677f
+
         /** One block of slack so geometry straddling the edge is not popped away. */
-        const val EDGE_PADDING = 1
+        private const val EDGE_PADDING = 1
     }
 }
 

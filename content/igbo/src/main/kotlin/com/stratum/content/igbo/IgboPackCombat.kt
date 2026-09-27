@@ -1,5 +1,6 @@
 package com.stratum.content.igbo
 
+import com.stratum.core.domain.actor.CombatRole
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.actor.SkillShape
@@ -285,6 +286,7 @@ internal object IgboPackCombat {
             experience = 14,
             spawnWeight = 160,
             bodyColor = 0xFF8C4A3A,
+            role = CombatRole.BRUTE,
         ),
         EnemyDefinition(
             id = "$NS:shadow_leopard",
@@ -300,6 +302,7 @@ internal object IgboPackCombat {
             spawnWeight = 120,
             bonusDropChance = 0.08f,
             bodyColor = 0xFF37474F,
+            role = CombatRole.SWARMER,
         ),
         EnemyDefinition(
             id = "$NS:storm_wisp",
@@ -313,6 +316,7 @@ internal object IgboPackCombat {
             spawnBiomeIds = listOf(IgboPackBiomes.thunderPeak.id, IgboPackBiomes.ozoCourtyard.id),
             spawnWeight = 110,
             bodyColor = 0xFF00E5FF,
+            role = CombatRole.RANGED,
         ),
         EnemyDefinition(
             id = "$NS:marsh_revenant",
@@ -326,6 +330,7 @@ internal object IgboPackCombat {
             spawnBiomeIds = listOf(IgboPackBiomes.mistMarsh.id, IgboPackBiomes.sacredGrove.id),
             spawnWeight = 100,
             bodyColor = 0xFF33691E,
+            role = CombatRole.MELEE,
         ),
         EnemyDefinition(
             id = "$NS:catacomb_guardian",
@@ -340,6 +345,7 @@ internal object IgboPackCombat {
             spawnWeight = 70,
             bonusDropChance = 0.2f,
             bodyColor = 0xFFCD7F32,
+            role = CombatRole.BRUTE,
         ),
         EnemyDefinition(
             id = "$NS:agbara_priest",

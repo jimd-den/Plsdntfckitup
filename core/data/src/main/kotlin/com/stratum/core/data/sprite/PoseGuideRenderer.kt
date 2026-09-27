@@ -144,16 +144,36 @@ object PoseGuideRenderer {
             style = Paint.Style.STROKE
         }
         val torso = Paint(limb).apply { strokeWidth = size * TORSO_WIDTH }
+        val farLimb = Paint(limb).apply { color = FAR_SIDE }
+        val farTorso = Paint(torso).apply { color = FAR_SIDE }
 
         // Far side first, near side last, so the nearer limbs cover the further
         // ones exactly as they will in the drawing. Without it a stick figure
         // at a three-quarter angle is ambiguous about which arm is which.
+        //
+        // And the far side is drawn grey, because on its own the draw order
+        // achieved nothing: a black line covering a black line is invisible,
+        // so every limb read as being at the same depth. Held against real
+        // generated art, that is exactly what came back -- two halves of a
+        // walk, one with the left leg leading and one with the right, were
+        // returned as the same stride drawn twice, because nothing in the
+        // diagram said which leg was nearer. The words said it and the prompt
+        // says to match the diagram, so the words lost.
+        //
+        // Grey rather than a second colour: the diagram stays a diagram, which
+        // is what stops a model returning a tidied-up line drawing instead of
+        // a character.
         for (bone in Skeleton.bones) {
             val from = pose[bone.from] ?: continue
             val to = pose[bone.to] ?: continue
+            val far = bone.from.isFarSide || bone.to.isFarSide
             canvas.drawLine(
                 from.x * size, from.y * size, to.x * size, to.y * size,
-                if (bone.weight == BoneWeight.TORSO) torso else limb,
+                when {
+                    bone.weight == BoneWeight.TORSO -> if (far) farTorso else torso
+                    far -> farLimb
+                    else -> limb
+                },
             )
         }
 
@@ -206,6 +226,11 @@ object PoseGuideRenderer {
     private const val FOOT_WEIGHT = 0.7f
 
     /** The legs' own colours in the OpenPose palette, so a foot joins its leg. */
+    /** The side of the body turned away from the camera, in the plain diagram. */
+    private const val FAR_SIDE = 0xFF9E9E9E.toInt()
+
+    private val Joint.isFarSide: Boolean get() = name.endsWith("_FAR")
+
     private const val NEAR_FOOT = 0xFF00FF00.toInt()
     private const val FAR_FOOT = 0xFF0000FF.toInt()
 }

@@ -31,8 +31,9 @@ import kotlin.math.sqrt
 /**
  * An analog thumbstick.
  *
- * Reports a vector in the unit circle: x east, y south, matching world axes so
- * the caller never has to translate. A direction pad cannot express "slightly
+ * Reports a vector in the unit circle in screen terms: x right, y down. The
+ * caller turns it into a direction on the ground for its camera; in an
+ * isometric view screen right is not world east. A direction pad cannot express "slightly
  * north-east", which is most of the input in an isometric game, and it forces
  * the thumb to hunt for four separate targets.
  */

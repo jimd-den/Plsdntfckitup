@@ -1,0 +1,12 @@
+{
+  "id": "nri.chronicles",
+  "name": "Ọfọ & Bronze: Chronicles of Nri",
+  "version": "1.0.0",
+  "author": "Stratum",
+  "license": "CC-BY-4.0",
+  "description": "The tabletop campaign of the Kingdom of Nri as a plugin: two classes, a masquerade spirit, and the four rites a party can attempt at the table for power in the fight.",
+  "api": 1,
+  "dependencies": [
+    { "id": "igbo", "version": "^2.0" }
+  ]
+}

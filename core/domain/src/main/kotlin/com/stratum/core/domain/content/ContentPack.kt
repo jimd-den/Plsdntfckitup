@@ -10,6 +10,15 @@ import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.item.RarityStyle
 import com.stratum.core.domain.item.WeaponBase
+import com.stratum.core.domain.crafting.CurrencyDefinition
+import com.stratum.core.domain.crafting.SupportDefinition
+import com.stratum.core.domain.difficulty.WaystoneMod
+import com.stratum.core.domain.actor.EnemyPackDefinition
+import com.stratum.core.domain.faction.FactionDefinition
+import com.stratum.core.domain.map.TileMap
+import com.stratum.core.domain.settlement.SettlementRecipe
+import com.stratum.core.domain.passive.PassiveTree
+import com.stratum.core.domain.tabletop.SkillCheck
 import com.stratum.core.domain.sprite.SpriteSheet
 import com.stratum.core.domain.world.BlockType
 
@@ -51,6 +60,47 @@ data class ContentPack(
     val rarityStyles: List<RarityStyle> = emptyList(),
     /** Sheets shipped by the pack. Generated sheets join these at runtime. */
     val spriteSheets: List<SpriteSheet> = emptyList(),
+    /**
+     * Hand-authored levels. A pack whose terrain recipe names
+     * [TerrainRecipe.TILE_MAP] plays on one of these instead of generated ground.
+     */
+    val maps: List<TileMap> = emptyList(),
+    /**
+     * Tabletop checks: dice against a difficulty, paid out as boons in the
+     * fight. How a plugin brings a pen-and-paper system into the game.
+     */
+    val checks: List<SkillCheck> = emptyList(),
+    /**
+     * Passive skill trees. The last one loaded is the one characters grow
+     * on; a pack with combat but no tree gets a generated one.
+     */
+    val passiveTrees: List<PassiveTree> = emptyList(),
+    /**
+     * Crafting currency, support gems and waystone mods. A pack with combat
+     * that defines none of a kind gets the engine's standard set of it.
+     */
+    val currencies: List<CurrencyDefinition> = emptyList(),
+    val supports: List<SupportDefinition> = emptyList(),
+    val waystoneMods: List<WaystoneMod> = emptyList(),
+    /** The sides in the world, and how they regard each other. */
+    val factions: List<FactionDefinition> = emptyList(),
+    /** Groups of monsters that spawn and fight together. */
+    val enemyPacks: List<EnemyPackDefinition> = emptyList(),
+    /** Kinds of town the world generator may build. */
+    val settlements: List<SettlementRecipe> = emptyList(),
+    /** How this pack suggests its worlds be played; the player can change it. The last pack with an opinion wins. */
+    val rules: com.stratum.core.domain.world.WorldRules? = null,
+    /** Survival: what the body needs, what feeds it, where food is found and how it is prepared. */
+    val needs: List<com.stratum.core.domain.survival.NeedDefinition> = emptyList(),
+    val consumables: List<com.stratum.core.domain.survival.ConsumableDefinition> = emptyList(),
+    val forageRules: List<com.stratum.core.domain.survival.ForageRule> = emptyList(),
+    val recipes: List<com.stratum.core.domain.survival.RecipeDefinition> = emptyList(),
+    /** Strategy: what outposts stockpile, build and recruit. */
+    val resources: List<com.stratum.core.domain.strategy.ResourceDefinition> = emptyList(),
+    val structures: List<com.stratum.core.domain.strategy.StructureDefinition> = emptyList(),
+    val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
+    /** The studio crew this pack brings: agents that write content in its lore. */
+    val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 
@@ -102,7 +152,66 @@ data class BiomeDefinition(
     /** Ores and their depth bands. */
     val deposits: List<DepositRule> = emptyList(),
     val ambientLight: Int = 12,
+    /** How the region is laid out beyond its noise. See [BiomeComposition]. */
+    val composition: BiomeComposition = BiomeComposition(),
+    /** 0 freezing to 1 hot: how warm a body stays here, for survival. */
+    val temperature: Float = 0.55f,
 )
+
+/**
+ * The deliberate part of a region's layout: where people walk and what they
+ * built.
+ *
+ * Noise alone makes a texture, not a place. Diablo's overworld reads as
+ * designed because it is: roads wind between set pieces, and set pieces sit in
+ * clearings the scenery frames. A pack says which blocks a region's paths and
+ * landmarks are made of; the generator decides where they go, deterministically
+ * and one column at a time, so chunks still generate in any order.
+ */
+data class BiomeComposition(
+    /** Surface block of the paths that wind through the region; null for none. */
+    val pathBlockId: String? = null,
+    /** Rough path width, in blocks. */
+    val pathWidth: Float = 2f,
+    /** A set piece placed in open ground every so often; null for none. */
+    val landmark: Landmark? = null,
+)
+
+/**
+ * A small built place: a centrepiece, a ring around it, a floor under both.
+ *
+ * The ground under it is levelled, scenery is kept back from it, and it only
+ * stands in a clearing, so it is always something the player walks up to
+ * rather than something found half-buried in a thicket.
+ */
+data class Landmark(
+    val centreBlockId: String,
+    val ringBlockId: String? = null,
+    val ringRadius: Int = 3,
+    val ringCount: Int = 4,
+    /** A floor-shaped block laid around the centre; null for bare ground. */
+    val floorBlockId: String? = null,
+    val floorRadius: Int = 3,
+    /**
+     * Share of candidate sites that get one. Sites sit on a fixed world grid
+     * about three screens apart, so this is how often a region has a set
+     * piece rather than how far apart they are.
+     */
+    val chance: Float = 0.7f,
+    /** Kept free of scatter around the centre. */
+    val clearRadius: Int = 6,
+) {
+    init {
+        require(clearRadius in 1..MAX_CLEAR_RADIUS) { "A landmark's clearing must be 1..$MAX_CLEAR_RADIUS blocks, not $clearRadius" }
+        require(ringRadius <= clearRadius && floorRadius <= clearRadius) { "A landmark must fit inside its clearing" }
+        require(chance in 0f..1f) { "Landmark chance of $chance is not a share" }
+    }
+
+    companion object {
+        /** The largest clearing the generator's site grid can hold without neighbours overlapping. */
+        const val MAX_CLEAR_RADIUS = 10
+    }
+}
 
 data class ScatterRule(
     val blockId: String,

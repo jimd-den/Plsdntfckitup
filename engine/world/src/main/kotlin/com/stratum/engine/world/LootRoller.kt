@@ -134,13 +134,17 @@ class LootRoller(
         return ItemRarity.COMMON
     }
 
-    private fun rollAffixes(rarity: ItemRarity, itemLevel: Int, random: Random): List<AffixRoll> {
-        if (rarity.affixCount == 0) return emptyList()
+    private fun rollAffixes(rarity: ItemRarity, itemLevel: Int, random: Random): List<AffixRoll> =
+        rollAffixes(rarity.affixCount, itemLevel, random)
 
-        val pool = affixes.filter { it.minItemLevel <= itemLevel }.toMutableList()
+    /** [count] new affixes, none of them one of [excluding] by definition id. */
+    internal fun rollAffixes(count: Int, itemLevel: Int, random: Random, excluding: Set<String> = emptySet()): List<AffixRoll> {
+        if (count <= 0) return emptyList()
+
+        val pool = affixes.filter { it.minItemLevel <= itemLevel && it.id !in excluding }.toMutableList()
         val chosen = mutableListOf<AffixRoll>()
 
-        repeat(rarity.affixCount) {
+        repeat(count) {
             if (pool.isEmpty()) return@repeat
             val definition = pickWeighted(pool, random) { it.weight } ?: return@repeat
             // An item never rolls the same affix twice; two "+5 attack" lines
@@ -156,6 +160,16 @@ class LootRoller(
             )
         }
         return chosen
+    }
+
+    /** The same affix with its value rolled again, or unchanged when its definition is no longer loaded. */
+    internal fun rerolled(roll: AffixRoll, random: Random): AffixRoll =
+        affixes.firstOrNull { it.id == roll.definitionId }?.let { roll.copy(value = it.roll(random.nextFloat())) } ?: roll
+
+    /** An item's name for new affixes, from its base when that is still loaded. */
+    internal fun renamed(item: ItemInstance, affixes: List<AffixRoll>): String {
+        val base = weapons.firstOrNull { it.id == item.baseId } ?: return item.name
+        return composeName(base, affixes)
     }
 
     /** "Roped Bronze Blade of Storms": first prefix, base, first suffix. */

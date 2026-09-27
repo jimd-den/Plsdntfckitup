@@ -283,6 +283,24 @@ data class Skeleton(
             Joint.HEEL_FAR to heelFar, Joint.TOE_FAR to toeFar,
         )
 
+        // Turned head-over-heels about the hips, if the pose asks for it. Done
+        // to the finished body rather than to each limb as it is built, so the
+        // shape being rotated is the shape that was authored.
+        val turned = if (angles.bodyPitch == 0f) {
+            body
+        } else {
+            val a = Math.toRadians(angles.bodyPitch.toDouble())
+            val cosA = cos(a).toFloat()
+            val sinA = sin(a).toFloat()
+            body.mapValues { (_, p) ->
+                BodyPoint(
+                    lateral = p.lateral,
+                    up = p.forward * sinA + p.up * cosA,
+                    forward = p.forward * cosA - p.up * sinA,
+                )
+            }
+        }
+
         // Projected, then placed. The pelvis keeps the position it always had,
         // so drift and the guide's framing are unchanged and only the shape of
         // the figure is different.
@@ -298,7 +316,7 @@ data class Skeleton(
         // entire point.
         val zoom = 1f / IsoProjection.heightScale
         return Pose(
-            body.mapValues { (_, point) ->
+            turned.mapValues { (_, point) ->
                 val screen = IsoProjection.project(point)
                 JointPoint(originX + screen.x * zoom, originY + screen.y * zoom)
             },
@@ -396,6 +414,21 @@ data class PoseAngles(
      * the limb is: the near arm goes towards the viewer's side of the body and
      * the far arm away, so one number reads the same on both.
      */
+    /**
+     * The whole body turned head-over-heels, about the hips.
+     *
+     * Separate from [lean], which bends the spine and leaves the limbs where
+     * they were. That is right for a stoop and wrong for a roll: every limb
+     * angle here is measured from straight down rather than from the torso, so
+     * a spine leaned to a hundred and forty-eight degrees put the head below
+     * the hips while the arms went on hanging as if the character were
+     * standing. The result was a knot of crossing lines that nothing could
+     * read as a body, let alone as a body rolling.
+     *
+     * Applied after the pose is built, so a tuck stays a tuck the whole way
+     * round and the rotation cannot pull a limb through the torso.
+     */
+    val bodyPitch: Float = 0f,
     val shoulderNearOut: Float = 0f,
     val shoulderFarOut: Float = 0f,
     val hipNearOut: Float = 0f,
@@ -422,6 +455,7 @@ data class PoseAngles(
         if (t >= 1f) return other
         fun mix(a: Float, b: Float) = a + (b - a) * t
         return PoseAngles(
+            bodyPitch = mix(bodyPitch, other.bodyPitch),
             shoulderNearOut = mix(shoulderNearOut, other.shoulderNearOut),
             shoulderFarOut = mix(shoulderFarOut, other.shoulderFarOut),
             hipNearOut = mix(hipNearOut, other.hipNearOut),
