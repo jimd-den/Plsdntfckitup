@@ -83,8 +83,8 @@ loaded, including the built-in pack's `igbo:` content.
 | `maps` | Hand-made levels: `width`, `height`, `ground`, `groundLevel`, `layers` (`palette` of block ids and one `cells` index per cell, `-1` empty; `elevation`, `thickness`), `markers` (`kind`: player_spawn, enemy_spawn, point_of_interest; `x`, `y`, `ref`). |
 | `classes` | `id`, `name`, `title`, `strength`, `agility`, `insight`, `abilities` (skill ids), `startingWeapon`, `resourceName`, `spriteSet`, `stats`. |
 | `damageTypes` | `id`, `name`, `color`, `symbol`. Every weapon, skill and monster must use a damage type some loaded pack defines. |
-| `weapons` | `id`, `name`, `damageType`, `minDamage`, `maxDamage`, `attackSpeed`, `attackRange`, `toolTier`, `minItemLevel`. |
-| `affixes`, `inserts` | Item modifiers and socketable runes: `stat` is one of attack_power, max_health, armour, crit_chance, crit_multiplier, attack_speed, resistance, life_steal, mining_speed. |
+| `weapons` | The short way to write a weapon: `id`, `name`, `damageType`, `minDamage`, `maxDamage`, `attackSpeed`, `attackRange`, `toolTier`, `twoHanded`, `tags`, `requiredLevel`, `minItemLevel`. |
+| `itemBases`, `affixes`, `inserts`, `uniques`, `itemSets`, `itemNames`, `baseTiers` | Gear of every kind and what rolls on it; see *Gear*. |
 | `enemies` | `id`, `name`, `rank` (minion, elite, champion...), `damageType`, `stats`, `moveSpeed`, `aggroRange`, `experience`, `spawnBiomes`, `spawnWeight`, `spriteSet`. |
 | `skills` | `id`, `name`, `damageType`, `powerMultiplier`, `resourceCost`, `cooldownSeconds`, `shape` (strike, nova, lance), `range`. |
 | `lore` | `id`, `title`, `body`, `category` (history, deity, artifact, bestiary, place, ritual), `subject`. |
@@ -150,7 +150,7 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
 `crit_chance`, `crit_multiplier`, `attack_speed`, `life_steal`, `resistance`
 (add `"damageType"` to scope it), `skill_damage`, `area`,
 `cooldown_recovery`, `resource_cost`, `move_speed`, `max_resource`,
-`experience_gain`, `item_rarity`, `item_quantity`.
+`experience_gain`, `item_rarity`, `item_quantity`, `mining_speed`.
 
 **Passive trees** — the last pack with one wins; trees replace, never merge:
 
@@ -193,6 +193,108 @@ increased and more (`0.1` is 10%). Stats: `max_health`, `damage`, `armour`,
 "waystoneMods": [{ "id": "yourname:eclipse", "name": "Eclipse",
   "monster": [{ "stat": "damage", "kind": "more", "value": 0.3 }],
   "reward": [{ "stat": "item_rarity", "value": 0.25 }] }]
+```
+
+## Gear
+
+A hero wears ten things: a weapon, an off hand, a helm, body armour,
+gloves, boots, a belt, an amulet and two rings. Everything worn is a
+**base**, rolls **affixes**, and becomes modifiers on the same sheet the
+passive tree and supports use, so a ring's "increased damage" and a
+keystone's stack exactly as they read.
+
+**Bases** (`itemBases`) are any gear. `slot` is `weapon`, `offhand`, `helm`,
+`chest`, `gloves`, `boots`, `belt`, `amulet` or `ring`. A base with a
+`damageType` is a weapon and reads `minDamage`, `maxDamage`, `attackSpeed`,
+`attackRange`, `toolTier` and `twoHanded` (a two-handed weapon empties the
+off hand). `defences` are flat amounts of any stat the base gives before it
+rolls anything; `implicits` are ranges rolled once when it drops. `tags` are
+yours to invent -- "blade", "heavy", "caster" -- and decide which affixes can
+roll on it; the slot, its family (`weapon`, `armour`, `offhand`,
+`jewellery`) and `one_handed`/`two_handed` are tags already.
+`requiredLevel` gates wearing it, `minItemLevel` gates it dropping. The old
+`weapons` section still works and becomes bases the same way.
+
+```json
+"itemBases": [
+  { "id": "yourname:bronze_helm", "name": "Bronze Helm", "slot": "helm", "tags": ["heavy"],
+    "defences": [{ "stat": "armour", "value": 20 }], "requiredLevel": 8, "minItemLevel": 10 },
+  { "id": "yourname:jade_ring", "name": "Jade Ring", "slot": "ring",
+    "implicits": [{ "stat": "max_health", "kind": "flat", "min": 5, "max": 10 }] },
+  { "id": "yourname:maul", "name": "Maul", "slot": "weapon", "damageType": "yourname:crush",
+    "minDamage": 20, "maxDamage": 34, "attackSpeed": 0.8, "twoHanded": true }
+]
+```
+
+A range is `stat`, `kind`, and `min`/`max` (or one `value`), plus
+`damageType` to scope it; `kind` defaults to `increased` here as everywhere.
+
+**Base ladders.** A pack does not have to write every strength of a base.
+Each base (unless it says `"grows": false`) grows stronger rungs that drop
+deeper, named from `baseTiers` -- or `{base} II`, `III`, `IV` when no pack
+names any:
+
+```json
+"baseTiers": [{ "name": "Riveted {base}", "levelsAbove": 12 }, { "name": "Titled {base}", "levelsAbove": 36, "bonus": 1.15 }]
+```
+
+A rung's id is its root's with `~2`, `~3`... after it. Only the two deepest
+rungs of a family a drop can reach are in its pool.
+
+**Affixes** have `tiers`, weakest first, each with its own `minItemLevel`,
+`modifiers`, optional `name` and `weight`. `slots` and `tags` keep an affix
+to gear it suits (empty means anything); a `group` stops two affixes of one
+family rolling on one item; `local` makes it change the item's own numbers
+-- its damage, speed or defences -- rather than its wearer's. Prefixes and
+suffixes each take at most half of a rarity's affixes, rounded up.
+
+```json
+"affixes": [{ "id": "yourname:plated", "name": "Plated", "kind": "prefix", "local": true,
+  "slots": ["helm", "chest", "gloves", "boots"], "group": "yourname:armour",
+  "tiers": [
+    { "modifiers": [{ "stat": "armour", "kind": "increased", "min": 0.1, "max": 0.2 }] },
+    { "minItemLevel": 20, "name": "Fortified", "modifiers": [{ "stat": "armour", "kind": "increased", "min": 0.3, "max": 0.5 }] }
+  ] }]
+```
+
+An affix of one strength can be written in one line: `stat`, `min`, `max`,
+`modifierKind`, `minItemLevel`. Packs written before modifiers -- `stat`
+one of attack_power, max_health, armour, crit_chance, crit_multiplier,
+attack_speed, resistance, life_steal, mining_speed, and no `modifierKind` --
+load unchanged and mean what they always did.
+
+**Inserts** take `modifiers` and `convertsTo` (a damage type the weapon
+they sit in switches to); the older `stat`, `value`, `damageType` and
+`convertsDamageType` still read. Any item can hold them.
+
+**Uniques** are named items on a `base`, with fixed or ranged `modifiers`,
+`localModifiers` for the item's own numbers, `flavour`, and `flags`: rules
+the engine lets gear break. The flags are `skills_cost_health`,
+`cannot_crit`, `resource_shields_health`, `skills_use_weapon_type`,
+`hits_ignore_resistance` and `life_steal_uncapped`. Currency can temper a
+unique's values and add sockets, never replace its modifiers.
+
+```json
+"uniques": [{ "id": "yourname:blood_crown", "name": "Crown of Blood", "base": "yourname:bronze_helm",
+  "flags": ["skills_cost_health"], "flavour": "It drinks.",
+  "modifiers": [{ "stat": "skill_damage", "kind": "more", "value": 0.3 }] }]
+```
+
+**Sets** are uniques that name a `set`. The set's `bonuses` unlock by how
+many distinct pieces are worn, and stack:
+
+```json
+"itemSets": [{ "id": "yourname:pair", "name": "The Pair",
+  "bonuses": [{ "pieces": 2, "modifiers": [{ "stat": "damage", "value": 0.2 }] },
+              { "pieces": 4, "modifiers": [], "flags": ["cannot_crit"] }] }]
+```
+
+**Names.** Rare items and better are named from `itemNames` pools -- one
+word from `first`, one from `second` -- that fit the item's `slots` and
+`tags`; with no pool they read their affixes, "Roped Bronze Blade of Storms".
+
+```json
+"itemNames": [{ "id": "yourname:blades", "first": ["Storm", "Ash"], "second": ["Bite", "Oath"], "slots": ["weapon"] }]
 ```
 
 ## Worlds with their own lore
