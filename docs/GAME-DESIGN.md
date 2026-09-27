@@ -75,6 +75,9 @@ Being honest about the other direction:
 - **Diplomacy.** Reputation moves with who you kill; there are no quests,
   tribute or treaties yet.
 
+For a whole-codebase review of these gaps and a roadmap, see
+[ENGINE-REVIEW.md](ENGINE-REVIEW.md).
+
 ## Sources
 
 - Diablo IV endgame and activities: maxroll.gg/d4/resources/infernal-hordes,
