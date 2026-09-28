@@ -24,7 +24,8 @@
       {
         "id": "micro:settlements",
         "options": {
-          "style": "earthen"
+          "style": "regional",
+          "homeStyle": "igbo"
         }
       },
       {

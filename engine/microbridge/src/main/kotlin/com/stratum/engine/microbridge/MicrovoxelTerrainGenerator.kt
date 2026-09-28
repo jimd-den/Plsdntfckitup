@@ -367,7 +367,8 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
                 // Africa's own geology, the home region in the Guinean forest hills the built-in pack comes from.
                 StageSpec(TerrainStage.ID, mapOf("geology" to "africa", "home" to com.stratum.engine.microvoxel.geo.Provinces.FOREST_HILLS, "spawnRise" to "12")),
                 StageSpec(com.stratum.engine.microvoxel.gen.GeoFeaturesStage.ID),
-                StageSpec(SettlementsStage.ID, mapOf("style" to SettlementsStage.EARTHEN)),
+                // Every town in its land's tradition; home is an Igbo compound, as the built-in pack is Igbo.
+                StageSpec(SettlementsStage.ID, mapOf("style" to SettlementsStage.REGIONAL, "homeStyle" to "igbo")),
                 StageSpec(com.stratum.engine.microvoxel.gen.GroundcoverStage.ID, mapOf("density" to "1.1", "tall" to "0.25")),
                 StageSpec(com.stratum.engine.microvoxel.gen.TreesStage.ID, mapOf("style" to "tropical", "density" to "0.85")),
             ),
@@ -384,7 +385,8 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
         /** Every stage the bridge can build, described for an AI world-builder or a settings screen. */
         val catalogue: Map<String, String> = MicroWorldgen.catalogue + mapOf(
             SettlementsStage.ID to "The packs' own towns, the home town among them, built in microvoxels on the same plans the game uses. " +
-                "Options: style (earthen: mud walls with uli bands, thatch, round huts, compound walls; plain: the block buildings, bevelled).",
+                "Options: style (regional: each town in the building tradition of its land; or one of ${com.stratum.engine.microvoxel.arch.Traditions.ids.joinToString()} " +
+                "for every town; plain: the block buildings), homeStyle (auto or a tradition), density, sacredTree, homeRecipe, homeSize, homeLayout, homeWalls, homeVariant.",
         )
 
         /** Every stage the bridge can build: the engine's, plus the ones that need the packs. */

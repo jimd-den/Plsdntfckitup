@@ -26,7 +26,7 @@ class MicrovoxelPluginTest {
             listOf("micro:terrain", "micro:features", "micro:settlements", "micro:groundcover", "micro:trees"),
             content.terrain.passes.map { it.id },
         )
-        assertEquals("earthen", content.terrain.passes.single { it.id == "micro:settlements" }.options["style"])
+        assertEquals("regional", content.terrain.passes.single { it.id == "micro:settlements" }.options["style"])
 
         val generator = MicrovoxelTerrainGenerator.create(content.terrainContext(WorldConfig(seed = 7L)))
         // It builds the packs' towns itself, so it answers for them.

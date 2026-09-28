@@ -23,6 +23,15 @@ import com.stratum.engine.microvoxel.gen.StageParam
 import com.stratum.engine.microvoxel.gen.StageSetup
 import com.stratum.engine.microvoxel.gen.TerrainStage
 import com.stratum.engine.microvoxel.gen.TreesStage
+import com.stratum.engine.microvoxel.arch.ArchPalette
+import com.stratum.engine.microvoxel.arch.Building
+import com.stratum.engine.microvoxel.arch.PlainBuildings
+import com.stratum.engine.microvoxel.arch.Monuments
+import com.stratum.engine.microvoxel.arch.Side
+import com.stratum.engine.microvoxel.arch.Tradition
+import com.stratum.engine.microvoxel.arch.Traditions
+import com.stratum.engine.microvoxel.arch.WallStyle
+import com.stratum.engine.microvoxel.geo.GeoField
 import com.stratum.engine.settlement.HomeTown
 import com.stratum.engine.settlement.SettlementLayouts
 import com.stratum.engine.settlement.SettlementPlanner
@@ -50,11 +59,12 @@ import kotlin.math.sqrt
  * Because the generator then *is* the town atlas, the session does not stamp
  * towns over the land afterwards, and the home town is drawn in full detail.
  *
- * Options: `style` -- `earthen` (default: plinths, rounded mud corners, uli
- * bands in white nzu, timber doorways, lattice windows, steep thatch with
- * ragged eaves, round huts, compound walls, a sacred tree in the square) or
- * `plain` (the block buildings, cleanly bevelled); `density` scales the
- * world rules' town density; `sacredTree` plants the square's iroko.
+ * Options: `style` -- `regional` (default: each town in the building
+ * tradition of the land it stands on; see [Traditions]), one tradition's id
+ * for every town (`earthen` is the old name for `igbo`), or `plain` (the
+ * block buildings, cleanly bevelled); `homeStyle` sets the home town's apart;
+ * `density` scales the world rules' town density; `sacredTree` raises what
+ * stands at each town's heart (a sacred tree, a stele, a conical tower...).
  *
  * The home town is the player's to reshape: `homeRecipe` (a settlement id,
  * or `auto`), `homeSize` (0.5..2 times its radius), `homeLayout` (`auto` or
@@ -64,11 +74,17 @@ import kotlin.math.sqrt
 class SettlementsStage(private val context: TerrainContext, private val blocks: BlockMaterials, private val biomeId: (Int, Int) -> String?) : MicroStageFactory, Describable {
 
     override fun describe() = StageInfo(
-        ID, "Towns & home", "The packs' towns and your home town, built in mud, thatch and timber.",
+        ID, "Towns & home", "The packs' towns and your home town, each built in the tradition of the land it stands on.",
         listOf(
-            StageParam.Choice("style", "Look", "Earthen: mud walls, uli bands, thatch and round huts. Plain: the block buildings.", listOf(EARTHEN, PLAIN), EARTHEN),
+            StageParam.Choice(
+                "style", "Building tradition",
+                "Regional: each town builds as the people of its land do (Sudano-Sahelian on the Sahel, Swahili on the coast, Great Zimbabwe " +
+                    "among the granite domes...). Or one tradition everywhere. Plain: the block buildings.",
+                listOf(REGIONAL) + Traditions.ids + PLAIN, REGIONAL,
+            ),
+            StageParam.Choice("homeStyle", "Home tradition", "How your home town is built; auto follows its land.", listOf(AUTO) + Traditions.ids, AUTO),
             StageParam.Number("density", "Towns", "How many towns the wilds hold, relative to the world rules.", 0f, 3f, 1f),
-            StageParam.Toggle("sacredTree", "Sacred tree", "An iroko in each earthen town's square.", true),
+            StageParam.Toggle("sacredTree", "Town heart", "What stands at each town's centre: a sacred tree, a stele, a tower, a kraal.", true),
             StageParam.Choice("homeRecipe", "Home town", "Which kind of town you begin in.", listOf(AUTO) + context.settlements.map { it.id }, AUTO),
             StageParam.Number("homeSize", "Home size", "Hamlet to city: scales the home town's radius.", 0.5f, 2f, 1f),
             StageParam.Choice("homeLayout", "Home streets", "The home town's street pattern.", listOf(AUTO) + SettlementLayouts.standard.ids, AUTO),
@@ -79,8 +95,12 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
 
     override fun create(setup: StageSetup): MicroStage {
         val o = setup.options
-        val style = o.string("style", EARTHEN)
-        require(style == EARTHEN || style == PLAIN) { "Stage '$ID' option 'style' is '$EARTHEN' or '$PLAIN', not '$style'" }
+        val style = o.string("style", REGIONAL).let { if (it == EARTHEN) "igbo" else it }
+        require(style == REGIONAL || style == PLAIN || style in Traditions.ids) {
+            "Stage '$ID' option 'style' is $REGIONAL, $PLAIN or a tradition (${Traditions.ids.joinToString()}), not '$style'"
+        }
+        val homeStyle = o.string("homeStyle", AUTO).let { if (it == EARTHEN) "igbo" else it }
+        require(homeStyle == AUTO || homeStyle in Traditions.ids) { "Stage '$ID' option 'homeStyle' is $AUTO or a tradition, not '$homeStyle'" }
         val fields = setup.fields
         val natural = fields.require(Fields.SURFACE)
         val rules = context.config.rules
@@ -104,7 +124,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         val previous = fields.get(Fields.FOOTPRINT)
         fields.publish(Fields.FOOTPRINT, TownFootprint(planner, previous))
 
-        val grammar = TownGrammar(setup.palette, blocks, style == EARTHEN)
+        val grammar = TownGrammar(setup.palette, blocks, style, homeStyle, fields.get(Fields.GEOLOGY))
         return MicroStage { ctx -> build(ctx, planner, grammar, sacred) }
     }
 
@@ -142,33 +162,41 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         for (plan in plans) {
             val floorTop = plan.groundZ * R + R - 1
             val tallest = (plan.buildings.maxOfOrNull { it.template.height } ?: 0).coerceAtLeast(plan.recipe.wallHeight)
-            if (ctx.z1 < floorTop - 4 || ctx.z0 > (plan.groundZ + tallest + 12) * R) continue
-            ground(ctx, plan, g, bx0, by0, span)
+            if (ctx.z1 < floorTop - 4 || ctx.z0 > (plan.groundZ + tallest + 16) * R) continue
+            val tradition = g.traditionOf(plan)
+            ground(ctx, plan, g, tradition, bx0, by0, span)
             for (b in plan.buildings) {
-                val x0 = b.x * R - EAVES; val x1 = (b.x + b.width) * R - 1 + EAVES
-                val y0 = b.y * R - EAVES; val y1 = (b.y + b.depth) * R - 1 + EAVES
-                val zTop = (plan.groundZ + 1 + b.template.height) * R + max(b.width, b.depth) * R / 2 + 6
+                val spec = g.spec(b, plan)
+                val reach = tradition.reach
+                val x0 = spec.x0 - reach; val x1 = spec.x1 + reach
+                val y0 = spec.y0 - reach; val y1 = spec.y1 + reach
+                val zTop = tradition.top(spec)
                 if (!ctx.overlaps(x0, y0, floorTop, x1, y1, zTop)) continue
                 for (z in max(ctx.z0, floorTop + 1)..min(ctx.z1, zTop))
                     for (y in max(ctx.y0, y0)..min(ctx.y1, y1))
                         for (x in max(ctx.x0, x0)..min(ctx.x1, x1)) {
-                            val v = g.building(b, plan, x, y, z)
+                            val v = tradition.voxel(spec, x, y, z)
                             if (v != KEEP) ctx.set(x, y, z, v)
                         }
                 furniture(ctx, plan, b, g)
             }
-            if (g.earthen && sacred) sacredTree(ctx, plan)
+            if (sacred) heart(ctx, plan, tradition)
         }
     }
 
-    /** Roads, floors and yards levelled at the town's height, and the compound wall. */
-    private fun ground(ctx: MicroGenContext, plan: SettlementPlan, g: TownGrammar, bx0: Int, by0: Int, span: Int) {
+    /** Roads, floors and yards levelled at the town's height, and the compound wall in its tradition's manner. */
+    private fun ground(ctx: MicroGenContext, plan: SettlementPlan, g: TownGrammar, tradition: Tradition, bx0: Int, by0: Int, span: Int) {
         val floorTop = plan.groundZ * R + R - 1
         val road = blocks[plan.recipe.roadBlockId]
-        // Earthen compounds have swept laterite yards: the town's own ground, else its foundation earth.
-        val yard = blocks[plan.recipe.groundBlockId] ?: if (g.earthen) blocks[plan.recipe.foundationBlockId] else null
+        val traditional = tradition.town.wall != WallStyle.PLAIN
+        // Swept yards: the town's own ground, else its tradition's (sand, coral, granite grit), else its foundation earth.
+        val yard = blocks[plan.recipe.groundBlockId]
+            ?: tradition.town.yard?.let { g.material(it) }
+            ?: if (traditional) blocks[plan.recipe.foundationBlockId] else null
+        val beaten = traditional && tradition.town.beaten
         val foundation = blocks[plan.recipe.foundationBlockId]
         val wall = blocks[plan.recipe.wallBlockId]
+        val wallStyle = tradition.town.wall
         for (by in by0 until by0 + span) for (bx in bx0 until bx0 + span) {
             val d = plan.distance(bx, by)
             if (d > plan.radius + SettlementPlanner.BLEND) continue
@@ -189,24 +217,69 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
                     if (solidTop) {
                         for (z in surface - 1..surface) if (z in ctx.z0..ctx.z1) ctx.set(mx, my, z, top)
                         // Footworn patches in a swept yard, so it reads as earth and not as a floor.
-                        if (g.earthen && top == yard && building == null && surface in ctx.z0..ctx.z1 &&
+                        if (beaten && top == yard && building == null && surface in ctx.z0..ctx.z1 &&
                             Hash.unit(ctx.fields.seed, mx, my, 0, 64) < 0.18f
                         ) ctx.set(mx, my, surface, g.beaten)
                     } else if (surface + 1 in ctx.z0..ctx.z1) ctx.set(mx, my, surface + 1, top) // a rug or boardwalk lies on the ground
                 }
                 // Beaten earth softens a road's edge into the yard beside it, a quarter block at a time.
-                if (g.earthen && onRoad && top != null && !plan.onRoad(Math.floorDiv(mx + EDGE_X[lx], R), Math.floorDiv(my + EDGE_Y[ly], R)) &&
+                if (beaten && onRoad && top != null && !plan.onRoad(Math.floorDiv(mx + EDGE_X[lx], R), Math.floorDiv(my + EDGE_Y[ly], R)) &&
                     Hash.unit(ctx.fields.seed, mx, my, 0, 61) < 0.5f && surface in ctx.z0..ctx.z1
                 ) ctx.set(mx, my, surface, g.beaten)
                 if (inside && wall != null && plan.walled && !onRoad && d > plan.radius - WALL_THICKNESS) {
-                    val height = plan.recipe.wallHeight * R + if (g.earthen) 1 else 0
-                    for (z in surface + 1..surface + height) if (z in ctx.z0..ctx.z1) ctx.set(mx, my, z, wall)
-                    // Earthen compound walls carry a thatch coping against the rain.
-                    if (g.earthen && surface + height + 1 in ctx.z0..ctx.z1 && (lx == 1 || lx == 2 || ly == 1 || ly == 2))
-                        ctx.set(mx, my, surface + height + 1, g.thatchDark)
+                    compoundWall(ctx, plan, g, wallStyle, wall, mx, my, surface, lx, ly)
                 }
             }
         }
+    }
+
+    /**
+     * One column of the town wall. The wall's core is always the recipe's
+     * wall block, so it plays as planned; its face, top and coping are the
+     * tradition's.
+     */
+    private fun compoundWall(ctx: MicroGenContext, plan: SettlementPlan, g: TownGrammar, style: WallStyle, wall: Short, mx: Int, my: Int, surface: Int, lx: Int, ly: Int) {
+        val height = plan.recipe.wallHeight * R + if (style != WallStyle.PLAIN) 1 else 0
+        val d = microDistance(plan, mx, my)
+        val face = d > plan.radius - 0.3f || d < plan.radius - WALL_THICKNESS + 0.3f
+        // Arc length round the town, for patterns that run along the wall.
+        val along = (atan2((my - plan.centerY * R).toFloat(), (mx - plan.centerX * R).toFloat()) * plan.radius * R).toInt()
+        for (z in surface + 1..surface + height) {
+            if (z !in ctx.z0..ctx.z1) continue
+            val h = z - surface - 1
+            val skin = if (!face) null else when (style) {
+                WallStyle.DRYSTONE -> if (height - h in 2..4 && (Math.floorMod(along + (height - h), 6) == 0 || Math.floorMod(along - (height - h), 6) == 0)) g.drystoneDark else g.drystone
+                WallStyle.PISE_CRENELLATED -> g.pise
+                WallStyle.ADOBE_PINNACLED -> g.render
+                WallStyle.LIME_MERLONED -> g.lime
+                WallStyle.THORN -> g.thorn
+                WallStyle.MUD_COPED, WallStyle.PLAIN -> null
+            }
+            ctx.set(mx, my, z, skin ?: wall)
+        }
+        val topZ = surface + height + 1
+        if (topZ + 4 < ctx.z0 || topZ > ctx.z1) return
+        fun put(z: Int, m: Short) { if (z in ctx.z0..ctx.z1) ctx.set(mx, my, z, m) }
+        when (style) {
+            WallStyle.MUD_COPED -> if (lx == 1 || lx == 2 || ly == 1 || ly == 2) put(topZ, g.thatchDark) // thatch coping against the rain
+            WallStyle.DRYSTONE -> put(topZ, g.drystoneDark)
+            WallStyle.PISE_CRENELLATED -> if (Math.floorMod(along, 6) < 3) { put(topZ, g.pise); put(topZ + 1, g.pise); put(topZ + 2, g.pise) }
+            WallStyle.ADOBE_PINNACLED -> {
+                val k = Math.floorMod(along, 10)
+                if (k < 2) for (dz in 0..3) put(topZ + dz, g.adobe) else put(topZ, g.render)
+            }
+            WallStyle.LIME_MERLONED -> when (Math.floorMod(along, 6)) { 0, 1 -> { put(topZ, g.lime); put(topZ + 1, g.lime) }; 2 -> put(topZ, g.lime); else -> Unit }
+            WallStyle.THORN -> if (Hash.unit(ctx.fields.seed, mx, my, topZ, 66) < 0.5f) put(topZ, g.thorn)
+            WallStyle.PLAIN -> Unit
+        }
+    }
+
+    /** What stands in the square: the tradition's own heart, where nothing else stands at the centre. */
+    private fun heart(ctx: MicroGenContext, plan: SettlementPlan, tradition: Tradition) {
+        for (dy in -1..1) for (dx in -1..1) {
+            if (plan.buildingAt(plan.centerX + dx, plan.centerY + dy) != null || plan.onRoad(plan.centerX + dx, plan.centerY + dy)) return
+        }
+        Monuments.draw(ctx, tradition.town.sacred, plan.centerX * R + R / 2, plan.centerY * R + R / 2, plan.groundZ * R + R, Hash.mix(ctx.fields.seed, plan.centerX, plan.centerY))
     }
 
     /** Furniture stands in the middle of the room, a whole block so it reads back as itself (a brazier stays a brazier). */
@@ -214,14 +287,6 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         val m = blocks[b.template.furnitureBlockId] ?: return
         val fx = (b.x + b.width / 2) * R; val fy = (b.y + b.depth / 2) * R; val fz = (plan.groundZ + 1) * R
         ctx.fill(fx, fy, fz, fx + R - 1, fy + R - 1, fz + R - 1, m)
-    }
-
-    /** An iroko in the village square, where nothing else stands at the centre: the tree the village meets under. */
-    private fun sacredTree(ctx: MicroGenContext, plan: SettlementPlan) {
-        for (dy in -1..1) for (dx in -1..1) {
-            if (plan.buildingAt(plan.centerX + dx, plan.centerY + dy) != null || plan.onRoad(plan.centerX + dx, plan.centerY + dy)) return
-        }
-        TreesStage.plant(ctx, TreesStage.Kind.IROKO, plan.centerX * R + R / 2, plan.centerY * R + R / 2, plan.groundZ * R + R, Hash.mix(ctx.fields.seed, plan.centerX, plan.centerY))
     }
 
     /** Towns own their ground: no trees in the streets, no tufts on a floor. */
@@ -263,6 +328,8 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         const val ID = "micro:settlements"
         const val EARTHEN = "earthen"
         const val PLAIN = "plain"
+        /** Each town builds as the people of its land do. */
+        const val REGIONAL = "regional"
         const val AUTO = "auto"
         val KEY = FieldKey<SettlementAtlas>("settlements")
 
@@ -291,141 +358,62 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
  * a wall cell stays at least three-quarters full, a door cell empty to two
  * blocks high, a window cell the window block.
  */
-internal class TownGrammar(palette: MaterialPalette, private val blocks: BlockMaterials, val earthen: Boolean) {
-    private val R = SettlementsStage.R
-    private val KEEP = SettlementsStage.KEEP
-    private val AIR = MaterialPalette.AIR
-    val thatch = palette.id(M.THATCH)
-    val thatchDark = palette.id(M.THATCH_DARK)
-    private val mudDark = palette.id(M.MUD_DARK)
-    private val nzu = palette.id(M.NZU)
-    private val timber = palette.id(M.TIMBER)
-    val beaten = palette.id(M.BEATEN_EARTH)
+internal class TownGrammar(
+    private val palette: MaterialPalette,
+    private val blocks: BlockMaterials,
+    /** `regional`, `plain`, or one tradition's id for every town. */
+    private val style: String,
+    /** `auto`, or the home town's tradition. */
+    private val homeStyle: String,
+    private val geology: GeoField?,
+) {
+    private val traditions: Map<String, Tradition> = (Traditions.all(palette) + PlainBuildings(ArchPalette(palette))).associateBy { it.id }
+    private val chosen = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val specs = java.util.concurrent.ConcurrentHashMap<PlacedBuilding, Building>()
 
-    fun building(b: PlacedBuilding, plan: SettlementPlan, x: Int, y: Int, z: Int): Short =
-        if (earthen && isRound(b)) roundHut(b, plan, x, y, z) else house(b, plan, x, y, z)
+    fun material(name: String): Short = palette.id(name)
+    val drystone = palette.id(com.stratum.engine.microvoxel.arch.A.DRYSTONE)
+    val drystoneDark = palette.id(com.stratum.engine.microvoxel.arch.A.DRYSTONE_DARK)
+    val pise = palette.id(com.stratum.engine.microvoxel.arch.A.PISE)
+    val render = palette.id(com.stratum.engine.microvoxel.arch.A.RENDER)
+    val adobe = palette.id(com.stratum.engine.microvoxel.arch.A.ADOBE)
+    val lime = palette.id(com.stratum.engine.microvoxel.arch.A.LIME)
+    val thorn = palette.id(com.stratum.engine.microvoxel.arch.A.THORN)
 
-    /** Small square houses with the door mid-wall become round huts under a conical thatch. */
-    private fun isRound(b: PlacedBuilding): Boolean {
-        if (b.width != b.depth || b.width !in 3..5) return false
-        val centred = when (b.door) {
-            Facing.NORTH, Facing.SOUTH -> b.doorX == b.x + b.width / 2
-            Facing.EAST, Facing.WEST -> b.doorY == b.y + b.depth / 2
-        }
-        return centred && (b.x * 31 + b.y * 17) and 1 == 0
-    }
-
-    private fun house(b: PlacedBuilding, plan: SettlementPlan, x: Int, y: Int, z: Int): Short {
-        val x0 = b.x * R; val x1 = (b.x + b.width) * R - 1; val y0 = b.y * R; val y1 = (b.y + b.depth) * R - 1
-        val base = (plan.groundZ + 1) * R
-        val wallTop = base + b.template.height * R - 1
-        val wallMat = blocks[b.template.wallBlockId] ?: blocks[plan.recipe.foundationBlockId] ?: return KEEP
-        val inside = x in x0..x1 && y in y0..y1
-        if (z > wallTop) return roof(b, x, y, z, wallTop, wallMat)
-        if (!inside) {
-            // A plinth: a raised mud step around the foot of the wall.
-            val out = max(max(x0 - x, x - x1), max(y0 - y, y - y1))
-            return if (earthen && out == 1 && z < base + 2 && !doorAt(b, x, y)) mudDark else KEEP
-        }
-        val dW = x - x0; val dE = x1 - x; val dN = y - y0; val dS = y1 - y
-        val e = min(min(dW, dE), min(dN, dS))
-        if (e > 2) return AIR // the room
-        // Rounded outer corners, a quarter block.
-        if (earthen && e == 0 && min(dW, dE) + min(dN, dS) == 0) return AIR
-        val h = z - base
-        if (doorAt(b, x, y) && h < 2 * R) return AIR
-        if (doorFrame(b, x, y) && h <= 2 * R && e <= 1) return timber
-        if (doorAt(b, x, y) && h in 2 * R..2 * R + 1) return timber // lintel
-        val bx = Math.floorDiv(x, R); val by = Math.floorDiv(y, R)
-        val window = blocks[b.template.windowBlockId]
-        if (window != null && Math.floorDiv(z, R) == plan.groundZ + 2 && (bx + by) % 3 == 0 && !cornerCell(b, bx, by)) {
-            // A lattice window: the window block, pierced in a checker on its face.
-            return if (e == 0 && ((x + y + z) and 1) == 0) AIR else window
-        }
-        if (earthen && e == 0 && wallTop - base >= 8) {
-            // Uli: a white zigzag of nzu at shoulder height over a dark dado, as painted on Igbo compound walls.
-            if (h == 3) return mudDark
-            // A zigzag three voxels high: down on 0, middle on 1 and 3, up on 2.
-            val along = Math.floorMod(if (dN == 0 || dS == 0) x else y, 4)
-            if ((h == 5 && along == 0) || (h == 6 && (along == 1 || along == 3)) || (h == 7 && along == 2)) return nzu
-        }
-        return wallMat
-    }
-
-    private fun roof(b: PlacedBuilding, x: Int, y: Int, z: Int, wallTop: Int, wallMat: Short): Short {
-        val roofMat = blocks[b.template.roofBlockId] ?: if (earthen) thatch else return KEEP
-        val eaves = if (earthen) SettlementsStage.EAVES else 1
-        val x0 = b.x * R; val x1 = (b.x + b.width) * R - 1; val y0 = b.y * R; val y1 = (b.y + b.depth) * R - 1
-        val ridgeAlongY = b.width <= b.depth
-        val a = if (ridgeAlongY) x - x0 else y - y0 // across the ridge
-        val span = if (ridgeAlongY) x1 - x0 + 1 else y1 - y0 + 1
-        val along = if (ridgeAlongY) y - y0 else x - x0
-        val length = if (ridgeAlongY) y1 - y0 + 1 else x1 - x0 + 1
-        if (a < -eaves || a >= span + eaves || along < -2 || along >= length + 2) return KEEP
-        val rise = min(a, span - 1 - a)
-        val roofZ = wallTop + 1 + rise
-        val dz = z - roofZ
-        if (dz in -2..0) {
-            // Ragged eaves: the lowest thatch hangs unevenly, as thatch does.
-            if (earthen && (a == -eaves || a == span - 1 + eaves) && Hash.unit(0L, x, y, z, 62) < 0.35f) return AIR
-            // Courses of thatch: a lighter band every third layer, as bundles are laid.
-            return if (earthen && (z / 3) % 2 == 0) thatch else roofMat
-        }
-        // The ridge cap, and a knot of thatch at each end.
-        if (earthen && dz == 1 && rise >= (span - 1) / 2) return if (along == 0 || along == length - 1) thatchDark else if ((along and 1) == 0) thatchDark else KEEP
-        if (dz < -2 && a in 0 until span && along in 0 until length) {
-            val gableEnd = along <= 2 || along >= length - 3
-            return if (gableEnd) wallMat else AIR
-        }
-        return KEEP
-    }
-
-    private fun roundHut(b: PlacedBuilding, plan: SettlementPlan, x: Int, y: Int, z: Int): Short {
-        val cx = (b.x + b.width / 2f) * R - 0.5f; val cy = (b.y + b.depth / 2f) * R - 0.5f
-        val radius = b.width * R / 2f - 0.5f
-        val base = (plan.groundZ + 1) * R
-        val wallTop = base + b.template.height * R - 1
-        val wallMat = blocks[b.template.wallBlockId] ?: blocks[plan.recipe.foundationBlockId] ?: return KEEP
-        val dx = x - cx; val dy = y - cy
-        val d = sqrt(dx * dx + dy * dy)
-        if (z > wallTop) {
-            val roofMat = blocks[b.template.roofBlockId] ?: thatch
-            val coneZ = wallTop + 1 + (radius + SettlementsStage.EAVES - d) * 1.15f
-            if (d > radius + SettlementsStage.EAVES) return KEEP
-            val dz = z - coneZ
-            if (d < 1.2f && z <= coneZ + 4) return thatchDark // the finial
-            if (dz in -2.5f..0.5f) {
-                if (d > radius + SettlementsStage.EAVES - 1 && Hash.unit(0L, x, y, z, 63) < 0.35f) return AIR
-                return if ((z / 3) % 2 == 0) thatch else roofMat
+    /**
+     * The tradition a town builds in (`plain` for the block buildings, bevelled).
+     * Regional towns follow the province at their centre; without geology, the
+     * Igbo compounds the built-in pack comes from. The home town may be set apart.
+     */
+    fun traditionOf(plan: SettlementPlan): Tradition {
+        val id = chosen.getOrPut(plan.id) {
+            val home = plan.centerX == 0 && plan.centerY == 0
+            when {
+                home && homeStyle != SettlementsStage.AUTO -> homeStyle
+                style != SettlementsStage.REGIONAL -> style
+                else -> Traditions.choose(geology?.provinceAt(plan.centerX * R, plan.centerY * R)?.id, Hash.mix(0L, plan.centerX, plan.centerY, 0, 97))
             }
-            return if (dz < -2.5f && d < radius - 2) AIR else KEEP
         }
-        if (d > radius + 1) return KEEP
-        if (d > radius) return if (z < base + 2) mudDark else KEEP // plinth
-        if (d < radius - 3) return AIR
-        val h = z - base
-        val facing = atan2(dy, dx)
-        val doorAngle = atan2(b.door.dy.toFloat(), b.door.dx.toFloat())
-        var off = abs(facing - doorAngle); if (off > Math.PI) off = (2 * Math.PI - off).toFloat()
-        if (off < 2.2f / radius && h < 2 * R) return AIR
-        if (off < 3.2f / radius && h <= 2 * R) return timber
-        if (h == 3) return mudDark
-        if ((h == 5 || h == 6) && Math.floorMod((facing * radius).toInt() + h, 4) == 0) return nzu
-        return wallMat
+        return traditions.getValue(id)
     }
 
-    /** The door cell, the whole block, to the full depth of the wall. */
-    private fun doorAt(b: PlacedBuilding, x: Int, y: Int): Boolean = Math.floorDiv(x, R) == b.doorX && Math.floorDiv(y, R) == b.doorY
-
-    /** The quarter-block jambs either side of the door. */
-    private fun doorFrame(b: PlacedBuilding, x: Int, y: Int): Boolean {
-        val bx = Math.floorDiv(x, R); val by = Math.floorDiv(y, R)
-        return when (b.door) {
-            Facing.NORTH, Facing.SOUTH -> by == b.doorY && (x == b.doorX * R - 1 || x == b.doorX * R + R)
-            Facing.EAST, Facing.WEST -> bx == b.doorX && (y == b.doorY * R - 1 || y == b.doorY * R + R)
-        }
+    /** A plan's building as a tradition sees it; made once per building. */
+    fun spec(b: PlacedBuilding, plan: SettlementPlan): Building = specs.getOrPut(b) {
+        val base = (plan.groundZ + 1) * R
+        Building(
+            x0 = b.x * R, y0 = b.y * R, x1 = (b.x + b.width) * R - 1, y1 = (b.y + b.depth) * R - 1,
+            base = base, wallTop = base + b.template.height * R - 1,
+            doorX = b.doorX, doorY = b.doorY,
+            door = when (b.door) { Facing.NORTH -> Side.NORTH; Facing.SOUTH -> Side.SOUTH; Facing.EAST -> Side.EAST; Facing.WEST -> Side.WEST },
+            wall = blocks[b.template.wallBlockId] ?: blocks[plan.recipe.foundationBlockId] ?: palette.id(M.MUD),
+            window = blocks[b.template.windowBlockId],
+            roof = blocks[b.template.roofBlockId],
+            r = R,
+            seed = Hash.mix(0L, b.x, b.y, 0, 98),
+            windowAt = { bx, by, bz -> bz == plan.groundZ + 2 && (bx + by) % 3 == 0 },
+        )
     }
-
-    private fun cornerCell(b: PlacedBuilding, bx: Int, by: Int): Boolean =
-        (bx == b.x || bx == b.x + b.width - 1) && (by == b.y || by == b.y + b.depth - 1)
+    private val R = SettlementsStage.R
+    val thatchDark = palette.id(M.THATCH_DARK)
+    val beaten = palette.id(M.BEATEN_EARTH)
 }

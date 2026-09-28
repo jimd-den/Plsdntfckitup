@@ -69,6 +69,11 @@ object MicroScenePreview {
         )
         val textures = TextureLibrary().also { lib -> forged?.let { ForgedTextures.loadInto(it, lib) } }
 
+        // `traditions [ids...]`: only the building traditions, one home town each.
+        if (args.getOrNull(3) == "traditions") {
+            traditions(out, content, config, hot, director, textures, args.drop(4))
+            return
+        }
         val vantages = listOf("home" to homeVantage(generator), "wilds" to wildVantage(generator))
         val shots = listOf(Triple("home", vantages[0].second, 34f), Triple("home-overview", vantages[0].second, 62f), Triple("wilds", vantages[1].second, 34f))
         for ((name, v, distance) in shots) {
@@ -161,6 +166,37 @@ object MicroScenePreview {
         ImageIO.write(on, "png", File(out, "reveal-indoors.png"))
         ImageIO.write(sideBySide(off, on, "Reveal off", "Reveal on: the hero is never covered"), "png", File(out, "reveal-indoors-off-vs-on.png"))
         println("wrote reveal-indoors.png (${b.template.id} at $x,$y)")
+    }
+
+    /** The home town built in each tradition in turn, seen from above its main street. */
+    private fun traditions(
+        out: File, content: AssembledContent, config: WorldConfig, hot: com.stratum.engine.microbridge.HotTerrain,
+        director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String>,
+    ) {
+        val base = hot.passes
+        val ids = only.ifEmpty { com.stratum.engine.microvoxel.arch.Traditions.ids }
+        for (id in ids) {
+            val towns = base.firstOrNull { it.id == "micro:settlements" } ?: com.stratum.engine.microvoxel.gen.StageSpec("micro:settlements")
+            hot.retune(MicrovoxelTerrainGenerator.withStage(base, towns.copy(options = towns.options + mapOf("homeStyle" to id))))?.let { error("$id: $it") }
+            val v = homeVantage(hot.current)
+            val world = StreamingWorld(content.registry, hot, config)
+            world.focusOn(BlockPos(v.first, v.second, 0))
+            val ground = world.surfaceAt(v.first, v.second)
+            val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = 40f)
+            val micro = SceneBuilder(director, textures, biomeAt = { x, y -> hot.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = hot)
+            val frame = settled(micro) { micro.build(world, camera, actorsAround(world, v.first, v.second), WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)) }
+            val img = SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
+            val name = com.stratum.engine.microvoxel.arch.Traditions.all(hot.palette).first { it.id == id }.name
+            runCatching {
+                val g = img.createGraphics()
+                g.color = java.awt.Color(0, 0, 0, 150); g.fillRect(0, HEIGHT - 34, WIDTH, 34)
+                g.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 18); g.color = java.awt.Color.WHITE
+                g.drawString(name, 14, HEIGHT - 11); g.dispose()
+            }
+            ImageIO.write(img, "png", File(out, "tradition-$id.png"))
+            println("wrote tradition-$id.png")
+        }
+        hot.retune(base)
     }
 
     /** Builds frames until the background detail meshes are all in, as a player standing still would see. */
