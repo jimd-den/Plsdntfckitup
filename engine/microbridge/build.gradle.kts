@@ -5,4 +5,6 @@ plugins { id("stratum.jvm") }
 dependencies {
   api(project(":core:domain"))
   api(project(":engine:microvoxel"))
+  // The packs' towns are planned by the same planner the block engine uses, then built in microvoxels.
+  implementation(project(":engine:settlement"))
 }

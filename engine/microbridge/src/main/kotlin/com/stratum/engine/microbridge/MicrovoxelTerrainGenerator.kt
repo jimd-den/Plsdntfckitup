@@ -2,6 +2,8 @@ package com.stratum.engine.microbridge
 
 import com.stratum.core.domain.content.BiomeDefinition
 import com.stratum.core.domain.world.BiomeSource
+import com.stratum.core.domain.settlement.SettlementAtlas
+import com.stratum.core.domain.settlement.SettlementPlan
 import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.ChunkPos
@@ -20,6 +22,9 @@ import com.stratum.engine.microvoxel.MicroTerrainSource
 import com.stratum.engine.microvoxel.gen.CityPlanStage
 import com.stratum.engine.microvoxel.gen.Fields
 import com.stratum.engine.microvoxel.gen.Hash
+import com.stratum.engine.microvoxel.gen.Layers
+import com.stratum.engine.microvoxel.gen.StageRegistry
+import com.stratum.engine.microvoxel.gen.Strata
 import com.stratum.engine.microvoxel.gen.LotUse
 import com.stratum.engine.microvoxel.gen.MicroGenerator
 import com.stratum.engine.microvoxel.gen.MicroWorldgen
@@ -60,16 +65,37 @@ import kotlin.math.abs
  *   ]
  * }
  * ```
- * `passes` empty uses the preset's stages. Options: `preset`, `spawns`
- * (monster spawn markers per 8 x 8 blocks of wild land, 0..1),
- * `block.<material>` to pin a material to a block. See
+ * `passes` empty uses the preset's stages ([ANCIENT] by default: the packs'
+ * own soils and towns). Options: `preset`, `spawns` (monster spawn markers
+ * per 8 x 8 blocks of wild land, 0..1), `block.<material>` to pin a
+ * material to a block, `strata` = `builtin` to use the engine's own grass,
+ * dirt and rock instead of the packs' region blocks. See
  * [MicroWorldgen.catalogue] for every stage and its options.
  */
-class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource {
+open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource {
 
-    val micro: MicroGenerator = MicroWorldgen.build(context.config.seed, specsFor(context))
+    /** The packs' blocks as materials, registered before anything is generated. */
+    val blockMaterials = BlockMaterials(MaterialPalette.standard(), context.blocks)
+
+    /**
+     * Each region's own ground, by column: its surface, subsurface and filler
+     * blocks. A pack's red earth stays red earth in microvoxels.
+     */
+    private val strata = Strata { mx, my ->
+        val biome = biomeAt(Math.floorDiv(mx, MICRO_PER_BLOCK), Math.floorDiv(my, MICRO_PER_BLOCK))
+        val top = blockMaterials[biome.surfaceBlockId] ?: return@Strata null
+        Layers(top, blockMaterials[biome.subsurfaceBlockId] ?: top, blockMaterials[biome.bedrockFillerBlockId] ?: blockMaterials[biome.subsurfaceBlockId] ?: top)
+    }
+
+    val micro: MicroGenerator = stagesFor(context, blockMaterials) { x, y -> biomeAt(x, y).id }
+        .build(context.config.seed, specsFor(context), blockMaterials.palette) { fields ->
+            if (context.blocks.isNotEmpty() && context.biomes.isNotEmpty() && context.recipe.options["strata"] != "builtin") fields.publish(Fields.STRATA, strata)
+        }
 
     override val palette: MaterialPalette get() = micro.palette
+
+    /** Which materials stand for a pack block exactly, by material id, for the conversion's inner loop. */
+    private val exact = BooleanArray(palette.all.maxOf { it.id.toInt() } + 1) { blockMaterials.blockOf(it.toShort()) != null }
 
     private val spawnRate = context.recipe.options["spawns"]?.toFloatOrNull() ?: 0.35f
     private val overrides = context.recipe.options.filterKeys { it.startsWith("block.") }.mapKeys { it.key.removePrefix("block.") }
@@ -122,6 +148,7 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
 
     private fun convert(pos: ChunkPos, bp: BlockPalette): ShortArray = converted.getOrPut(pos) {
         val out = ShortArray(Chunk.VOLUME)
+        val exM = ShortArray(EXACT_SLOTS); val exC = IntArray(EXACT_SLOTS)
         val r = MICRO_PER_BLOCK
         val blocksPerMicroChunk = MicroChunk.SIZE / r
         val need = (r * r * r * SOLID_SHARE).toInt()
@@ -139,8 +166,10 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
                     }
                 } else {
                     var solid = 0; var water = 0; var leaves = 0; var bark = 0; var top: Short = MaterialPalette.AIR
+                    var exN = 0
                     for (dz in r - 1 downTo 0) for (dy in 0 until r) for (dx in 0 until r) {
                         val m = mc[bx * r + dx, by * r + dy, bz * r + dz]
+                        if (m != MaterialPalette.AIR && exact.getOrElse(m.toInt()) { false }) exN = tally(exM, exC, exN, m)
                         when {
                             m == MaterialPalette.AIR -> Unit
                             m == waterId -> water++
@@ -152,7 +181,9 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
                             }
                         }
                     }
+                    val pinned = exactBlock(exM, exC, exN, r * r * r, solid >= need)
                     when {
+                        pinned != null -> bp.block(pinned)
                         solid >= need -> bp.block(top)
                         // A trunk is thinner than a block; keep it anyway, or forests lose their trees at block scale.
                         bark >= need / 2 -> bp.block(barkId)
@@ -167,6 +198,33 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
         placeCrowns(out, bp)
         for (y in 0 until Chunk.SIZE) for (x in 0 until Chunk.SIZE) out[Chunk.indexOf(x, y, 0)] = BEDROCK
         out
+    }
+
+    /** Counts [m] among a cell's pack-block materials; returns the new number of distinct ones. */
+    private fun tally(ms: ShortArray, cs: IntArray, n: Int, m: Short): Int {
+        for (i in 0 until n) if (ms[i] == m) { cs[i]++; return n }
+        if (n == ms.size) return n
+        ms[n] = m; cs[n] = 1
+        return n + 1
+    }
+
+    /**
+     * The pack block a cell is, when voxels made of pack blocks decide it:
+     * a prop (a brazier) that fills half its cell, a floor one layer, or a
+     * solid block its usual share -- whichever holds the most. Solid pack
+     * blocks only win when the cell is solid at all, so a wall's thin eave
+     * never turns air into wall.
+     */
+    private fun exactBlock(ms: ShortArray, cs: IntArray, n: Int, cell: Int, cellSolid: Boolean): Short? {
+        var best: Short? = null; var bestCount = 0
+        for (i in 0 until n) {
+            val m = ms[i]
+            val b = blockMaterials.blockOf(m) ?: continue
+            if (cs[i] < blockMaterials.thresholdOf(m, cell)) continue
+            if (b.isSolid && b.isOpaque && b.glyph == null && !cellSolid) continue
+            if (cs[i] > bestCount) { best = m; bestCount = cs[i] }
+        }
+        return best
     }
 
     /**
@@ -277,9 +335,52 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
         private const val CROWN = -2
         private val BEDROCK = 1.toShort() // BlockRegistry always puts bedrock at index 1
         private const val MICRO_CACHE = 160
+        private const val EXACT_SLOTS = 6
         private const val BLOCK_CACHE = 96
 
-        val factory = TerrainGeneratorFactory { context -> MicrovoxelTerrainGenerator(context) }
+        val factory = TerrainGeneratorFactory { context -> create(context) }
+
+        /**
+         * The generator a recipe asks for. When its stages build the packs'
+         * towns ([SettlementsStage]), it is also the world's town atlas -- and
+         * the session then leaves the towns to it instead of stamping them
+         * over the land as blocks.
+         */
+        fun create(context: TerrainContext): MicrovoxelTerrainGenerator =
+            if (specsFor(context).any { it.id == SettlementsStage.ID } && context.settlements.isNotEmpty()) Settled(context)
+            else MicrovoxelTerrainGenerator(context)
+
+        /**
+         * Bridge presets, on top of [MicroWorldgen.presets]. They use stages
+         * only the bridge has, because they need the packs: their soils and
+         * their towns.
+         */
+        val presets: Map<String, List<StageSpec>> = mapOf(
+            ANCIENT to listOf(
+                StageSpec(TerrainStage.ID, mapOf("height" to "0.26", "mountains" to "0.3", "scale" to "0.75", "spawnRise" to "12")),
+                StageSpec(SettlementsStage.ID, mapOf("style" to SettlementsStage.EARTHEN)),
+                StageSpec(com.stratum.engine.microvoxel.gen.GroundcoverStage.ID, mapOf("density" to "1.1", "tall" to "0.25")),
+                StageSpec(com.stratum.engine.microvoxel.gen.TreesStage.ID, mapOf("style" to "tropical", "density" to "0.85")),
+            ),
+        )
+
+        /**
+         * The default world: the packs' own land and towns, in microvoxels.
+         * With the built-in pack that is an ancient West African world -- red
+         * laterite and grove turf, iroko, oil palm and baobab, walled
+         * compounds of mud and thatch, and the home town among them.
+         */
+        const val ANCIENT = "micro:ancient"
+
+        /** Every stage the bridge can build, described for an AI world-builder or a settings screen. */
+        val catalogue: Map<String, String> = MicroWorldgen.catalogue + mapOf(
+            SettlementsStage.ID to "The packs' own towns, the home town among them, built in microvoxels on the same plans the game uses. " +
+                "Options: style (earthen: mud walls with uli bands, thatch, round huts, compound walls; plain: the block buildings, bevelled).",
+        )
+
+        /** Every stage the bridge can build: the engine's, plus the ones that need the packs. */
+        private fun stagesFor(context: TerrainContext, blocks: BlockMaterials, biomeId: (Int, Int) -> String?): StageRegistry =
+            MicroWorldgen.stages.copy().register(SettlementsStage.ID, SettlementsStage(context, blocks, biomeId))
 
         /**
          * The stages a recipe asks for: its own `passes` when it lists any,
@@ -288,10 +389,10 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
          */
         fun specsFor(context: TerrainContext): List<StageSpec> {
             val recipe = context.recipe
-            val preset = recipe.options["preset"] ?: MicroWorldgen.ARPG
+            val preset = recipe.options["preset"] ?: ANCIENT
             val specs = if (recipe.passes.isNotEmpty()) recipe.passes.map { StageSpec(it.id, it.options) }
-            else MicroWorldgen.presets[preset] ?: throw IllegalArgumentException(
-                "No microvoxel preset '$preset'. Known: ${MicroWorldgen.presets.keys.joinToString()}",
+            else presets[preset] ?: MicroWorldgen.presets[preset] ?: throw IllegalArgumentException(
+                "No microvoxel preset '$preset'. Known: ${(presets.keys + MicroWorldgen.presets.keys).joinToString()}",
             )
             return specs.map { spec ->
                 if (spec.id != TerrainStage.ID) spec
@@ -302,6 +403,12 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
             }
         }
     }
+}
+
+/** The generator when it builds the packs' towns: it answers for them, so nothing stamps them twice. */
+private class Settled(context: TerrainContext) : MicrovoxelTerrainGenerator(context), SettlementAtlas {
+    private val towns: SettlementAtlas get() = micro.fields.require(SettlementsStage.KEY)
+    override fun settlementsNear(x: Int, y: Int, radius: Int): List<SettlementPlan> = towns.settlementsNear(x, y, radius)
 }
 
 /** A small thread-safe least-recently-used cache; values are computed outside the lock. */

@@ -152,9 +152,21 @@ class StageRegistry {
 
     fun copy(): StageRegistry = StageRegistry().also { it.factories.putAll(factories) }
 
-    fun build(seed: Long, specs: List<StageSpec>, palette: MaterialPalette = MaterialPalette.standard()): MicroGenerator {
+    /**
+     * @param prepare runs before any stage is set up, to publish services the
+     *   stages may read -- how a host (the block-world bridge) hands the
+     *   pipeline things it knows and the pipeline does not: a pack's soils,
+     *   its towns.
+     */
+    fun build(
+        seed: Long,
+        specs: List<StageSpec>,
+        palette: MaterialPalette = MaterialPalette.standard(),
+        prepare: (WorldFields) -> Unit = {},
+    ): MicroGenerator {
         require(specs.isNotEmpty()) { "A microvoxel pipeline needs at least one stage" }
         val fields = WorldFields(seed, palette)
+        prepare(fields)
         val stages = specs.map { spec ->
             val factory = factories[spec.id] ?: throw IllegalArgumentException(
                 "No microvoxel stage named '${spec.id}'. Known stages: ${factories.keys.joinToString()}",

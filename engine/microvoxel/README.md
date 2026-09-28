@@ -55,6 +55,21 @@ where the world *comes from* and what the camera *sees up close*.
                    spawns (markers), towns, saves                 then swap) ──▶ GLES renderer
 ```
 
+* **The default world (`micro:ancient`)** — the packs' own land and towns in
+  microvoxels. Terrain takes each region's surface, subsoil and rock blocks
+  (the pack's red earth, turf, granite); flora is tropical (iroko with
+  buttress roots, oil palms, baobabs, elephant grass); and **every pack town,
+  the home town first, is built by `micro:settlements`** from the same
+  `SettlementPlanner` plans the game uses (same seed, recipes, density,
+  starting town and welcoming rule), so names, factions, doors and
+  garrisons are unchanged. The `earthen` style draws them as Igbo
+  compounds: plinths, rounded mud corners, uli zigzags in white nzu, timber
+  doorways, lattice windows, coursed thatch with ragged eaves, round huts
+  under conical thatch, compound walls, a sacred iroko in the square. The
+  generator is then the world's town atlas, so the session no longer stamps
+  towns over the land -- which is what lets the home area render in
+  microvoxel detail. Pack blocks are materials of their own (`block:<id>`)
+  and read back into exactly those blocks.
 * **`:engine:microbridge`** — `MicrovoxelTerrainGenerator`, registered as
   `stratum:microvoxel`. Converts each block from the microvoxels it covers,
   maps materials onto *any* pack's blocks (so AI-made packs just work),

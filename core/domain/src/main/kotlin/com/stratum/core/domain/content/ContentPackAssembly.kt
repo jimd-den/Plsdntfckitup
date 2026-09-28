@@ -421,7 +421,8 @@ data class AssembledContent(
     fun recipe(id: String): RecipeDefinition? = recipes.firstOrNull { it.id == id }
 
     /** What a terrain generator is built from, for this content and [config]. */
-    fun terrainContext(config: WorldConfig): TerrainContext = TerrainContext(config, biomes, terrain, maps, settlements, structureTemplates)
+    fun terrainContext(config: WorldConfig): TerrainContext =
+        TerrainContext(config, biomes, terrain, maps, settlements, structureTemplates, blocks = registry.all)
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 

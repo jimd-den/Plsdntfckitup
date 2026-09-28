@@ -23,12 +23,14 @@ class MicrovoxelPluginTest {
 
         assertEquals(TerrainRecipe.MICROVOXEL, content.terrain.generatorId)
         assertEquals(
-            listOf("micro:terrain", "micro:city_plan", "micro:roads", "micro:buildings", "micro:groundcover", "micro:trees"),
+            listOf("micro:terrain", "micro:settlements", "micro:groundcover", "micro:trees"),
             content.terrain.passes.map { it.id },
         )
-        assertEquals("2", content.terrain.passes.single { it.id == "micro:city_plan" }.options["maxFloors"])
+        assertEquals("earthen", content.terrain.passes.single { it.id == "micro:settlements" }.options["style"])
 
-        val generator = MicrovoxelTerrainGenerator(content.terrainContext(WorldConfig(seed = 7L)))
+        val generator = MicrovoxelTerrainGenerator.create(content.terrainContext(WorldConfig(seed = 7L)))
+        // It builds the packs' towns itself, so it answers for them.
+        assertTrue(generator is com.stratum.core.domain.settlement.SettlementAtlas)
         val chunk = generator.generate(ChunkPos(0, 0), content.registry)
         assertTrue(chunk.surfaceAt(8, 8) in 1 until 47, "no ground at the origin")
     }

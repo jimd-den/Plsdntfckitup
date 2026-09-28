@@ -1,12 +1,15 @@
 {
   "id": "microvoxel.realms",
   "name": "Microvoxel Realms",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Stratum",
   "license": "CC-BY-4.0",
-  "description": "Generates the world in quarter-block microvoxels: smooth hills, lakes, forests with real trees, and walled towns with streets, pavements, lamps and houses. Plays on the built-in pack's blocks, creatures and towns.",
+  "description": "Generates the world in quarter-block microvoxels: an ancient West African land of red laterite and grove turf, iroko, oil palm and baobab, and the built-in pack's towns - the home town first - as walled compounds of mud and thatch with uli-painted walls and round huts. Plays on the built-in pack's blocks, creatures and towns.",
   "api": 1,
   "dependencies": [
-    { "id": "igbo", "version": "^2.0" }
+    {
+      "id": "igbo",
+      "version": "^2.0"
+    }
   ]
 }

@@ -76,6 +76,21 @@ object Fields {
 
     /** Where the ground is built on or paved, so vegetation stays off it. */
     val FOOTPRINT = FieldKey<Footprint>("footprint")
+
+    /**
+     * A host's own soils by column. Published before the stages are set up
+     * (see [StageRegistry.build]'s `prepare`), it replaces the built-in
+     * grass, dirt and rock: a pack's red earth, its turf, its granite.
+     */
+    val STRATA = FieldKey<Strata>("strata")
+}
+
+/** The layers of ground at a column, as material ids. */
+class Layers(val surface: Short, val subsurface: Short, val filler: Short)
+
+fun interface Strata {
+    /** The layers at a column, or null where the built-in ones should stand. */
+    fun at(x: Int, y: Int): Layers?
 }
 
 /** The land use at a column. Default is wild land. */
@@ -94,7 +109,14 @@ interface Footprint {
 }
 
 /** One chunk column's worth of cached surface data. */
-class Columns(val heights: IntArray, val tops: ShortArray, val slopes: FloatArray) {
+class Columns(
+    val heights: IntArray,
+    val tops: ShortArray,
+    val slopes: FloatArray,
+    /** What lies under the top: soil, then rock. */
+    val subs: ShortArray = ShortArray(0),
+    val fills: ShortArray = ShortArray(0),
+) {
     fun height(lx: Int, ly: Int) = heights[ly * MicroChunk.SIZE + lx]
     fun top(lx: Int, ly: Int) = tops[ly * MicroChunk.SIZE + lx]
     fun slope(lx: Int, ly: Int) = slopes[ly * MicroChunk.SIZE + lx]
@@ -120,7 +142,12 @@ fun interface ColumnSource {
  * `height` (vertical stretch), `mountains` (0..2), `snowLine` (micro above sea),
  * `maxHeight` / `minHeight` (micro; peaks ease under the ceiling),
  * `sampleStep` (noise sampled every this many columns and interpolated; 1 = every column),
- * `spawnRadius` / `spawnRise` (dry land lifted around the origin; 0 = off).
+ * `spawnRadius` / `spawnRise` (dry land lifted around the origin; 0 = off),
+ * `terrace` (micro; land gathers into soft plateaus this tall, as laterite
+ * escarpments do; 0 = off).
+ *
+ * When a host publishes [Fields.STRATA], the surface, soil and rock are the
+ * host's own (a pack's biome blocks); beaches, snow, scree and water stay.
  */
 object TerrainStage : MicroStageFactory {
     const val ID = "micro:terrain"
@@ -141,6 +168,7 @@ object TerrainStage : MicroStageFactory {
         // the natural land at the edge. 0 turns it off.
         val spawnRadius = o.float("spawnRadius", 360f)
         val spawnRise = o.float("spawnRise", 10f)
+        val terrace = o.float("terrace", 0f)
         val seed = setup.seed
         val noise = Noise(seed)
         val climateNoise = Noise(seed xor 0x5A17)
@@ -157,6 +185,7 @@ object TerrainStage : MicroStageFactory {
                 val d = kotlin.math.sqrt(ix.toFloat() * ix + iy.toFloat() * iy) / spawnRadius
                 if (d < 1f) h += (sea + spawnRise - h) * smooth(0f, 1f, 1f - d)
             }
+            if (terrace > 0f) h = terraced(h, terrace)
             softCeiling(h, maxHeight).coerceAtLeast(minHeight)
         })
         // Climate changes over hundreds of blocks: a coarse lattice is exact enough and nearly free.
@@ -197,6 +226,8 @@ object TerrainStage : MicroStageFactory {
         val raw = FloatArray(w * w)
         for (y in 0 until w) for (x in 0 until w) raw[y * w + x] = surface.heightAt(ox + x - 1, oy + y - 1)
         val heights = IntArray(s * s); val tops = ShortArray(s * s); val slopes = FloatArray(s * s)
+        val subs = ShortArray(s * s); val fills = ShortArray(s * s)
+        val strata = fields.get(Fields.STRATA)
         for (y in 0 until s) for (x in 0 until s) {
             val h = raw[(y + 1) * w + x + 1]
             val gx = (raw[(y + 1) * w + x + 2] - raw[(y + 1) * w + x]) * 0.5f
@@ -205,18 +236,23 @@ object TerrainStage : MicroStageFactory {
             val wx = ox + x; val wy = oy + y
             val hi = floor(h).toInt()
             val jitter = Hash.unit(fields.seed, wx, wy, 0, 9) * 18f
+            val own = strata?.at(wx, wy)
+            val rock = own?.filler ?: mat.stone
             tops[y * s + x] = when {
-                slope > 1.35f -> if (hi > snowLine) mat.darkStone else mat.stone
+                slope > 1.35f -> if (hi > snowLine) mat.darkStone else rock
                 hi > snowLine + jitter - 20f && slope < 0.9f -> mat.snow
                 hi <= sea + 3 -> if (hi < sea - 6) mat.gravel else mat.sand
-                slope > 0.9f -> mat.gravel
+                slope > 0.9f -> own?.subsurface ?: mat.gravel
+                own != null -> own.surface
                 climate.moisture(wx, wy) < 0.32f || climate.temperature(wx, wy) > 0.78f -> mat.dryGrass
                 else -> mat.grass
             }
+            subs[y * s + x] = own?.subsurface ?: mat.dirt
+            fills[y * s + x] = rock
             heights[y * s + x] = hi
             slopes[y * s + x] = slope
         }
-        return Columns(heights, tops, slopes)
+        return Columns(heights, tops, slopes, subs, fills)
     }
 
     private fun fill(ctx: MicroGenContext, sea: Int, mat: SurfaceMaterials) {
@@ -228,7 +264,8 @@ object TerrainStage : MicroStageFactory {
         if (ctx.z0 > top) return // open sky: stays one uniform brick table.
         // Bulk rock under the shallowest soil: whole bricks, no per-voxel work.
         val rockTop = lowest - SOIL_MAX - 1
-        if (rockTop >= ctx.z0) ctx.fill(ctx.x0, ctx.y0, ctx.z0, ctx.x1, ctx.y1, min(rockTop, ctx.z1), mat.stone)
+        val bedrock = if (cols.fills.isEmpty()) mat.stone else cols.fills[(s / 2) * s + s / 2]
+        if (rockTop >= ctx.z0) ctx.fill(ctx.x0, ctx.y0, ctx.z0, ctx.x1, ctx.y1, min(rockTop, ctx.z1), bedrock)
         val end = min(ctx.z1, top)
         // Per 8 x 8 group of columns, rock under the group's lowest soil is also
         // whole bricks: in hills the chunk-wide floor is far below most columns.
@@ -239,7 +276,7 @@ object TerrainStage : MicroStageFactory {
             val floorZ = (Math.floorDiv(low - SOIL_MAX - 1 - ctx.z0 + 1, 8) * 8) + ctx.z0 - 1 // last z of the last whole brick below the soil
             groupFloor[gy * (s / 8) + gx] = floorZ
             if (floorZ > rockTop && floorZ >= ctx.z0)
-                ctx.fill(ctx.x0 + gx * 8, ctx.y0 + gy * 8, max(ctx.z0, rockTop + 1), ctx.x0 + gx * 8 + 7, ctx.y0 + gy * 8 + 7, min(floorZ, ctx.z1), mat.stone)
+                ctx.fill(ctx.x0 + gx * 8, ctx.y0 + gy * 8, max(ctx.z0, rockTop + 1), ctx.x0 + gx * 8 + 7, ctx.y0 + gy * 8 + 7, min(floorZ, ctx.z1), bedrock)
         }
         for (ly in 0 until s) for (lx in 0 until s) {
             val start = max(ctx.z0, max(rockTop, groupFloor[(ly / 8) * (s / 8) + lx / 8]) + 1)
@@ -247,15 +284,16 @@ object TerrainStage : MicroStageFactory {
             val h = cols.height(lx, ly)
             val surfaceMat = cols.top(lx, ly)
             val wx = ctx.x0 + lx; val wy = ctx.y0 + ly
-            val soil = if (surfaceMat == mat.stone || surfaceMat == mat.darkStone) 0 else 3 + Hash.int(ctx.fields.seed, wx, wy, 11, 5)
-            val subsoil = if (surfaceMat == mat.sand) mat.sand else mat.dirt
+            val rock = if (cols.fills.isEmpty()) mat.stone else cols.fills[ly * s + lx]
+            val soil = if (surfaceMat == mat.stone || surfaceMat == mat.darkStone || surfaceMat == rock) 0 else 3 + Hash.int(ctx.fields.seed, wx, wy, 11, 5)
+            val subsoil = if (surfaceMat == mat.sand) mat.sand else if (cols.subs.isEmpty()) mat.dirt else cols.subs[ly * s + lx]
             for (z in start..end) {
                 val m = when {
                     z > h -> if (z <= sea) mat.water else break
-                    z == h -> if (h < sea && surfaceMat != mat.sand && surfaceMat != mat.gravel) mat.dirt else surfaceMat
+                    z == h -> if (h < sea && surfaceMat != mat.sand && surfaceMat != mat.gravel) subsoil else surfaceMat
                     z > h - soil -> subsoil
-                    z < h - 40 && Hash.unit(ctx.fields.seed, wx, wy, z, 3) < 0.5f -> mat.darkStone
-                    else -> mat.stone
+                    z < h - 40 && rock == mat.stone && Hash.unit(ctx.fields.seed, wx, wy, z, 3) < 0.5f -> mat.darkStone
+                    else -> rock
                 }
                 ctx.set(wx, wy, z, m)
             }
@@ -264,6 +302,18 @@ object TerrainStage : MicroStageFactory {
 
     /** Deepest soil layer; anything below it is rock and can be bulk-filled. */
     private const val SOIL_MAX = 8
+
+    /**
+     * Soft terraces: most of each step is nearly flat and the rise between is
+     * a short steep bank -- plateaus with clean ledges, still continuous, so
+     * slopes stay quarter-block smooth rather than becoming cliffs.
+     */
+    internal fun terraced(h: Float, step: Float): Float {
+        val base = kotlin.math.floor(h / step) * step
+        val t = (h - base) / step
+        val eased = smooth(0.62f, 1f, t)
+        return base + eased * step
+    }
 
     /** Leaves heights well under [ceiling] alone and eases the rest towards it, never past it. */
     internal fun softCeiling(h: Float, ceiling: Float): Float {
@@ -274,7 +324,7 @@ object TerrainStage : MicroStageFactory {
         return knee + 24f * (over / (over + 24f))
     }
 
-    internal fun smooth(a: Float, b: Float, x: Float): Float {
+    fun smooth(a: Float, b: Float, x: Float): Float {
         val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)
     }

@@ -105,16 +105,17 @@ class ClassForgeViewModel(
     }
 
     /**
-     * Art a hero can be drawn with. A monster sheet is laid out differently and
-     * would read as a broken character rather than as the wrong choice.
+     * Every sheet a hero can be drawn with: all of them. Hero art is listed
+     * first, then characters, monsters and pack art, so the likely choice is
+     * nearest; the player may pick any.
      *
-     * Generated sheets first: the same id drawn again is the newer art, and
-     * `distinctBy` keeps whichever it sees first.
+     * Generated sheets first within each group: the same id drawn again is
+     * the newer art, and `distinctBy` keeps whichever it sees first.
      */
     private fun heroSheets(): List<SpriteSheet> =
         (loadSheets() + content.spriteSheets)
             .distinctBy { it.id }
-            .filter { SpriteNamespace.servesHero(it.id) }
+            .sortedBy { if (SpriteNamespace.servesHero(it.id)) 0 else 1 }
 
     /**
      * Asks for this hero's look in the background: a sheet drawn from its name

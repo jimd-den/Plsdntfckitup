@@ -1,5 +1,6 @@
 package com.stratum.engine.scene
 
+import com.stratum.core.domain.world.BlockRegistry
 import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.ChunkPos
@@ -79,13 +80,28 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             val top = world.surface(wx, wy)
             for (z in 0 until Chunk.HEIGHT) {
                 val here = world.index(wx, wy, z)
-                if (here < 0 || here == source.generatedBlock(wx, wy, z)) continue
-                lists[z / blocksPerMicro] += (z % blocksPerMicro) * Chunk.SIZE * Chunk.SIZE + y * Chunk.SIZE + x
+                if (here < 0) continue
+                val cell = (z % blocksPerMicro) * Chunk.SIZE * Chunk.SIZE + y * Chunk.SIZE + x
+                if (here == source.generatedBlock(wx, wy, z)) {
+                    // A pack prop the generator built (a town's brazier) is drawn as its sprite, like any prop --
+                    // but a tree sprite standing in for microvoxel leaves is not: those leaves are drawn already.
+                    if (here != BlockRegistry.AIR_INDEX && world.type(here).glyph != null && builtAsBlock(pos, x, y, z, here))
+                        lists[z / blocksPerMicro] += cell
+                    continue
+                }
+                lists[z / blocksPerMicro] += cell
                 if (z >= top - 1) surfaceChanged++
             }
         }
         if (surfaceChanged > Chunk.SIZE * Chunk.SIZE * MAX_CHANGED_SHARE) return null
         return Array(layers) { lists[it].toIntArray() }
+    }
+
+    /** Whether the microvoxels at a block's centre are that block's own material: a block the generator placed whole. */
+    private fun builtAsBlock(pos: ChunkPos, lx: Int, ly: Int, z: Int, index: Int): Boolean {
+        val mc = source.microChunk(MicroChunkPos(pos.x, pos.y, z / blocksPerMicro))
+        val c = r / 2
+        return mc[lx * r + c, ly * r + c, (z % blocksPerMicro) * r + c] == source.materialForBlock(index)
     }
 
     /** The generated microvoxels with every changed block filled in as that block (or dug out as air). */

@@ -88,6 +88,15 @@ class MaterialPalette {
             register(M.METAL, 0x44484C, gloss = 0.4f, jitter = 0.02f)
             register(M.LAMP, 0xFFF1C8, emission = 3f, jitter = 0f)
             register(M.GRAVEL, 0x8C857A, jitter = 0.16f)
+            // Added after the first set so existing ids never move.
+            register(M.THATCH, 0xB8914E, jitter = 0.16f)
+            register(M.THATCH_DARK, 0x8A6A36, jitter = 0.12f)
+            register(M.MUD, 0xA0583A, jitter = 0.08f)
+            register(M.MUD_DARK, 0x6E3A25, jitter = 0.08f)
+            register(M.NZU, 0xEDE4D0, jitter = 0.03f)
+            register(M.PALM, 0x5E8F2C, jitter = 0.14f)
+            register(M.FRUIT, 0xD8581E, jitter = 0.1f)
+            register(M.BEATEN_EARTH, 0xB07A52, jitter = 0.1f)
         }
     }
 }
@@ -125,4 +134,13 @@ object M {
     const val METAL = "metal"
     const val LAMP = "lamp"
     const val GRAVEL = "gravel"
+    const val THATCH = "thatch"
+    const val THATCH_DARK = "thatch_dark"
+    const val MUD = "mud"
+    const val MUD_DARK = "mud_dark"
+    /** White kaolin chalk, the paint of uli wall designs. */
+    const val NZU = "nzu"
+    const val PALM = "palm"
+    const val FRUIT = "fruit"
+    const val BEATEN_EARTH = "beaten_earth"
 }

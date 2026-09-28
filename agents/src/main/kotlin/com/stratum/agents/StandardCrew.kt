@@ -88,9 +88,9 @@ object StandardCrew {
         dependsOn = listOf(cartographer.id),
         brief = "Write one terrain object with \"generator\": \"${com.stratum.core.domain.world.TerrainRecipe.MICROVOXEL}\" and a \"passes\" list " +
             "chosen from these stages, in this order, each as {\"id\": ..., \"options\": {...}} with every option value a string: " +
-            com.stratum.engine.microvoxel.gen.MicroWorldgen.catalogue.entries.joinToString(" ") { (id, what) -> "$id -- $what" } +
-            " Always include micro:terrain first. Keep height 0.1 to 0.5 and maxFloors at most 3 so the land stays walkable and towns fit " +
-            "under the isometric camera. Optionally pin materials to this world's blocks in \"options\" as \"block.<material>\": \"<block id>\" " +
+            com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.catalogue.entries.joinToString(" ") { (id, what) -> "$id -- $what" } +
+            " Always include micro:terrain first, and micro:settlements so the world's towns (and the home town) are built. " +
+            "Keep height 0.1 to 0.5 and maxFloors at most 3 so the land stays walkable and towns fit under the isometric camera. Optionally pin materials to this world's blocks in \"options\" as \"block.<material>\": \"<block id>\" " +
             "(materials: grass, dirt, stone, sand, water, bark, asphalt, sidewalk, brick, plaster, roof_tile, timber, glass).",
         maxAttempts = 3,
     )

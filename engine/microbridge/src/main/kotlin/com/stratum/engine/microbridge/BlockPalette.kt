@@ -41,6 +41,8 @@ class BlockPalette(
             if (m.id == MaterialPalette.AIR) continue
             val pinned = overrides[m.name]
             blockFor[m.id.toInt()] = when {
+                // A pack block's own material is that block, exactly.
+                m.name.startsWith(BlockMaterials.PREFIX) -> registry.indexOrNull(m.name.removePrefix(BlockMaterials.PREFIX)) ?: -1
                 pinned != null -> registry.indexOrNull(pinned) ?: throw IllegalArgumentException(
                     "Microvoxel option 'block.${m.name}' names unknown block '$pinned'",
                 )
@@ -55,7 +57,7 @@ class BlockPalette(
         materialFor = ShortArray(registry.size) { i ->
             if (i == BlockRegistry.AIR_INDEX) MaterialPalette.AIR
             else registry.typeOf(i).let { b ->
-                palette.register("block:${b.id}", (b.sideColor and 0xFFFFFF).toInt(), opaque = b.isOpaque, solid = b.isSolid, emission = b.lightEmission / 10f)
+                palette.register(BlockMaterials.PREFIX + b.id, (b.topColor and 0xFFFFFF).toInt(), opaque = b.material != com.stratum.core.domain.world.BlockMaterial.LIQUID, solid = b.isSolid, emission = b.lightEmission / 10f)
             }
         }
     }

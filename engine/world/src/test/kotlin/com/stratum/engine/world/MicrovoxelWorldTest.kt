@@ -10,7 +10,6 @@ import com.stratum.core.domain.world.TerrainRecipe
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldMarkerKind
 import com.stratum.engine.microbridge.MicrovoxelTerrainGenerator
-import com.stratum.engine.microvoxel.gen.CityPlanStage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -81,13 +80,14 @@ class MicrovoxelWorldTest {
     @Test
     fun `monsters wait in the wild and towns are marked`() {
         val context = content().terrainContext(WorldConfig(seed = 20260928L))
-        val gen = MicrovoxelTerrainGenerator(context)
+        val gen = MicrovoxelTerrainGenerator.create(context)
         gen.paletteFor(igbo.registry)
         val markers = (-12..12).flatMap { y -> (-12..12).flatMap { x -> gen.markersIn(ChunkPos(x, y)) } }
         assertTrue(markers.count { it.kind == WorldMarkerKind.ENEMY_SPAWN } > 50, "too few spawn markers")
-        val city = gen.micro.fields.require(CityPlanStage.KEY)
+        val towns = gen as com.stratum.core.domain.settlement.SettlementAtlas
+        assertTrue(towns.settlementsNear(0, 0, 0).isNotEmpty(), "no starting town at the origin")
         for (m in markers.filter { it.kind == WorldMarkerKind.ENEMY_SPAWN })
-            assertTrue(!city.isOccupied(m.x * 4, m.y * 4), "a monster was placed on a road or in a house at $m")
+            assertTrue(towns.settlementsNear(m.x, m.y, 0).none { it.contains(m.x, m.y) }, "a monster was placed inside a town at $m")
     }
 
     @Test

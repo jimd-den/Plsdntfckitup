@@ -16,9 +16,7 @@ import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.TerrainRecipe
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.microbridge.MicrovoxelTerrainGenerator
-import com.stratum.engine.microvoxel.gen.CityPlanStage
 import com.stratum.engine.microvoxel.gen.Fields
-import com.stratum.engine.microvoxel.gen.RoadKind
 import com.stratum.engine.scene.SceneActor
 import com.stratum.engine.scene.SceneBuilder
 import com.stratum.engine.scene.SceneCamera
@@ -59,7 +57,9 @@ object MicroScenePreview {
         val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack))
             .let { it.copy(terrain = TerrainRecipe(generatorId = TerrainRecipe.MICROVOXEL)) }
         val config = WorldConfig(seed = seed, simulationRadius = 3)
-        val generator = StratumTerrain.create(content.terrainContext(config)) as MicrovoxelTerrainGenerator
+        // From a real session, so the home town is the one a player starts in: the session decides
+        // which towns are welcoming by the player's standing with each faction.
+        val generator = com.stratum.engine.world.WorldSession(content, config).microTerrain as MicrovoxelTerrainGenerator
 
         val director = StyleSheetArtDirector(
             StyleLexicon.interpret("stratum house style", ArtDirection.HOUSE, seed).direction,
@@ -67,12 +67,13 @@ object MicroScenePreview {
         )
         val textures = TextureLibrary().also { lib -> forged?.let { ForgedTextures.loadInto(it, lib) } }
 
-        val vantages = listOf("town" to townVantage(generator), "wilds" to wildVantage(generator))
-        for ((name, v) in vantages) {
+        val vantages = listOf("home" to homeVantage(generator), "wilds" to wildVantage(generator))
+        val shots = listOf(Triple("home", vantages[0].second, 34f), Triple("home-overview", vantages[0].second, 62f), Triple("wilds", vantages[1].second, 34f))
+        for ((name, v, distance) in shots) {
             val world = StreamingWorld(content.registry, generator, config)
             world.focusOn(BlockPos(v.first, v.second, 0))
             val ground = world.surfaceAt(v.first, v.second)
-            val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT)
+            val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = distance)
             val actors = actorsAround(world, v.first, v.second)
             val blocks = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH))
             val micro = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = generator)
@@ -96,13 +97,11 @@ object MicroScenePreview {
         return frame
     }
 
-    /** A street corner in the nearest town the microvoxel planner laid out. */
-    private fun townVantage(gen: MicrovoxelTerrainGenerator): Pair<Int, Int> {
-        val city = gen.micro.fields.require(CityPlanStage.KEY)
-        val region = (0..6).asSequence().flatMap { d -> (-d..d).asSequence().flatMap { y -> (-d..d).asSequence().map { x -> x to y } } }
-            .map { (x, y) -> city.region(x, y) }.first { it.urban && it.roads.any { r -> r.kind == RoadKind.STREET } }
-        val street = region.roads.first { it.kind == RoadKind.STREET }
-        return ((street.rect.x0 + street.rect.x1) / 2) / 4 to ((street.rect.y0 + street.rect.y1) / 2) / 4
+    /** The home town, from a street near its centre: where every new hero starts. */
+    private fun homeVantage(gen: MicrovoxelTerrainGenerator): Pair<Int, Int> {
+        val home = (gen as? com.stratum.core.domain.settlement.SettlementAtlas)?.settlementsNear(0, 0, 0)?.firstOrNull() ?: return 0 to 0
+        val road = home.roads.minByOrNull { r -> kotlin.math.abs(r.fromX + r.toX - 2 * home.centerX) + kotlin.math.abs(r.fromY + r.toY - 2 * home.centerY) }
+        return if (road == null) home.centerX to home.centerY else ((road.fromX + road.toX) / 2) to ((road.fromY + road.toY) / 2)
     }
 
     /** Wooded open land away from town. */

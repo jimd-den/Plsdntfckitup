@@ -21,9 +21,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Every hero look the player has: drawn in the forges or brought in by a
- * plugin, each with its first idle frame to show. Read off the main thread;
- * the sprite store caches the decoded images, so a second screen asking is cheap.
+ * Every look the player can wear: every sprite sheet drawn in the forges or
+ * brought in by a plugin -- heroes, characters, monsters and pack art alike
+ * -- each with its first idle frame to show. Nothing is filtered out: what
+ * a player chooses to look like is theirs to choose, so the list is every
+ * sheet there is, hero art first and each labelled with what it was made as.
+ * Read off the main thread; the sprite store caches the decoded images, so a
+ * second screen asking is cheap.
  */
 @Composable
 internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): List<LookChoice> {
@@ -32,12 +36,12 @@ internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): 
         value = withContext(Dispatchers.IO) {
             (drawnSheets + content.spriteSheets)
                 .distinctBy { it.id }
-                .filter { SpriteNamespace.servesHero(it.id) }
+                .sortedBy { if (SpriteNamespace.servesHero(it.id)) 0 else 1 }
                 .map { sheet ->
                     val idle = sheet.clipOrFallback(AnimationState.IDLE)?.firstFrame ?: 0
                     LookChoice(
                         id = sheet.id,
-                        name = sheet.name,
+                        name = if (SpriteNamespace.servesHero(sheet.id)) sheet.name else "${sheet.name} · ${SpriteNamespace.kindOf(sheet.id)}",
                         portrait = app.graph.ai.sprites.drawableBitmapFor(sheet.id)?.asImageBitmap(),
                         frame = sheet.frameRect(idle),
                     )

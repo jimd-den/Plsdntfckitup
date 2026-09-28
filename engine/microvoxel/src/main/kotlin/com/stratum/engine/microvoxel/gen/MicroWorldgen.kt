@@ -66,13 +66,13 @@ object MicroWorldgen {
      * write a `terrain.passes` list without reading Kotlin.
      */
     val catalogue: Map<String, String> = linkedMapOf(
-        TerrainStage.ID to "The ground: continents, eroded hills, ridged mountains, sea. Options: seaLevel, scale, height, mountains (0..2), snowLine, maxHeight, minHeight (microvoxels; 4 per block).",
+        TerrainStage.ID to "The ground: continents, eroded hills, ridged mountains, sea, in each region's own soils. Options: seaLevel, scale, height, mountains (0..2), terrace (plateau steps), snowLine, maxHeight, minHeight (microvoxels; 4 per block).",
         CavesStage.ID to "Tunnels under the surface. Options: threshold (0..1, lower = more cave), minDepth.",
         CityPlanStage.ID to "Towns on an endless grid of regions, flattening the land under them. Options: density (0..1), regionSize, styles (terrace,villa,tower), maxFloors.",
         RoadsStage.ID to "Draws the town's roads, kerbs, markings and lamps. Options: lampSpacing.",
         BuildingsStage.ID to "Raises each town lot's building in its style. No options.",
-        GroundcoverStage.ID to "Grass tufts, flowers, shrubs and pebbles. Options: density (0..2).",
-        TreesStage.ID to "Broadleaf and conifer trees by climate. Options: cell (spacing), density (0..2).",
+        GroundcoverStage.ID to "Grass tufts, flowers, shrubs and pebbles on whatever the ground is. Options: density (0..2), tall (0..1, elephant grass).",
+        TreesStage.ID to "Trees by climate. Options: style (temperate: oak and fir; tropical: iroko, oil palm, baobab), cell (spacing), density (0..2).",
     )
 
     fun build(seed: Long, specs: List<StageSpec>, palette: MaterialPalette = MaterialPalette.standard()): MicroGenerator =
