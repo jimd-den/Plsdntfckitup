@@ -92,6 +92,14 @@ internal class EncounterSystem(
         }
     }
 
+    /** Generated-world markers already peopled, as a save keeps them. */
+    val consumedMarkers: Set<String> get() = markers?.consumedKeys.orEmpty()
+
+    /** Marks a save's peopled markers as spent, so a cleared room stays cleared after a reload. */
+    fun restoreMarkers(keys: Collection<String>) {
+        markers?.restore(keys)
+    }
+
     /**
      * Tops up the wilds, turns out the garrisons of towns in sight, and moves
      * every body by the crowd brain, held back by whatever stuns or slows it.

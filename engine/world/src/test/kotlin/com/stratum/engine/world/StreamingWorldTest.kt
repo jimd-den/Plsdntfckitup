@@ -160,6 +160,22 @@ class StreamingWorldTest {
     }
 
     @Test
+    fun `restored chunks wait for the window and are used instead of generating, and stay dirty`() {
+        val world = world()
+        val far = ChunkPos(8, 0)
+        val restored = com.stratum.core.domain.world.Chunk(far).apply { setBlock(0, 0, 1, registry.indexOf(TestContent.stone.id)) }
+        world.restoreEdited(listOf(restored))
+        world.focusOn(ChunkPos(0, 0))
+
+        assertFalse(world.isLoaded(far), "a restored chunk is not made resident")
+        assertEquals(listOf(far), world.dirtyChunks().map { it.pos }, "but it is still saved")
+
+        world.focusOn(far)
+        assertEquals(TestContent.stone.id, world.blockAt(BlockPos(far.originX, 0, 1)).id)
+        assertEquals(listOf(far), world.dirtyChunks().map { it.pos })
+    }
+
+    @Test
     fun `a larger simulation radius loads the square it promises`() {
         val wide = WorldConfig(seed = 1L, simulationRadius = 3)
         assertEquals(49, wide.loadedChunkCount)

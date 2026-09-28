@@ -26,14 +26,25 @@ internal class MarkerPopulation(private val marked: MarkedWorld) {
 
     private val waiting = HashMap<ChunkPos, List<WorldMarker>>()
     private val resident = HashSet<ChunkPos>()
-    private val consumed = HashSet<WorldMarker>()
+    /** Consumed markers by [key], so the set can be saved and read back without the chunks that hold them. */
+    private val consumed = HashSet<String>()
     private var seenResidency = -1
 
     /** Markers waiting in resident chunks, for tests and a map. */
     val pending: List<WorldMarker> get() = waiting.values.flatten()
 
     /** Whether [marker] has already been peopled this session. */
-    fun isConsumed(marker: WorldMarker): Boolean = marker in consumed
+    fun isConsumed(marker: WorldMarker): Boolean = marker.key in consumed
+
+    /** Every marker peopled so far, as the keys a save keeps. */
+    val consumedKeys: Set<String> get() = consumed.toSet()
+
+    /** Marks saved markers as already peopled. Before the first [follow], so none of them is ever listed as waiting. */
+    fun restore(keys: Collection<String>) {
+        consumed += keys
+        waiting.replaceAll { _, markers -> markers.filterNot { it.key in consumed } }
+        waiting.values.removeAll { it.isEmpty() }
+    }
 
     /**
      * Brings the waiting list in line with the resident chunks. [residency]
@@ -49,7 +60,7 @@ internal class MarkerPopulation(private val marked: MarkedWorld) {
         }
         now.filterNot(resident::contains).forEach { pos ->
             resident += pos
-            val fresh = marked.markersIn(pos).filterNot(consumed::contains)
+            val fresh = marked.markersIn(pos).filterNot { it.key in consumed }
             if (fresh.isNotEmpty()) waiting[pos] = fresh
         }
     }
@@ -72,7 +83,7 @@ internal class MarkerPopulation(private val marked: MarkedWorld) {
             if (!marker.isMonster) return@filter true
             (room > 0).also { if (it) room-- }
         }
-        consumed += woken
+        woken.mapTo(consumed) { it.key }
         val gone = woken.toHashSet()
         waiting.replaceAll { _, markers -> markers.filterNot(gone::contains) }
         waiting.values.removeAll { it.isEmpty() }
@@ -87,6 +98,13 @@ internal class MarkerPopulation(private val marked: MarkedWorld) {
         const val WAKE_DEPTH = 6f
     }
 }
+
+/**
+ * A marker's identity across sessions: what it is, where, and what placed
+ * it. Markers are a function of the seed and the chunk, so the same world
+ * names the same marker the same way every time it is generated.
+ */
+internal val WorldMarker.key: String get() = "${kind.name}@$x,$y,$z#$sourceId${refId?.let { "/$it" }.orEmpty()}"
 
 /** The middle of the marked block, at standing height. */
 internal val WorldMarker.centre: WorldPoint get() = WorldPoint(x + 0.5f, y + 0.5f, z.toFloat())

@@ -88,7 +88,7 @@ object HeroSaveJson {
 }
 
 @Serializable
-private data class HeroSchema(
+internal data class HeroSchema(
     val version: Int = FORMAT_VERSION,
     val id: String,
     val heroClassId: String,
@@ -151,7 +151,7 @@ private data class HeroSchema(
 }
 
 @Serializable
-private data class ItemSchema(
+internal data class ItemSchema(
     val instanceId: String,
     val baseId: String,
     val name: String,
@@ -210,7 +210,7 @@ private data class ItemSchema(
  * those still read, as the modifier the stat has become.
  */
 @Serializable
-private data class AffixSchema(
+internal data class AffixSchema(
     val id: String,
     val name: String,
     val kind: String,
@@ -238,7 +238,7 @@ private data class AffixSchema(
 }
 
 @Serializable
-private data class SetBonusSchema(val pieces: Int, val modifiers: List<ModifierSchema> = emptyList(), val flags: List<String> = emptyList()) {
+internal data class SetBonusSchema(val pieces: Int, val modifiers: List<ModifierSchema> = emptyList(), val flags: List<String> = emptyList()) {
     fun toDomain() = SetBonus(pieces, modifiers.map { it.toDomain() }, flagsOf(flags))
 
     companion object {
@@ -250,7 +250,7 @@ private data class SetBonusSchema(val pieces: Int, val modifiers: List<ModifierS
 private fun flagsOf(names: List<String>): Set<BuildFlag> = names.mapNotNullTo(HashSet()) { name -> BuildFlag.entries.firstOrNull { it.name == name } }
 
 @Serializable
-private data class ModifierSchema(val stat: String, val kind: String, val value: Float, val damageTypeId: String? = null) {
+internal data class ModifierSchema(val stat: String, val kind: String, val value: Float, val damageTypeId: String? = null) {
     fun toDomain() = StatModifier(Stat.valueOf(stat), ModifierKind.valueOf(kind), value, damageTypeId)
 
     companion object {
@@ -263,7 +263,7 @@ private data class ModifierSchema(val stat: String, val kind: String, val value:
  * under one version of a plugin opens the same world after an update.
  */
 @Serializable
-private data class WaystoneSchema(val id: String, val tier: Int, val mods: List<WaystoneModSchema> = emptyList()) {
+internal data class WaystoneSchema(val id: String, val tier: Int, val mods: List<WaystoneModSchema> = emptyList()) {
     fun toDomain() = Waystone(id, tier, mods.map { it.toDomain() })
 
     companion object {
@@ -272,7 +272,7 @@ private data class WaystoneSchema(val id: String, val tier: Int, val mods: List<
 }
 
 @Serializable
-private data class WaystoneModSchema(
+internal data class WaystoneModSchema(
     val id: String,
     val name: String,
     val monster: List<ModifierSchema> = emptyList(),

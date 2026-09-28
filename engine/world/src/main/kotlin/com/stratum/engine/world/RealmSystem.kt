@@ -149,8 +149,14 @@ internal class RealmSystem(private val content: AssembledContent, private val ra
 
     /** Followers home again: back into the garrison of the nearest outpost. */
     fun garrison(unitIds: List<String>, near: WorldPoint) {
-        val home = outposts.minByOrNull { distance(it, floor(near.x).toInt(), floor(near.y).toInt()) } ?: return
-        replace(home.copy(garrison = unitIds.fold(home.garrison) { g, id -> g + (id to (g[id] ?: 0) + 1) }))
+        outposts = garrisoned(outposts, unitIds, near)
+    }
+
+    /** [among] with [unitIds] counted back into the garrison nearest [near]; changes nothing held. */
+    fun garrisoned(among: List<Outpost>, unitIds: List<String>, near: WorldPoint): List<Outpost> {
+        val home = among.minByOrNull { distance(it, floor(near.x).toInt(), floor(near.y).toInt()) } ?: return among
+        val housed = home.copy(garrison = unitIds.fold(home.garrison) { g, id -> g + (id to (g[id] ?: 0) + 1) })
+        return among.map { if (it.id == home.id) housed else it }
     }
 
     fun command(order: FollowerOrder, at: WorldPoint): RealmResult {
@@ -191,8 +197,11 @@ internal class RealmSystem(private val content: AssembledContent, private val ra
             outpost(id)?.let { held -> held.copy(raidsSurvived = held.raidsSurvived + 1).also(::replace) }?.let { RealmEvent.RaidRepelled(it) }
         }
 
-    fun restore(saved: List<Outpost>) {
+    /** Puts a saved realm back: its outposts, and the orders the followers were under. */
+    fun restore(saved: List<Outpost>, order: FollowerOrder = FollowerOrder.FOLLOW, holdAt: WorldPoint? = null) {
         outposts = saved
+        this.order = order
+        this.holdAt = holdAt.takeIf { order == FollowerOrder.HOLD }
     }
 
     private fun change(outpostId: String, action: (Outpost) -> Pair<Outpost?, RealmResult>): RealmResult {

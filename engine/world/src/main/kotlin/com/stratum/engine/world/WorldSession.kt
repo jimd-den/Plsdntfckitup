@@ -15,6 +15,10 @@ import com.stratum.core.domain.sandbox.StatBreakdown
 import com.stratum.core.domain.sandbox.StatQuery
 import com.stratum.core.domain.session.HeroSave
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.session.SavedChunk
+import com.stratum.core.domain.session.WorldIdentity
+import com.stratum.core.domain.session.WorldPlayer
+import com.stratum.core.domain.session.WorldSave
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.tabletop.ActiveBoon
@@ -40,8 +44,18 @@ import kotlin.math.roundToInt
  * are built and joined by [SessionParts]. The session decides the order they
  * run in each tick, starts and restarts the run, takes snapshots, and answers
  * for each system's verbs by delegation, so callers see one object.
+ *
+ * A session can be kept and resumed: [worldSave] takes the world as it
+ * stands, and [restore] builds a session from one. A restored session is
+ * built exactly as a new one is -- same seed, same parts -- and then has
+ * the saved state laid over it, so there is one road into a world rather
+ * than two that drift apart.
  */
-class WorldSession private constructor(private val parts: SessionParts) :
+class WorldSession private constructor(
+    private val parts: SessionParts,
+    /** The save this session resumes, or null for a new world. Read once, while the session is built. */
+    restoring: WorldSave? = null,
+) :
     SessionBuilding by parts.building,
     SessionGear by parts.gear,
     SessionSurvival by parts.survival,
@@ -120,12 +134,32 @@ class WorldSession private constructor(private val parts: SessionParts) :
     var events: List<CombatEvent> = emptyList()
         private set
 
+    /**
+     * Seconds this world has been played, summed from the steps it was
+     * advanced by rather than read from a clock, so a replay counts the same.
+     */
+    var playSeconds: Double = 0.0
+        private set
+
     init {
-        streamingWorld.focusOn(SPAWN_CHUNK)
-        val spawn = parts.spawnPoint()
+        // A save's chunks go in before anything streams, so the ground under a
+        // resumed player is the ground they left rather than a fresh copy of it.
+        restoring?.let { save ->
+            val remap = SavedChunk.remapTable(save.blockIds, content.registry)
+            streamingWorld.restoreEdited(save.chunks.map { it.toChunk(remap) })
+            encounters.restoreMarkers(save.consumedMarkers)
+        }
+        streamingWorld.focusOn(restoring?.player?.position?.toBlockPos()?.chunkPos ?: SPAWN_CHUNK)
+        val spawn = restoring?.player?.position ?: parts.spawnPoint()
         val fresh = parts.heroClass?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
         player = parts.gear.armed(fresh, parts.heroClass).let { armed -> parts.hero?.restoreOnto(armed) ?: armed }
         player = parts.profile.restored(parts.progression.settle(player))
+        restoring?.let { save ->
+            player = save.player.applyTo(player)
+            clock.restore(save.clockSeconds)
+            playSeconds = save.playSeconds.toDouble()
+            parts.politics.restore(save.realm)
+        }
         encounters.placeLevelEncounters(currentBiome.id)
     }
 
@@ -139,6 +173,7 @@ class WorldSession private constructor(private val parts: SessionParts) :
      * that drops a frame loses the floating numbers and nothing else.
      */
     fun tick(deltaSeconds: Float): List<CombatEvent> {
+        playSeconds += deltaSeconds
         if (!player.isAlive) {
             events = emptyList()
             return events
@@ -208,6 +243,30 @@ class WorldSession private constructor(private val parts: SessionParts) :
 
     /** The character as it should be kept, to carry into the next world. */
     fun heroSave(id: String = player.heroClassId, savedAt: Long = 0L): HeroSave = parts.progression.heroSave(id, savedAt)
+
+    /**
+     * The world as it stands, to be kept: every chunk the player changed,
+     * where they are, the realm, the markers already cleared, the clock, and
+     * this world's copy of the hero.
+     *
+     * Everything is copied, block cells included, so the save can be written
+     * out on another thread while this one keeps digging: take it on the
+     * thread that ticks the session and nothing in it can tear.
+     */
+    fun worldSave(identity: WorldIdentity, savedAt: Long = 0L, heroId: String = player.heroClassId): WorldSave = WorldSave(
+        identity = identity,
+        lastPlayedAt = savedAt,
+        playSeconds = playSeconds.toLong(),
+        config = config,
+        difficulty = difficulty,
+        hero = heroSave(heroId, savedAt),
+        player = WorldPlayer.of(player),
+        clockSeconds = clock.elapsedSeconds,
+        blockIds = content.registry.all.map { it.id },
+        chunks = streamingWorld.dirtyChunks().map(SavedChunk::of).sortedWith(compareBy({ it.x }, { it.y })),
+        realm = parts.politics.realmSave(),
+        consumedMarkers = encounters.consumedMarkers,
+    )
 
     /** Short-lived visuals: damage numbers, misses, level-ups. */
     val feedback: List<FeedbackMark> get() = cues.active
@@ -318,6 +377,16 @@ class WorldSession private constructor(private val parts: SessionParts) :
     val sandbox: SandboxTools? = if (config.rules.sandbox) SandboxTools(this, combat) else null
 
     companion object {
+        /**
+         * A session resuming [save]: its world regenerated from the seed with
+         * the saved chunks laid in, and the player, the realm, the markers and
+         * the clock where the save left them. [terrainGenerator] is for the
+         * same callers who pass one to a new session; null resolves the
+         * packs' own, as the save's world was made with.
+         */
+        fun restore(content: AssembledContent, save: WorldSave, terrainGenerator: TerrainGenerator? = null): WorldSession =
+            WorldSession(SessionParts(content, save.config, save.heroClassId, terrainGenerator, save.difficulty, save.hero), save)
+
         /**
          * Chunks each way from the player's that are generated the tick they
          * are needed. Beyond it the window is filled [STREAM_BUDGET] a tick:
