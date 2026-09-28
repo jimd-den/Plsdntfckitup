@@ -136,14 +136,18 @@ fun ContentForgeContent(
             color = colors.inkMuted,
         )
         Spacer(Modifier.height(Space.large))
+        // What is being made comes first: it is what the player is watching,
+        // and the request form below it is for asking for the next one.
+        state.open?.let { draft ->
+            Anvil(state, draft, actions, now)
+            Spacer(Modifier.height(Space.large))
+            SectionLabel("Ask for another")
+            Spacer(Modifier.height(Space.small))
+        }
         Request(state, actions)
         state.error?.let {
             Spacer(Modifier.height(Space.small))
             Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger, modifier = Modifier.clickable(onClick = actions.onDismissError))
-        }
-        state.open?.let { draft ->
-            Spacer(Modifier.height(Space.large))
-            Anvil(state, draft, actions, now)
         }
         Spacer(Modifier.height(Space.large))
         Row(verticalAlignment = Alignment.CenterVertically) {
