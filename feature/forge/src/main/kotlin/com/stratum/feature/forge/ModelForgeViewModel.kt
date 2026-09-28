@@ -12,6 +12,10 @@ import com.stratum.core.domain.ai.ModelGenerationObserver
 import com.stratum.core.domain.ai.ModelJobProgress
 import com.stratum.core.domain.ai.ModelSubjectKind
 import com.stratum.core.domain.content.VoxelBlueprint
+import com.stratum.core.domain.creation.CreationJob
+import com.stratum.core.domain.creation.InMemoryJobCenter
+import com.stratum.core.domain.creation.JobLauncher
+import com.stratum.core.domain.creation.observer
 import com.stratum.core.domain.world.BlockType
 import com.stratum.engine.model.BlockPalette
 import com.stratum.engine.model.ModelPipeline
@@ -57,7 +61,18 @@ class ModelForgeViewModel(
     private val encodePng: (Texture) -> ByteArray,
     /** Told when a binding changes, so the world can pick the model up. */
     private val onContentChanged: () -> Unit = {},
+    /** The app's job centre: a model keeps generating, and shows in the tray, when this screen is left. */
+    jobs: JobLauncher? = null,
 ) : ViewModel() {
+
+    private val jobs: JobLauncher = jobs ?: InMemoryJobCenter(viewModelScope)
+    private var jobId: String? = null
+
+    init {
+        viewModelScope.launch {
+            this@ModelForgeViewModel.jobs.jobs.collect { all -> all.firstOrNull { it.id == jobId }?.let { job -> _state.update { it.copy(job = job) } } }
+        }
+    }
 
     private val _state = MutableStateFlow(
         ModelForgeUiState(
@@ -91,20 +106,52 @@ class ModelForgeViewModel(
             reference = current.reference, textured = current.textured,
         )
         _state.update { it.copy(generating = true, error = null, message = null, progress = null, stage = GenerationStage.PREPARING) }
-        viewModelScope.launch {
+        jobId = jobs.launch(
+            kind = "model",
+            title = "3D model: ${brief.subject.ifBlank { "from a picture" }}",
+            steps = listOf("Writing the request", "Waiting for ${providerLabel()}", "Reading the reply", PREPARING),
+        ) {
+            val reported = observer(model = providerLabel())
             val observer = object : ModelGenerationObserver {
-                override fun onStage(stage: GenerationStage) = _state.update { it.copy(stage = stage) }
-                override fun onProgress(progress: ModelJobProgress) = _state.update { it.copy(progress = progress) }
+                override fun onStage(stage: GenerationStage) {
+                    reported.onStage(stage)
+                    _state.update { it.copy(stage = stage) }
+                }
+                override fun onAttempt(attempt: com.stratum.core.domain.ai.GenerationAttempt) = reported.onAttempt(attempt)
+                override fun onProgress(progress: ModelJobProgress) {
+                    // A remote job's own words -- queued, 40% -- are the detail of the wait.
+                    detail(ModelForgeUiState(progress = progress).progressLabel)
+                    _state.update { it.copy(progress = progress) }
+                }
             }
-            val outcome = generate(brief, observer).mapCatching { model -> withContext(Dispatchers.Default) { prepare(brief, model, current.heightBlocks) } }
-            outcome
-                .onSuccess { asset ->
+            val outcome = try {
+                generate(brief, observer).mapCatching { model ->
+                    begin(PREPARING)
+                    withContext(Dispatchers.Default) { prepare(brief, model, current.heightBlocks) }
+                }
+            } catch (stopped: kotlinx.coroutines.CancellationException) {
+                _state.update { it.copy(generating = false, error = "Stopped.") }
+                throw stopped
+            }
+            outcome.fold(
+                onSuccess = { asset ->
                     _state.update { it.copy(generating = false, assets = storage.all(), selectedId = asset.id, message = "Saved ${asset.name}: ${asset.triangleCount} triangles") }
-                }
-                .onFailure { failure ->
-                    _state.update { it.copy(generating = false, error = failure.message ?: "The model could not be made") }
-                }
+                    "Saved ${asset.name}: ${asset.triangleCount} triangles."
+                },
+                onFailure = { failure ->
+                    val reason = failure.message ?: "The model could not be made"
+                    _state.update { it.copy(generating = false, error = reason) }
+                    fail(reason)
+                },
+            )
         }
+        _state.update { it.copy(job = jobs.jobs.value.firstOrNull { job -> job.id == jobId }) }
+    }
+
+    /** Stops the model being made; nothing half-made is kept. */
+    fun cancel() {
+        jobId?.let(jobs::cancel)
+        _state.update { it.copy(generating = false) }
     }
 
     /** Checks the model parses, bakes its preview and keeps it. Throws with a sentence when the file is bad. */
@@ -178,6 +225,7 @@ class ModelForgeViewModel(
 
     companion object {
         const val MIN_HEIGHT = 0.5f
+        private const val PREPARING = "Checking and baking the model"
         const val MAX_HEIGHT = 12f
         private const val PREVIEW_SIZE = 256
 
@@ -191,10 +239,11 @@ class ModelForgeViewModel(
             isProviderConfigured: () -> Boolean,
             encodePng: (Texture) -> ByteArray,
             onContentChanged: () -> Unit = {},
+            jobs: JobLauncher? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ModelForgeViewModel(
-                generate, pipeline, storage, propBlocks, allBlocks, providerLabel, isProviderConfigured, encodePng, onContentChanged,
+                generate, pipeline, storage, propBlocks, allBlocks, providerLabel, isProviderConfigured, encodePng, onContentChanged, jobs,
             ) as T
         }
     }
@@ -220,6 +269,8 @@ data class ModelForgeUiState(
     val providerConfigured: Boolean = false,
     val message: String? = null,
     val error: String? = null,
+    /** The generation as a job, for its timeline. */
+    val job: CreationJob? = null,
 ) {
     val selected: ModelAsset? get() = assets.firstOrNull { it.id == selectedId }
     val canGenerate: Boolean get() = !generating && providerConfigured && (subject.isNotBlank() || reference != null)

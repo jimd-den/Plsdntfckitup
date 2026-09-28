@@ -32,6 +32,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.JobProgress
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -93,6 +94,7 @@ fun SpriteForgeScreen(
         onMapFrames = onMapFrames,
         onPoseForge = onPoseForge,
         onWeaponForge = onWeaponForge,
+        onCancel = viewModel::cancel,
     )
 }
 
@@ -116,6 +118,7 @@ fun SpriteForgeContent(
     onMapFrames: () -> Unit = {},
     onPoseForge: () -> Unit = {},
     onWeaponForge: () -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
 
@@ -337,7 +340,13 @@ fun SpriteForgeContent(
                 )
             }
 
-            if (state.busy) {
+            val job = state.job
+            if (job != null && (state.busy || job.isActive)) {
+                Spacer(Modifier.height(Space.medium))
+                // Every step the adapter reported, with the seconds it has waited:
+                // which step it is on is the difference between "slow" and "broken".
+                JobProgress(job, showHeader = false, onCancel = onCancel)
+            } else if (state.busy) {
                 Spacer(Modifier.height(Space.medium))
                 // The stage the adapter reported, not a guess. Which step it is
                 // stuck on is the difference between "slow" and "broken".

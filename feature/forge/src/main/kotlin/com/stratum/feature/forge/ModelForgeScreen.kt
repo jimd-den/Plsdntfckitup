@@ -37,6 +37,7 @@ import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
 import com.stratum.core.designsystem.component.StratumPanel
+import com.stratum.core.designsystem.component.JobProgress
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.designsystem.theme.safeContent
@@ -117,7 +118,14 @@ fun ModelForgeScreen(
                 onClick = viewModel::generate, enabled = state.canGenerate,
                 emphasis = ActionEmphasis.PRIMARY, modifier = Modifier.fillMaxWidth(),
             )
-            if (state.generating) {
+            val job = state.job
+            if (state.generating && job != null) {
+                Spacer(Modifier.height(Space.small))
+                val fraction = state.progress?.fraction
+                if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(Space.small))
+                JobProgress(job, showHeader = false, onCancel = viewModel::cancel)
+            } else if (state.generating) {
                 Spacer(Modifier.height(Space.small))
                 val fraction = state.progress?.fraction
                 if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
