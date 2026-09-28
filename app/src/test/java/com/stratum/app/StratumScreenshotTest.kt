@@ -61,44 +61,6 @@ class StratumScreenshotTest {
     @get:Rule val composeTestRule = createComposeRule()
 
     @Test
-    fun home_screen() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                StratumApp(modifier = Modifier.fillMaxSize())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home.png")
-    }
-
-    @Test
-    @Config(qualifiers = "+land")
-    fun home_screen_landscape() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                StratumApp(modifier = Modifier.fillMaxSize())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home_landscape.png")
-    }
-
-    @Test
-    fun world_setup() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(com.stratum.core.designsystem.theme.StratumTheme.colors.surface).padding(16.dp)) {
-                    WorldSetupCard(
-                        rules = com.stratum.core.domain.world.RulesPresets.survivor.rules.copy(raids = false),
-                        suggested = com.stratum.core.domain.world.WorldRules(),
-                        onRulesChange = {},
-                        startExpanded = true,
-                    )
-                }
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/world_setup.png")
-    }
-
-    @Test
     fun agent_studio() {
         val crew = com.stratum.agents.StandardCrew
         fun attempt(n: Int, reply: String, problems: List<String> = emptyList(), added: Map<String, List<String>> = emptyMap()) =
@@ -364,6 +326,7 @@ class StratumScreenshotTest {
                     onSave = {},
                     onBack = {},
                     modifier = Modifier.fillMaxSize(),
+                    onChooseGraphics = {},
                 )
             }
         }
@@ -511,6 +474,47 @@ class StratumScreenshotTest {
             recipes = session.content.recipes.mapIndexed { i, r -> com.stratum.engine.world.RecipeOption(r, haveIngredients = i == 0, atStation = true) },
         ),
     )
+
+    /** The pause sheet: every system behind the one menu button, with a point to spend calling from Hero. */
+    @Test
+    fun play_pause_menu() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session), world = session.world, modifier = Modifier.fillMaxSize(), menuOpen = true)
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_pause.png")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun play_pause_menu_landscape() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session), world = session.world, modifier = Modifier.fillMaxSize(), menuOpen = true)
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_pause_landscape.png")
+    }
+
+    /** Once every hint has been taught, the HUD is only the controls and the world. */
+    @Test
+    fun play_screen_hints_learned() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = fightState(content, session),
+                    world = session.world,
+                    modifier = Modifier.fillMaxSize(),
+                    seenHints = com.stratum.feature.play.Hints.all,
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_quiet.png")
+    }
 
     @Test
     @Config(qualifiers = "+land")

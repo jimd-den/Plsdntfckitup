@@ -1,4 +1,4 @@
-package com.stratum.app.world
+package com.stratum.app
 
 import com.stratum.core.domain.session.WorldSave
 import com.stratum.core.domain.session.WorldSaveRepository
@@ -15,7 +15,7 @@ import com.stratum.core.domain.session.WorldSummary
  */
 class InMemoryWorldSaveRepository(
     summaries: List<WorldSummary> = emptyList(),
-    private val summaryOf: (WorldSave) -> WorldSummary = { it.summary },
+    private val summaryOf: (WorldSave) -> WorldSummary = { it.summary() },
 ) : WorldSaveRepository {
 
     private val summaries = summaries.associateBy { it.id }.toMutableMap()

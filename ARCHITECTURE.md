@@ -508,17 +508,43 @@ sweep for a cooldown.
 
 - **Left thumb:** the stick, with Build (showing the block in hand) above it.
 - **Right thumb:** one big button for what the current mode is for -- Strike,
-  or Done while building -- and the rest fanned around it on rings sized so no
-  two buttons or labels touch (`clusterOffsets`).
-- **Top:** vitals in the corner, and the dock -- Bag, Anvil, Hero, Table,
-  Style, View -- under it in portrait or beside it in landscape.
+  or Done while building -- and the skills, roll and flasks fanned around it on
+  rings sized so no two buttons or labels touch (`clusterOffsets`).
+- **Top:** vitals and the place name in the corner, and one Menu button in the
+  other. Bag, Anvil, Hero, Table, Camp, Realm, Style, View, zoom and Save &
+  quit live in the pause sheet behind it (`PauseMenu`); the Menu button wears
+  the badge of whatever inside is calling, so "points to spend" is not hidden
+  by being tidied away. Pinch zooms.
+- **Hints** teach in play: each appears when it first matters, fades, and is
+  never shown again (`PlayHints`, persisted by the app). News from the game
+  fades after a moment. There is no permanent caption over the world.
+- **Back** closes the open panel, then opens the menu; it never drops the
+  player out of a world.
 - **Build mode** swaps the fan for a tray of shapes and blocks.
 
-Play view models are scoped to the play screen (`ScopedViewModels`), not the
-activity, so leaving play saves the hero and frees the world, and the next
-visit starts a fresh one. Home is laid out as a title menu: the hero and one
-button to play, a seven-line how-to-play whose glyphs match the HUD, and every
-creation tool as a tile that says what it does and what state it is in.
+Play view models are scoped to the world being played (`ScopedViewModels`,
+keyed on the world id), not the activity, so leaving play takes the exit save
+and frees the world, and the next visit starts a fresh one.
+
+## The app shell
+
+`StratumApp` is a dispatcher over a sealed `Route` hierarchy and a small
+in-house `BackStack` that the system back gesture pops. In-house rather than
+Navigation-Compose because the routes carry Kotlin values (a world launch),
+there are no deep links, and play sessions are already scoped by
+`ScopedViewModels`. State that outlives a screen lives in `AppViewModel`:
+`AppGraph` holds the adapters, `GameState` the assembled content, the chosen
+hero and look, the world style and the forged models, and `SavedWorlds` the
+world list over the world-save `WorldLibrary`. Each tool's wiring sits in its
+own route file under `app/.../tools`.
+
+The title screen has three doors -- Play, Create, Import & Share -- and a gear
+for settings; "Continue" is the primary action whenever a world is saved.
+Behind Play is the saved-world list and a three-step new world (hero, world,
+go); behind Create, the studio's tools as five cards with a status each;
+behind Import & Share, installing, importing, sharing and the plugin manager.
+Every screen wears `StratumTopBar`, whose slot for the creation-jobs tray is
+provided once by the shell through `LocalJobsTray`.
 
 The **texture forge** is its own screen: describe a look, choose regions,
 paint, and watch a progress bar and a gallery fill as textures arrive.
