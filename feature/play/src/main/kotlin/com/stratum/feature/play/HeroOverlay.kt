@@ -2,6 +2,7 @@ package com.stratum.feature.play
 
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.LookRow
+import com.stratum.core.designsystem.component.RoundIconButton
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -49,6 +52,7 @@ data class HeroActions(
     val onUnlinkSupport: (String, String) -> Unit = { _, _ -> },
     val onEnterTier: (Int) -> Unit = {},
     val onOpenWaystone: (String) -> Unit = {},
+    val onExplain: (com.stratum.core.domain.sandbox.StatQuery) -> Unit = {},
 )
 
 /**
@@ -57,20 +61,50 @@ data class HeroActions(
  * pixel a phone has; the fight keeps running behind it, as the bag does.
  */
 @Composable
-fun HeroOverlay(state: PlayUiState, actions: HeroActions, modifier: Modifier = Modifier) {
+fun HeroOverlay(state: PlayUiState, actions: HeroActions, modifier: Modifier = Modifier, looks: HeroLooks = HeroLooks()) {
     val colors = StratumTheme.colors
     val panel = state.hero
     Column(modifier = modifier.fillMaxSize().background(colors.surface).safeContent().padding(Space.medium)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-            HeroTab.entries.forEach { tab -> StratumChip(label = tab.label, selected = panel.tab == tab, onClick = { actions.onSelectTab(tab) }) }
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = "Close", onClick = actions.onClose, emphasis = ActionEmphasis.QUIET)
+            // The tabs scroll sideways on a narrow phone rather than squeezing Close.
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                HeroTab.entries.forEach { tab -> StratumChip(label = tab.label, selected = panel.tab == tab, onClick = { actions.onSelectTab(tab) }) }
+            }
+            // A round ✕, as the pause menu closes, so five tabs fit a phone held upright.
+            RoundIconButton(glyph = "✕", description = "Close", onClick = actions.onClose)
         }
         Spacer(Modifier.height(Space.small))
         when (panel.tab) {
             HeroTab.TREE -> TreePage(state, actions, Modifier.weight(1f))
             HeroTab.SKILLS -> SkillsPage(state, actions, Modifier.weight(1f))
+            HeroTab.STATS -> StatsPage(state, actions, Modifier.weight(1f))
             HeroTab.WORLDS -> WorldsPage(state, actions, Modifier.weight(1f))
+            HeroTab.LOOK -> LookPage(looks, Modifier.weight(1f))
+        }
+    }
+}
+
+/**
+ * How the hero looks, changed mid-fight: the class's own art first, then every
+ * look the player drew or imported. The world behind redraws them at once.
+ */
+@Composable
+private fun LookPage(looks: HeroLooks, modifier: Modifier) {
+    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionLabel("Wearing")
+        Text(
+            looks.looks.firstOrNull { it.id == looks.wornId }?.name ?: "Class art",
+            style = MaterialTheme.typography.titleMedium,
+            color = StratumTheme.colors.accent,
+        )
+        LookRow(looks.looks, looks.wornId, looks.onPick, Modifier.fillMaxWidth())
+        if (looks.looks.isEmpty()) {
+            Muted("Draw your hero in the sprite forge and they will stand here to be worn, in this world and every other.")
+        } else {
+            Muted("Your look goes with you: every world you enter shows the one you wear.")
+        }
+        looks.onMake?.let { make ->
+            StratumAction(label = "Make a look", onClick = make, emphasis = ActionEmphasis.SECONDARY)
         }
     }
 }
@@ -166,65 +200,94 @@ private fun NodeCard(node: PassiveNode, state: PlayUiState, actions: HeroActions
     }
 }
 
+/**
+ * The skills and their links: each skill's cost, timing and tags, the
+ * supports linked to it and what each does, and -- for the selected skill --
+ * every held support, the ones that fit first and the rest saying what they
+ * would need.
+ */
 @Composable
 private fun SkillsPage(state: PlayUiState, actions: HeroActions, modifier: Modifier) {
     val panel = state.hero
-    val selected = panel.selectedSkill ?: state.skills.firstOrNull()?.id
+    val selected = state.skills.firstOrNull { it.id == panel.selectedSkill } ?: state.skills.firstOrNull()
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.small)) {
         items(state.skills, key = SkillDefinition::id) { skill ->
-            SkillRow(skill, skill.id == selected, panel, actions)
+            SkillRow(skill, skill.id == selected?.id, state, actions)
         }
         item {
             Spacer(Modifier.height(Space.small))
-            SectionLabel("Supports held")
+            SectionLabel(selected?.let { "Supports for ${it.name}" } ?: "Supports held")
             if (panel.heldSupports.isEmpty()) {
                 Muted("Supports drop from monsters. Each changes one skill: harder, wider, faster or cheaper, at a price.")
-            } else {
-                Muted("Tap one to link it to the selected skill.")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-                    items(panel.heldSupports, key = { it.definition.id }) { held ->
-                        StratumChip(
-                            label = "${held.definition.glyph} ${held.definition.name} ×${held.count}",
-                            selected = false,
-                            onClick = { actions.onLinkSupport(held.definition.id) },
-                            swatch = Color(held.definition.color),
-                        )
-                    }
-                }
+            } else if (selected != null) {
+                Muted("Tap one that fits to link it. A skill holds ${com.stratum.core.domain.crafting.StandardCrafting.MAX_SUPPORTS_PER_SKILL}.")
+            }
+        }
+        if (selected != null) {
+            items(SkillFacts.options(selected, panel.heldSupports), key = { "held:" + it.support.id }) { option ->
+                SupportOptionRow(option, actions)
             }
         }
     }
 }
 
 @Composable
-private fun SkillRow(skill: SkillDefinition, selected: Boolean, panel: HeroPanelState, actions: HeroActions) {
+private fun SkillRow(skill: SkillDefinition, selected: Boolean, state: PlayUiState, actions: HeroActions) {
     val colors = StratumTheme.colors
     StratumPanel(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(skill.name, style = MaterialTheme.typography.titleSmall, color = colors.ink)
+                Text(skill.name, style = MaterialTheme.typography.titleSmall, color = Color(skill.color))
                 Text(
-                    "×%.2f power · %d cost · %.1fs · reach %d".format(skill.powerMultiplier, skill.resourceCost, skill.cooldownSeconds, skill.range),
+                    SkillFacts.facts(skill, state.costOf(skill), state.player.resourceName).joinToString(" · "),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.inkMuted,
                 )
+                Text(SkillFacts.tags(skill).joinToString(" "), style = MaterialTheme.typography.labelSmall, color = colors.accentAlt)
             }
             StratumChip(label = if (selected) "Selected" else "Select", selected = selected, onClick = { actions.onSelectSkill(skill.id) })
         }
-        val linked = panel.supportsBySkill[skill.id].orEmpty()
-        if (linked.isNotEmpty()) {
+        val linked = state.hero.supportsBySkill[skill.id].orEmpty()
+        linked.forEach { support ->
             Spacer(Modifier.height(Space.tight))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-                items(linked, key = { it.id }) { support ->
-                    StratumChip(
-                        label = "${support.glyph} ${support.name} ✕",
-                        selected = true,
-                        onClick = { actions.onUnlinkSupport(skill.id, support.id) },
-                        swatch = Color(support.color),
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${support.glyph} ${support.name}", style = MaterialTheme.typography.bodySmall, color = Color(support.color))
+                    Text(SkillFacts.changes(support).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
                 }
+                StratumAction(label = "Unlink", onClick = { actions.onUnlinkSupport(skill.id, support.id) }, emphasis = ActionEmphasis.QUIET)
             }
         }
+    }
+}
+
+@Composable
+private fun SupportOptionRow(option: SupportOption, actions: HeroActions) {
+    val colors = StratumTheme.colors
+    StratumPanel(Modifier.fillMaxWidth(), raised = option.fits) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${option.support.glyph} ${option.support.name} ×${option.held}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (option.fits) Color(option.support.color) else colors.inkMuted,
+                )
+                Text(option.changes.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+                option.needs?.let { Text("Needs a $it skill", style = MaterialTheme.typography.labelSmall, color = colors.danger) }
+            }
+            StratumAction(label = "Link", onClick = { actions.onLinkSupport(option.support.id) }, emphasis = ActionEmphasis.SECONDARY, enabled = option.fits)
+        }
+    }
+}
+
+/** Every number the character fights with, one at a time, broken down to where each part came from. */
+@Composable
+private fun StatsPage(state: PlayUiState, actions: HeroActions, modifier: Modifier) {
+    val panel = state.hero
+    Column(modifier.verticalScroll(rememberScrollState())) {
+        StatPicker(panel.query, panel.damageTypes, state.skills, actions.onExplain)
+        Spacer(Modifier.height(Space.medium))
+        BreakdownView(panel.breakdown)
     }
 }
 

@@ -64,6 +64,7 @@ fun ClassForgeScreen(
         onReset = viewModel::reset,
         onEditExisting = viewModel::editExisting,
         onDelete = viewModel::delete,
+        onMakeLook = viewModel::makeLook,
     )
 }
 
@@ -93,6 +94,8 @@ fun ClassForgeScreenContent(
     onReset: () -> Unit = {},
     onEditExisting: (HeroClassDefinition) -> Unit = {},
     onDelete: (String) -> Unit = {},
+    /** Queues this hero's look as a background job; never waits for it. */
+    onMakeLook: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     val draft = state.draft
@@ -105,14 +108,7 @@ fun ClassForgeScreenContent(
             .verticalScroll(rememberScrollState())
             .padding(Space.large),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SectionLabel("Class forge")
-            StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Class forge", onBack = onBack)
 
         Spacer(Modifier.height(Space.large))
 
@@ -232,6 +228,19 @@ fun ClassForgeScreenContent(
                         swatch = Color(skill.color),
                     )
                 }
+            }
+
+            // The look is one tap and never a wait: the sheet is drawn as a job
+            // in the background, and picked for this hero when it lands.
+            if (state.canMakeLook) {
+                Spacer(Modifier.height(Space.medium))
+                StratumAction(
+                    label = if (state.lookPending) "Drawing a look…" else "Make a look",
+                    onClick = onMakeLook,
+                    enabled = !state.lookPending,
+                    emphasis = ActionEmphasis.SECONDARY,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             // Art the sprite forge has drawn. Hidden when there is none rather

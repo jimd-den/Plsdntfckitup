@@ -33,6 +33,11 @@ class WorldClock(private val dayLengthSeconds: Float, startFraction: Float = MOR
         elapsedSeconds += deltaSeconds
     }
 
+    /** Sets the clock to a saved running total: the same hour of the same day. */
+    fun restore(seconds: Float) {
+        elapsedSeconds = seconds.coerceAtLeast(0f)
+    }
+
     companion object {
         const val MORNING = 0.1f
         const val DUSK = 0.5f
@@ -79,7 +84,7 @@ internal class SurvivalSystem(
     val surroundings: Environment get() = environment
 
     /** Needs run down, the weather is felt, a harsh world takes its toll. */
-    fun advance(player: PlayerState, deltaSeconds: Float, clock: WorldClock, biome: BiomeDefinition): PlayerState {
+    fun advance(player: PlayerState, deltaSeconds: Float, clock: WorldClock, biome: BiomeDefinition, maxHealth: Int): PlayerState {
         if (!active || !player.isAlive) return player
         sinceSensed += deltaSeconds
         if (sinceSensed >= SENSE_EVERY) {
@@ -89,7 +94,7 @@ internal class SurvivalSystem(
         effects.replaceAll { (modifiers, left) -> modifiers to left - deltaSeconds }
         effects.removeAll { it.second <= 0f }
         val needs = Survival.advanced(player.needs, content.needs, environment, deltaSeconds)
-        healthDebt += Survival.healthLossPerSecond(needs, content.needs, mode, player.maxHealthWithGear) * deltaSeconds
+        healthDebt += Survival.healthLossPerSecond(needs, content.needs, mode, maxHealth) * deltaSeconds
         val loss = floor(healthDebt).toInt()
         healthDebt -= loss
         return player.copy(needs = needs).let { if (loss > 0) it.damaged(loss) else it }
@@ -99,11 +104,12 @@ internal class SurvivalSystem(
     fun modifiers(player: PlayerState): List<StatModifier> =
         if (!active) emptyList() else Survival.penalties(player.needs, content.needs, mode) + effects.flatMap { it.first }
 
-    fun consume(player: PlayerState, itemId: String): Pair<PlayerState, SurvivalResult> {
+    fun consume(player: PlayerState, itemId: String, maxHealth: Int): Pair<PlayerState, SurvivalResult> {
         val food = content.consumable(itemId) ?: return player to SurvivalResult.Unknown
         val spent = player.consuming(itemId) ?: return player to SurvivalResult.NoneHeld
         if (food.modifiers.isNotEmpty() && food.durationSeconds > 0f) effects += food.modifiers to food.durationSeconds
-        return spent.copy(needs = Survival.consumed(spent.needs, food)).healed(food.heals) to SurvivalResult.Consumed(food)
+        val healed = (spent.health + food.heals).coerceAtMost(maxOf(spent.health, maxHealth))
+        return spent.copy(needs = Survival.consumed(spent.needs, food), health = healed) to SurvivalResult.Consumed(food)
     }
 
     /** A drink from open water within reach. */

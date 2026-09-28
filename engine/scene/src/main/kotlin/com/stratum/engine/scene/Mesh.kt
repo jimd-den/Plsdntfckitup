@@ -87,14 +87,76 @@ object Vertex {
     const val SPRITE_SHADOW = 2f
 }
 
-/** Triangles of one material kind, ready to upload or rasterise. */
+/**
+ * Triangles of one material kind, ready to upload or rasterise.
+ *
+ * The arrays may be longer than what is used: only the first [vertexFloats]
+ * and [indexCount] entries are this batch. That is what lets a batch rebuilt
+ * every frame live in recycled arrays; see [MeshRecycler].
+ */
 class MeshBatch(
     val kind: MaterialKind,
     val vertices: FloatArray,
     val indices: IntArray,
+    val vertexFloats: Int = vertices.size,
+    val indexCount: Int = indices.size,
+    private val recycler: MeshRecycler? = null,
 ) {
-    val vertexCount: Int get() = vertices.size / Vertex.STRIDE
-    val triangleCount: Int get() = indices.size / 3
+    val vertexCount: Int get() = vertexFloats / Vertex.STRIDE
+    val triangleCount: Int get() = indexCount / 3
+    val isEmpty: Boolean get() = indexCount == 0
+
+    /**
+     * Hands the arrays back for another frame's batch. Only the owner that
+     * knows nothing will read this batch again calls it -- the GL renderer,
+     * once a newer frame has replaced this one.
+     */
+    fun release() {
+        recycler?.recycle(vertices, indices)
+    }
+}
+
+/**
+ * Arrays for batches rebuilt every frame, handed round instead of allocated.
+ *
+ * A frame's per-frame geometry is a megabyte or more; allocating it fresh at
+ * sixty frames a second was most of the garbage the game made, and on a
+ * phone garbage is paid for in collector pauses -- stutter. The builder takes
+ * arrays from here, the renderer returns them when it is done. Thread-safe,
+ * because those are different threads. A batch never released is simply
+ * collected, so a caller that ignores recycling loses nothing but the saving.
+ */
+class MeshRecycler(private val keep: Int = KEEP) {
+    private val floats = java.util.concurrent.ConcurrentLinkedQueue<FloatArray>()
+    private val ints = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+
+    fun floats(size: Int): FloatArray = take(floats, size) { it.size } ?: FloatArray(grown(size))
+
+    fun ints(size: Int): IntArray = take(ints, size) { it.size } ?: IntArray(grown(size))
+
+    fun recycle(vertices: FloatArray, indices: IntArray) {
+        if (floats.size < keep) floats.offer(vertices)
+        if (ints.size < keep) ints.offer(indices)
+    }
+
+    private inline fun <T> take(queue: java.util.concurrent.ConcurrentLinkedQueue<T>, size: Int, length: (T) -> Int): T? {
+        // Look at what is pooled once round; anything too small is put back for a smaller batch.
+        repeat(queue.size) {
+            val candidate = queue.poll() ?: return null
+            if (length(candidate) >= size) return candidate
+            queue.offer(candidate)
+        }
+        return null
+    }
+
+    /** Room to grow into, so a batch a few quads bigger than last frame's reuses the same array. */
+    private fun grown(size: Int): Int = maxOf(size + size / 4, MIN_SIZE)
+
+    private companion object {
+        /** Enough for every per-frame batch of the frame being built, the one waiting and the one drawn. */
+        const val KEEP = 16
+        const val MIN_SIZE = 1024
+    }
 }
 
 /** A growable vertex and index buffer. Reused frame to frame by its owner. */
@@ -151,7 +213,17 @@ class MeshBuilder(private val kind: MaterialKind) {
         triangle(a, c, d)
     }
 
+    /** An exact copy, for a batch that is kept, such as a chunk's terrain. */
     fun build(): MeshBatch = MeshBatch(kind, vertices.copyOf(vertexFloats), indices.copyOf(indexCount))
+
+    /** A copy into recycled arrays, for a batch rebuilt every frame. */
+    fun build(recycler: MeshRecycler): MeshBatch {
+        val v = recycler.floats(vertexFloats)
+        val i = recycler.ints(indexCount)
+        vertices.copyInto(v, 0, 0, vertexFloats)
+        indices.copyInto(i, 0, 0, indexCount)
+        return MeshBatch(kind, v, i, vertexFloats, indexCount, recycler)
+    }
 }
 
 /** A texture as plain pixels, so the domain side never touches a platform bitmap. */

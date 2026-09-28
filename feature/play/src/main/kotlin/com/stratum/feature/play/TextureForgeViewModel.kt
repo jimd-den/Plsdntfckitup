@@ -16,7 +16,9 @@ import com.stratum.engine.scene.forge.ForgeProgress
 import com.stratum.feature.play.gl.ForgedKits
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import com.stratum.core.domain.creation.InMemoryJobCenter
+import com.stratum.core.domain.creation.JobLauncher
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,11 +61,14 @@ class TextureForgeViewModel(
     private val model: ImageModelPort?,
     private val root: File,
     initialPrompt: String,
+    /** The app's job centre, so a painting run shows in the tray and outlives this screen. */
+    jobs: JobLauncher? = null,
 ) : ViewModel() {
 
+    private val jobs: JobLauncher = jobs ?: InMemoryJobCenter(viewModelScope)
     private val pack = mergedPack(content)
     private val runner = model?.let { TextureForgeRunner(it, root) }
-    private var job: Job? = null
+    private var jobId: String? = null
 
     private val _state = MutableStateFlow(TextureForgeUiState(regions = content.biomes, hasModel = model != null))
     val state: StateFlow<TextureForgeUiState> = _state.asStateFlow()
@@ -102,19 +107,25 @@ class TextureForgeViewModel(
         val plan = runner.plan(direction(state.prompt), pack, state.selectedRegions, state.includeActors)
         if (plan.isEmpty) return _state.update { it.copy(message = "Everything here is already painted", progress = ForgeProgress(plan.alreadyMade, skipped = plan.alreadyMade)) }
         _state.update { it.copy(gallery = emptyList(), message = null) }
-        job = viewModelScope.launch(Dispatchers.IO) {
-            runner.run(plan) { progress ->
-                val thumbs = thumbnails(plan.folder, progress)
-                _state.update { it.copy(progress = progress, gallery = thumbs) }
+        jobId = jobs.launch(kind = "textures", title = "Textures: ${state.prompt}", steps = listOf(PAINTING)) {
+            begin(PAINTING, "${plan.orders.size} to paint")
+            val finished = withContext(Dispatchers.IO) {
+                runner.run(plan) { progress ->
+                    val thumbs = thumbnails(plan.folder, progress)
+                    _state.update { it.copy(progress = progress, gallery = thumbs) }
+                    detail("${progress.done} of ${progress.total}" + if (progress.failed.isNotEmpty()) " · ${progress.failed.size} failed" else "")
+                }
             }
             _state.update { it.copy(message = "Done. Play in this style and the world wears it.") }
             replan()
+            if (finished.made.isEmpty() && finished.failed.isNotEmpty()) fail("None came back: ${finished.failed.first().second}")
+            "Painted ${finished.made.size}" + if (finished.failed.isNotEmpty()) ", ${finished.failed.size} failed." else "."
         }
     }
 
     /** Stops between images; what has arrived is kept and used. */
     fun stop() {
-        job?.cancel()
+        jobId?.let(jobs::cancel)
         _state.update { it.copy(progress = it.progress?.cancelling(), message = "Stopped. What was painted is kept.") }
         replan()
     }
@@ -146,11 +157,6 @@ class TextureForgeViewModel(
             }
         }
 
-    override fun onCleared() {
-        job?.cancel()
-        super.onCleared()
-    }
-
     companion object {
         private const val GALLERY_SIZE = 24
         private const val THUMB_SAMPLE = 4
@@ -167,10 +173,12 @@ class TextureForgeViewModel(
             enemies = content.enemies,
         )
 
-        fun factory(content: AssembledContent, model: ImageModelPort?, root: File, initialPrompt: String): ViewModelProvider.Factory =
+        private const val PAINTING = "Painting textures"
+
+        fun factory(content: AssembledContent, model: ImageModelPort?, root: File, initialPrompt: String, jobs: JobLauncher? = null): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T = TextureForgeViewModel(content, model, root, initialPrompt) as T
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = TextureForgeViewModel(content, model, root, initialPrompt, jobs) as T
             }
     }
 }

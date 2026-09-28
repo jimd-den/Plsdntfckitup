@@ -58,9 +58,9 @@ internal fun VitalsCard(state: PlayUiState, modifier: Modifier = Modifier) {
         shape = Cut.small,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Space.small),
     ) {
-        StratumMeter(label = "♥ Vitality", value = state.player.health, max = state.player.maxHealthWithGear, tint = colors.danger)
+        StratumMeter(label = "♥ Vitality", value = state.player.health, max = state.maxHealth, tint = colors.danger)
         Spacer(Modifier.height(Space.hair))
-        StratumMeter(label = "✦ ${state.player.resourceName}", value = state.player.resource, max = state.player.resourceCeiling, tint = colors.accentAlt)
+        StratumMeter(label = "✦ ${state.player.resourceName}", value = state.player.resource, max = state.maxResource, tint = colors.accentAlt)
         Spacer(Modifier.height(Space.tight))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("LV ${state.player.level}" + if (state.hero.tier > 0) " · T${state.hero.tier}" else "", style = MaterialTheme.typography.labelSmall, color = colors.accent)
@@ -95,64 +95,26 @@ internal data class DockEntry(
 )
 
 /**
- * The game's systems, each one tap away and each labelled: bag, anvil, hero,
- * table, style. A badge says when something inside is waiting, so a new
- * feature is found by the number on it rather than by reading a manual.
- */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-internal fun FeatureDock(entries: List<DockEntry>, modifier: Modifier = Modifier, perRow: Int = Int.MAX_VALUE) {
-    // Wraps rather than running off a narrow screen; right-aligned, under the thumb's reach.
-    androidx.compose.foundation.layout.FlowRow(
-        modifier,
-        horizontalArrangement = Arrangement.spacedBy(Space.small, Alignment.End),
-        verticalArrangement = Arrangement.spacedBy(Space.small),
-        maxItemsInEachRow = perRow,
-    ) {
-        entries.forEach { entry ->
-            GameButton(
-                glyph = entry.glyph,
-                label = entry.label,
-                onClick = entry.onClick,
-                size = DOCK_BUTTON,
-                badge = entry.badge,
-                emphasis = when {
-                    entry.active -> GameEmphasis.ACTIVE
-                    entry.calling -> GameEmphasis.PRIMARY
-                    else -> GameEmphasis.NORMAL
-                },
-            )
-        }
-    }
-}
-
-/**
- * Where the player is and what the game just said. The hint is a teacher,
- * not a label: it says what the next gesture does.
+ * Where the player is, in one quiet line under the vitals. What the game has
+ * to say goes in a hint or a toast that fades, not here.
  */
 @Composable
-internal fun RegionBanner(state: PlayUiState, modifier: Modifier = Modifier) {
+internal fun PlaceTag(state: PlayUiState, modifier: Modifier = Modifier) {
     val colors = StratumTheme.colors
-    val line = state.message ?: if (state.settlementHostile) {
-        "Defeat the garrison to liberate it"
-    } else if (state.buildMode) {
-        "Drag on the ground to build · pick a shape and a block below"
-    } else {
-        "Stick to move · tap ground to dig · hold to place"
-    }
-    Column(
+    // In a town, the town is the place; out in the wilds, the region is.
+    val place = state.settlementName?.let { if (state.settlementHostile) "$it · stronghold" else it } ?: state.biomeName.ifBlank { "Uncharted" }
+    Text(
+        place.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        color = if (state.settlementHostile) colors.danger else colors.accent,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = modifier
-            .widthIn(max = 520.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .widthIn(max = VITALS_WIDTH)
+            .clip(RoundedCornerShape(8.dp))
             .background(colors.surface.copy(alpha = 0.72f))
-            .padding(horizontal = Space.medium, vertical = Space.tight),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // In a town, the town is the place; out in the wilds, the region is.
-        val place = state.settlementName?.let { if (state.settlementHostile) "$it · stronghold" else it } ?: state.biomeName.ifBlank { "Uncharted" }
-        Text(place.uppercase(), style = MaterialTheme.typography.labelMedium, color = if (state.settlementHostile) colors.danger else colors.accent, maxLines = 1)
-        Text(line, style = MaterialTheme.typography.labelSmall, color = colors.ink, textAlign = TextAlign.Center, maxLines = 2)
-    }
+            .padding(horizontal = Space.small, vertical = Space.tight),
+    )
 }
 
 /** A button placed around the big one: where it sits and what it is. */
@@ -164,6 +126,8 @@ internal data class ArcButton(
     val cooldown: Float = 0f,
     val enabled: Boolean = true,
     val active: Boolean = false,
+    /** Charges ready, a life cost, a flask's uses: the one number the thumb needs before pressing. */
+    val badge: String? = null,
 )
 
 /**
@@ -198,6 +162,7 @@ internal fun ActionCluster(
                 cooldown = button.cooldown,
                 enabled = button.enabled,
                 emphasis = if (button.active) GameEmphasis.ACTIVE else GameEmphasis.NORMAL,
+                badge = button.badge,
                 // Centred on the big button's centre, then pushed out along the arc.
                 modifier = Modifier.offset(
                     x = (dx.dp - (PRIMARY_BUTTON - ARC_BUTTON) / 2),
@@ -292,6 +257,19 @@ internal fun BuildTray(
             }
         }
         BlockStrip(state, world, onSelectSlot, Modifier.fillMaxWidth())
+        // Structures made in the model forge, raised whole in front of the player.
+        if (state.blueprints.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                items(state.blueprints.size) { index ->
+                    val blueprint = state.blueprints[index]
+                    StratumChip(
+                        label = "⌂ ${blueprint.name} ${blueprint.blocks}",
+                        selected = false,
+                        onClick = { state.onRaiseBlueprint(blueprint.id) },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -322,18 +300,6 @@ internal fun BuildTool.glyph(): String = when (this) {
     BuildTool.ERASE -> "✕"
 }
 
-/** Two small buttons for the camera, out of the thumbs' way. */
-@Composable
-internal fun ZoomPair(onZoom: (Float) -> Unit, modifier: Modifier = Modifier, horizontal: Boolean = false) {
-    val zoomIn = @Composable { GameButton(glyph = "+", onClick = { onZoom(ZOOM_STEP) }, size = ZOOM_BUTTON) }
-    val zoomOut = @Composable { GameButton(glyph = "−", onClick = { onZoom(-ZOOM_STEP) }, size = ZOOM_BUTTON) }
-    if (horizontal) {
-        Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.small)) { zoomOut(); zoomIn() }
-    } else {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.small)) { zoomIn(); zoomOut() }
-    }
-}
-
 /** A thin bar over the controls while a block is being dug. */
 @Composable
 internal fun MiningBar(name: String, fraction: Float, modifier: Modifier = Modifier) {
@@ -359,7 +325,6 @@ internal val PANEL_MAX_WIDTH: Dp = 720.dp
 internal val DOCK_BUTTON: Dp = 48.dp
 internal val PRIMARY_BUTTON: Dp = 80.dp
 internal val ARC_BUTTON: Dp = 56.dp
-private val ZOOM_BUTTON: Dp = 36.dp
 private val TOOL_BUTTON: Dp = 44.dp
 private const val PER_RING = 4
 /** Centre to centre, in dp: a button, its label and a finger's slack. */

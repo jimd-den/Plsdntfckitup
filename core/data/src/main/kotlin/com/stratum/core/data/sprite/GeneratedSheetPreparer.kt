@@ -8,6 +8,8 @@ import com.stratum.core.domain.sprite.KeyResult
 import com.stratum.core.domain.sprite.KeyStrategy
 import com.stratum.core.domain.sprite.SheetGrid
 import com.stratum.core.domain.sprite.SheetInspection
+import com.stratum.core.domain.sprite.SheetPreparation
+import com.stratum.core.domain.sprite.SheetRepeats
 import com.stratum.core.domain.sprite.SpriteKeying
 import com.stratum.core.domain.sprite.SpriteSheet
 import java.io.ByteArrayOutputStream
@@ -21,7 +23,12 @@ data class PreparedSheet(
     val grid: GridVerdict,
     /** Almost nothing is drawn on it, so the world would show no character. */
     val looksEmpty: Boolean = false,
+    /** Neighbouring frames of a clip that are the same drawing; see [SheetRepeats]. */
+    val repeatedFrames: List<Pair<Int, Int>> = emptyList(),
 ) {
+    /** What the screen reports, without reaching into this adapter's types. */
+    fun preparation(): SheetPreparation = SheetPreparation(sheet, keyStrategy, grid, looksEmpty, repeatedFrames)
+
     override fun equals(other: Any?): Boolean =
         this === other ||
             (other is PreparedSheet &&
@@ -29,6 +36,8 @@ data class PreparedSheet(
                 keyStrategy == other.keyStrategy &&
                 clearedPixels == other.clearedPixels &&
                 grid == other.grid &&
+                looksEmpty == other.looksEmpty &&
+                repeatedFrames == other.repeatedFrames &&
                 bytes.contentEquals(other.bytes))
 
     override fun hashCode(): Int {
@@ -94,17 +103,19 @@ object GeneratedSheetPreparer {
         )
 
         val empty = looksEmpty(best.pixels)
+        // Only worth asking of a sheet that is really a grid of frames.
+        val repeats = if (empty || cut.frameCount <= 1) emptyList() else SheetRepeats.find(best.pixels, width, height, cut)
 
         // Nothing was cleared: re-encoding would only re-compress the same
         // pixels, so the original bytes are kept.
         if (!best.cleared) {
-            return PreparedSheet(cut, bytes, best.strategy, 0, verdict, empty)
+            return PreparedSheet(cut, bytes, best.strategy, 0, verdict, empty, repeats)
         }
 
         val encoded = encode(best.pixels, width, height)
-            ?: return PreparedSheet(cut, bytes, KeyStrategy.NONE, 0, verdict, empty)
+            ?: return PreparedSheet(cut, bytes, KeyStrategy.NONE, 0, verdict, empty, repeats)
 
-        return PreparedSheet(cut, encoded, best.strategy, best.clearedPixels, verdict, empty)
+        return PreparedSheet(cut, encoded, best.strategy, best.clearedPixels, verdict, empty, repeats)
     }
 
     /**

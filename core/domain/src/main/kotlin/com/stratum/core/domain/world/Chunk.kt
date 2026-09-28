@@ -25,6 +25,17 @@ class Chunk(
     var revision: Int = 0
         private set
 
+    /**
+     * Bumped only when a block in the outermost ring of columns changes.
+     *
+     * A neighbour's mesh reads one cell into this chunk -- the faces it shares
+     * and the shading at its corners -- and nothing deeper, so it depends on
+     * this counter rather than on [revision]. Without the distinction every
+     * block dug remeshed the nine chunks around it.
+     */
+    var edgeRevision: Int = 0
+        private set
+
     fun blockAt(localX: Int, localY: Int, z: Int): Int {
         if (!isInBounds(localX, localY, z)) return BlockRegistry.AIR_INDEX
         return blocks[indexOf(localX, localY, z)].toInt()
@@ -38,6 +49,7 @@ class Chunk(
         blocks[cell] = index.toShort()
         heightMapValid = false
         revision++
+        if (localX == 0 || localY == 0 || localX == SIZE - 1 || localY == SIZE - 1) edgeRevision++
         return true
     }
 

@@ -27,6 +27,37 @@ enum class Stat(val label: String, val isPercent: Boolean = false) {
     EXPERIENCE_GAIN("experience gained"),
     ITEM_RARITY("rarity of items found"),
     ITEM_QUANTITY("quantity of items found"),
+    /** How fast blocks break; read by the dig, so a pick can be a build of its own. */
+    MINING_SPEED("mining speed"),
+
+    // The combat core's stats. Scoped ones read [StatModifier.damageTypeId] the way resistance does.
+    /** Chance to avoid an attack outright, as a rating weighed against the attacker's accuracy. */
+    EVASION("evasion rating"),
+    ACCURACY("accuracy rating"),
+    BLOCK_CHANCE("chance to block", isPercent = true),
+    /** Health restored per second. */
+    LIFE_REGEN("life regenerated per second"),
+    /** Resource restored per second, on top of the base trickle. */
+    RESOURCE_REGEN("resource regenerated per second"),
+    /** Share of the target's resistance a hit ignores; scoped to one damage type or all. */
+    PENETRATION("penetration", isPercent = true),
+    /** Raises the resistance cap, up to the world's hard ceiling; scoped like resistance. */
+    MAX_RESISTANCE("maximum resistance", isPercent = true),
+    /** Added to every damage type's base chance to inflict its ailment. */
+    AILMENT_CHANCE("chance to inflict ailments", isPercent = true),
+    /** How long statuses a character inflicts or casts last. */
+    DURATION("skill and status duration"),
+    DAMAGE_OVER_TIME("damage over time"),
+    /** On the defender: increased damage taken is a vulnerability, reduced is toughness. */
+    DAMAGE_TAKEN("damage taken"),
+    PROJECTILES("projectiles"),
+    PIERCE("pierce"),
+    CHAIN("chains"),
+    FORK("forks"),
+    PROJECTILE_SPEED("projectile speed"),
+    CAST_SPEED("cast speed"),
+    FLASK_CHARGES("flask charges gained"),
+    FLASK_EFFECT("flask effect"),
 }
 
 /**

@@ -4,6 +4,7 @@ import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.combat.DamageResult
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.item.EquipmentSlot
 import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.session.PlayerState
@@ -14,6 +15,7 @@ import com.stratum.core.domain.tabletop.CheckResult
 import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.WorldPoint
+import com.stratum.core.domain.status.StatusInstance
 
 // What a WorldSession reports back: the result of each thing a player can
 // do, and the snapshot the UI draws from. Values only; no rules live here.
@@ -54,6 +56,22 @@ data class SessionSnapshot(
     val settlement: SettlementPlan? = null,
     /** Whether that town is held against the player. */
     val settlementHostile: Boolean = false,
+    /** Everything in flight, for the renderer to draw. */
+    val projectiles: List<Projectile> = emptyList(),
+    /** Ground that is burning, trapped or pulsing. */
+    val zones: List<Zone> = emptyList(),
+    /** Wind-ups in progress, each with the ground it will land on: what the player rolls out of. */
+    val telegraphs: List<Telegraph> = emptyList(),
+    /** Statuses by actor id: the player's under [WorldSession.PLAYER_ACTOR_ID]. */
+    val statuses: Map<String, List<StatusInstance>> = emptyMap(),
+    val flasks: List<FlaskView> = emptyList(),
+    /**
+     * The player's life and resource ceilings with gear, inserts, passives,
+     * traits, needs and boons counted: what the bars should be measured
+     * against. [PlayerState.maxHealthWithGear] cannot see traits or boons.
+     */
+    val maxHealth: Int = player.maxHealthWithGear,
+    val maxResource: Int = player.resourceCeiling,
 )
 
 /** What a pending build would cost and cover. */
@@ -98,9 +116,23 @@ sealed interface ReviveResult {
 
 /** What changing gear did. */
 sealed interface EquipResult {
-    data class Equipped(val item: ItemInstance, val replaced: ItemInstance?) : EquipResult
+    /** [removed] is everything that came off to make room: both hands' worth when a two-handed weapon went on. */
+    data class Equipped(val item: ItemInstance, val removed: List<ItemInstance>) : EquipResult {
+        val replaced: ItemInstance? get() = removed.firstOrNull()
+    }
+
+    data class Unequipped(val item: ItemInstance) : EquipResult
     data class Discarded(val item: ItemInstance) : EquipResult
     data object NotInBag : EquipResult
+
+    /** The character is not experienced enough to wear it yet. */
+    data class TooLowLevel(val item: ItemInstance, val requiredLevel: Int) : EquipResult
+
+    /** It does not go there: a ring on the head, a helm in the off hand. */
+    data class WrongSlot(val item: ItemInstance, val slot: EquipmentSlot) : EquipResult
+
+    /** Nothing is worn in the slot asked to be emptied. */
+    data object NothingWorn : EquipResult
 }
 
 /** What a trip to the anvil did. */
@@ -130,6 +162,12 @@ sealed interface AttackReport {
     data object OnCooldown : AttackReport
     data object NotEnoughResource : AttackReport
     data object UnknownSkill : AttackReport
+
+    /** Released, with its outcome still to come: a projectile in flight, a wind-up, a zone, a summon. */
+    data class Cast(val skill: SkillDefinition) : AttackReport
+
+    /** Stunned or frozen: no swinging, no casting. */
+    data object Stunned : AttackReport
 }
 
 /** Something worth showing the player. Produced per tick and not retained. */
@@ -147,6 +185,9 @@ sealed interface CombatEvent {
 
     /** Something happened in the player's realm: a raid arrived, was settled, or was beaten off. */
     data class Realm(val event: RealmEvent) : CombatEvent
+
+    /** A boss has moved into a new phase of its fight. */
+    data class BossPhaseBegan(val enemyName: String, val phaseName: String, val announcement: String) : CombatEvent
 }
 
 /** What trying a tabletop check did. */

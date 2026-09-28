@@ -13,7 +13,6 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
 
@@ -104,14 +103,6 @@ android {
   }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
-}
-
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
 // Some unused dependencies are commented out below instead of being removed.
@@ -124,13 +115,15 @@ dependencies {
   implementation(project(":content:igbo"))
   implementation(project(":feature:play"))
   implementation(project(":engine:scene"))
+  implementation(project(":engine:model"))
   implementation(project(":feature:forge"))
   implementation(project(":feature:hero"))
   implementation(project(":feature:library"))
   implementation(project(":plugins"))
   implementation(project(":agents"))
   implementation(project(":core:data"))
-  implementation(project(":feature:studio"))
+  // :feature:studio and :legacy:* are frozen: they still build on their own,
+  // but nothing in the app reaches them. See ARCHITECTURE.md.
 
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
@@ -173,6 +166,7 @@ dependencies {
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  testImplementation(kotlin("test"))
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)

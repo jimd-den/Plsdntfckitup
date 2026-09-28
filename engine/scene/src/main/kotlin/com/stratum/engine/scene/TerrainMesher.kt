@@ -49,8 +49,44 @@ class TerrainMesher(
         val details: List<GroundDetail> = emptyList(),
     )
 
+    // One builder for every chunk this mesher makes, cleared between them: a
+    // fresh one grew by doubling and copying a dozen times per chunk.
+    private val out = MeshBuilder(MaterialKind.OPAQUE)
+
+    /** How one block looks as a cube, in one region; the director and textures never change under a mesher. */
+    private class CubeLook(
+        val top: com.stratum.core.domain.art.SurfaceStyle,
+        val side: com.stratum.core.domain.art.SurfaceStyle,
+        val topLayer: Float,
+        val sideLayer: Float,
+        val map: Int,
+        val variantA: Float,
+        val variantB: Float,
+    )
+
+    private val cubeLooks = java.util.IdentityHashMap<BlockType, HashMap<String?, CubeLook>>()
+
+    private fun cubeLook(block: BlockType, biomeId: String?): CubeLook =
+        cubeLooks.getOrPut(block) { HashMap() }.getOrPut(biomeId) {
+            val top = director.surfaceFor(block, SurfaceFace.TOP, biomeId)
+            val side = director.surfaceFor(block, SurfaceFace.SIDE, biomeId)
+            // A ground map, when the forge painted one, covers the top instead of
+            // the small tile: one large painting laid across sixteen blocks.
+            val map = textures.layerOf(com.stratum.core.domain.art.GroundMap.keyFor(block.id))
+            val mapped = map >= 0
+            CubeLook(
+                top, side,
+                textures.layerOf(top.texture).toFloat(),
+                textures.layerOf(side.texture).toFloat(),
+                map,
+                // Otherwise ground has sister paintings, keyed "<top>#1" and "<top>#2".
+                if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#1" }).toFloat(),
+                if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#2" }).toFloat(),
+            )
+        }
+
     fun mesh(world: World, minX: Int, maxX: Int, minY: Int, maxY: Int): Result {
-        val out = MeshBuilder(MaterialKind.OPAQUE)
+        out.clear()
         val props = ArrayList<PropInstance>()
         val lights = ArrayList<PointLight>()
         val details = ArrayList<GroundDetail>()
@@ -123,18 +159,16 @@ class TerrainMesher(
     }
 
     private fun cube(world: World, out: MeshBuilder, x: Int, y: Int, z: Int, block: BlockType, biomeId: String?) {
-        val top = director.surfaceFor(block, SurfaceFace.TOP, biomeId)
-        val side = director.surfaceFor(block, SurfaceFace.SIDE, biomeId)
-        val topLayer = textures.layerOf(top.texture).toFloat()
-        val sideLayer = textures.layerOf(side.texture).toFloat()
+        val look = cubeLook(block, biomeId)
+        val top = look.top
+        val side = look.side
+        val topLayer = look.topLayer
+        val sideLayer = look.sideLayer
         val emissive = top.emissive
-        // A ground map, when the forge painted one, covers the top instead of
-        // the small tile: one large painting laid across sixteen blocks.
-        val map = textures.layerOf(com.stratum.core.domain.art.GroundMap.keyFor(block.id))
+        val map = look.map
         val mapped = map >= 0
-        // Otherwise ground has sister paintings, keyed "<top>#1" and "<top>#2".
-        val variantA = if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#1" }).toFloat()
-        val variantB = if (mapped) -1f else textures.layerOf(top.texture?.let { "$it#2" }).toFloat()
+        val variantA = look.variantA
+        val variantB = look.variantB
         FACES.forEach { face ->
             val neighbour = world.blockAt(BlockPos(x + face.dx, y + face.dy, z + face.dz))
             // This camera never sees an underside, and neither does the sun.
@@ -292,14 +326,18 @@ class TerrainMesher(
         val sx = if (face.dx != 0) 0 else if (cx == 1) 1 else -1
         val sy = if (face.dy != 0) 0 else if (cy == 1) 1 else -1
         val sz = if (face.dz != 0) 0 else if (cz == 1) 1 else -1
-        val axes = ArrayList<IntArray>(2)
-        if (sx != 0) axes += intArrayOf(sx, 0, 0)
-        if (sy != 0) axes += intArrayOf(0, sy, 0)
-        if (sz != 0) axes += intArrayOf(0, 0, sz)
-        val a = axes[0]; val b = axes[1]
-        val side1 = solid(world, ox + a[0], oy + a[1], oz + a[2])
-        val side2 = solid(world, ox + b[0], oy + b[1], oz + b[2])
-        val corner = solid(world, ox + a[0] + b[0], oy + a[1] + b[1], oz + a[2] + b[2])
+        // Exactly two of the three are non-zero: the first is one tangent, the
+        // second the other. Worked out in place; a list of arrays per corner
+        // was most of what meshing allocated.
+        val ax = if (sx != 0) sx else 0
+        val ay = if (sx != 0) 0 else sy
+        val az = if (sx != 0 || sy != 0) 0 else sz
+        val bx = 0
+        val by = if (sx != 0) sy else 0
+        val bz = if (sx != 0 && sy != 0) 0 else sz
+        val side1 = solid(world, ox + ax, oy + ay, oz + az)
+        val side2 = solid(world, ox + bx, oy + by, oz + bz)
+        val corner = solid(world, ox + ax + bx, oy + ay + by, oz + az + bz)
         val level = if (side1 && side2) 3 else (if (side1) 1 else 0) + (if (side2) 1 else 0) + (if (corner) 1 else 0)
         return AO_LEVELS[level]
     }

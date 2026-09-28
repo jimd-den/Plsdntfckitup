@@ -93,7 +93,7 @@ class SceneRasterizer(
             val v = batch.vertices
             val idx = batch.indices
             var i = 0
-            while (i < idx.size) {
+            while (i < batch.indexCount) {
                 for (k in 0 until 3) {
                     val o = idx[i + k] * Vertex.STRIDE
                     Mat4.transform(m, v[o], v[o + 1], v[o + 2], clip)
@@ -162,7 +162,7 @@ class SceneRasterizer(
         val attr = Array(3) { FloatArray(Vertex.STRIDE) }
         val scratch = FloatArray(4)
         var i = 0
-        while (i < idx.size) {
+        while (i < batch.indexCount) {
             var behind = false
             for (k in 0 until 3) {
                 val o = idx[i + k] * Vertex.STRIDE

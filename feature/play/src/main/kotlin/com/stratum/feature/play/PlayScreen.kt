@@ -15,13 +15,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
+import com.stratum.core.designsystem.component.GameEmphasis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stratum.core.designsystem.component.ActionEmphasis
 import com.stratum.core.designsystem.component.GameButton
@@ -38,16 +46,36 @@ import com.stratum.engine.world.BuildTool
  * The play screen: the world full screen, in either orientation, with the HUD
  * floating over it the way handheld games lay one out -- the stick under the
  * left thumb, one big action under the right with the rest fanned around it,
- * the hero's vitals in the top corner, and each of the game's systems a
- * labelled button in a dock that badges itself when something is waiting.
+ * the hero's vitals in the top corner, and every other system behind one
+ * menu button that badges itself when something inside is waiting.
+ *
+ * The system back gesture closes whatever panel is open, then opens the menu;
+ * it never drops the player out of a world by accident. Leaving is "Save &
+ * quit" in the menu, which calls [onOpenMenu].
  */
 @Composable
 fun PlayScreen(
     viewModel: PlayViewModel,
     modifier: Modifier = Modifier,
     onOpenMenu: () -> Unit = {},
+    /** Hints already taught, so each appears once ever. */
+    seenHints: Set<String> = emptySet(),
+    onHintSeen: (String) -> Unit = {},
+    /** The player's looks, worn and changed from the hero panel. */
+    looks: HeroLooks = HeroLooks(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    BackHandler {
+        when {
+            menuOpen -> menuOpen = false
+            closeOpenPanel(state, viewModel) -> Unit
+            else -> menuOpen = true
+        }
+    }
+    // The app going into the background is the last moment it is sure to be
+    // alive: a phone may kill it from there without another word.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.onBackground() }
     val heroActions = remember(viewModel) {
         HeroActions(
             onClose = viewModel::toggleHero,
@@ -60,6 +88,36 @@ fun PlayScreen(
             onUnlinkSupport = viewModel::unlinkSupport,
             onEnterTier = viewModel::enterTier,
             onOpenWaystone = viewModel::openWaystone,
+            onExplain = viewModel::explainHeroStat,
+        )
+    }
+    val gearActions = remember(viewModel) {
+        GearActions(onSelectSlot = viewModel::selectGearSlot, onInspect = viewModel::inspectItem, onReroll = viewModel::rerollItem)
+    }
+    val sandboxActions = remember(viewModel) {
+        SandboxActions(
+            onToggle = viewModel::toggleSandbox,
+            onSelectTab = viewModel::selectSandboxTab,
+            onFilterSlot = viewModel::filterSandboxSlot,
+            onItemLevel = viewModel::setSandboxItemLevel,
+            onRarity = viewModel::setSandboxRarity,
+            onSpawnBase = viewModel::spawnBase,
+            onSpawnUnique = viewModel::spawnUnique,
+            onLevel = viewModel::setHeroLevel,
+            onRespec = viewModel::respec,
+            onGrantCurrency = viewModel::grantCurrency,
+            onGrantSupport = viewModel::grantSupport,
+            onGrantEverything = viewModel::grantEverything,
+            onToggleCaps = viewModel::toggleCaps,
+            onDummy = viewModel::setDummy,
+            onSpawnDummy = viewModel::spawnDummy,
+            onHealDummies = viewModel::healDummies,
+            onClearDummies = viewModel::clearDummies,
+            onSpawnMonster = viewModel::spawnMonster,
+            onResetMeter = viewModel::resetMeter,
+            onExplain = viewModel::explainSandboxStat,
+            onExport = { viewModel.exportBuild() },
+            onImport = viewModel::importBuild,
         )
     }
     val survivalActions = remember(viewModel) {
@@ -93,10 +151,12 @@ fun PlayScreen(
         onStopMining = viewModel::stopMining,
         onAttack = viewModel::attack,
         onCastSkill = viewModel::castSkill,
+        onUseFlask = viewModel::useFlask,
         onRevive = viewModel::revive,
         onNewRun = viewModel::newRun,
         onToggleSatchel = viewModel::toggleSatchel,
         onEquip = viewModel::equip,
+        onUnequip = viewModel::unequip,
         onDiscard = viewModel::discard,
         onToggleAnvil = viewModel::toggleAnvil,
         onSelectAnvilItem = viewModel::selectAnvilItem,
@@ -112,9 +172,16 @@ fun PlayScreen(
         onChooseQuality = viewModel::chooseQuality,
         onOpenMenu = onOpenMenu,
         onCraft = viewModel::craft,
+        menuOpen = menuOpen,
+        onMenuOpenChange = { menuOpen = it },
+        seenHints = seenHints,
+        onHintSeen = onHintSeen,
         heroActions = heroActions,
+        looks = looks,
         survivalActions = survivalActions,
         realmActions = realmActions,
+        gearActions = gearActions,
+        sandboxActions = sandboxActions,
     )
 }
 
@@ -137,10 +204,12 @@ fun PlayScreenContent(
     onStopMining: () -> Unit = {},
     onAttack: () -> Unit = {},
     onCastSkill: (String) -> Unit = {},
+    onUseFlask: (Int) -> Unit = {},
     onRevive: () -> Unit = {},
     onNewRun: () -> Unit = {},
     onToggleSatchel: () -> Unit = {},
     onEquip: (String) -> Unit = {},
+    onUnequip: (com.stratum.core.domain.item.EquipmentSlot) -> Unit = {},
     onDiscard: (String) -> Unit = {},
     onToggleAnvil: () -> Unit = {},
     onSelectAnvilItem: (String) -> Unit = {},
@@ -156,16 +225,24 @@ fun PlayScreenContent(
     onChooseQuality: (QualityTier?) -> Unit = {},
     onOpenMenu: () -> Unit = {},
     onCraft: (String) -> Unit = {},
+    /** The pause menu; hoisted so a test can show it and back can close it. */
+    menuOpen: Boolean = false,
+    onMenuOpenChange: (Boolean) -> Unit = {},
+    seenHints: Set<String> = emptySet(),
+    onHintSeen: (String) -> Unit = {},
     heroActions: HeroActions = HeroActions(),
+    looks: HeroLooks = HeroLooks(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
+    gearActions: GearActions = GearActions(),
+    sandboxActions: SandboxActions = SandboxActions(),
 ) {
     val colors = StratumTheme.colors
 
     // The world runs edge to edge in either orientation; the HUD floats over
     // it inside the safe area, so a notch or a gesture bar never sits on a
     // button, and nothing is a band stealing a quarter of the screen.
-    BoxWithConstraints(modifier = modifier.fillMaxSize().background(colors.surface)) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(colors.surface).pinchToZoom(onZoom)) {
         val landscape = maxWidth > maxHeight
         if (state.use3D) {
             com.stratum.feature.play.gl.Scene3DView(
@@ -200,6 +277,10 @@ fun PlayScreenContent(
                     spriteFor = state.spriteFor,
                     playerAnimation = state.playerAnimation,
                     animationFor = state.animationFor,
+                    propModels = state.propModels,
+                    projectiles = state.projectiles,
+                    zones = state.zones,
+                    telegraphs = state.telegraphs,
                 ),
                 modifier = Modifier.fillMaxSize(),
                 onTapBlock = onTapBlock,
@@ -222,6 +303,9 @@ fun PlayScreenContent(
                 insertColor = { state.insertOrNull(it)?.color },
                 insertGlyph = { state.insertOrNull(it)?.glyph },
                 feedback = state.feedback,
+                projectiles = state.projectiles,
+                zones = state.zones,
+                telegraphs = state.telegraphs,
                 playerFlash = state.playerFlash,
                 isRolling = state.isRolling,
                 isInvulnerable = state.isInvulnerable,
@@ -246,6 +330,9 @@ fun PlayScreenContent(
             )
         }
 
+        val menuEntries = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle) +
+            listOfNotNull(DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active })
+
         if (!state.isDead) {
             Hud(
                 state = state,
@@ -256,13 +343,17 @@ fun PlayScreenContent(
                 onDodge = onDodge,
                 onAttack = onAttack,
                 onCastSkill = onCastSkill,
+                onUseFlask = onUseFlask,
                 onToggleBuild = onToggleBuild,
                 onSelectBuildTool = onSelectBuildTool,
                 onSelectSlot = onSelectSlot,
-                onZoom = onZoom,
-                onOpenMenu = onOpenMenu,
-                dock = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle),
+                onOpenMenu = { onMenuOpenChange(true) },
+                menuBadge = menuBadge(menuEntries),
                 onDrink = survivalActions.onDrink,
+                onOpenSandbox = sandboxActions.onToggle,
+                // Nothing to teach while paused: the hint waits for the world.
+                seenHints = if (menuOpen) Hints.all else seenHints,
+                onHintSeen = onHintSeen,
             )
         }
 
@@ -286,6 +377,7 @@ fun PlayScreenContent(
                 state = state,
                 world = world,
                 onEquip = onEquip,
+                onUnequip = onUnequip,
                 onDiscard = onDiscard,
                 // The two panels are one errand: read the item here, socket
                 // it next door, without going back out to the world first.
@@ -295,6 +387,7 @@ fun PlayScreenContent(
                 },
                 onClose = onToggleSatchel,
                 modifier = Modifier.fillMaxSize(),
+                actions = gearActions,
             )
         }
 
@@ -325,7 +418,25 @@ fun PlayScreenContent(
         }
 
         if (state.hero.open && !state.isDead) {
-            HeroOverlay(state = state, actions = heroActions)
+            HeroOverlay(state = state, actions = heroActions, looks = looks)
+        }
+
+        if (state.sandbox.open && !state.isDead) {
+            SandboxOverlay(state = state, actions = sandboxActions)
+        }
+
+        if (menuOpen && !state.isDead) {
+            PauseMenu(
+                state = state,
+                // Choosing a system closes the menu and opens that system's panel.
+                entries = menuEntries.map { entry -> entry.copy(onClick = { onMenuOpenChange(false); entry.onClick() }) },
+                onZoom = onZoom,
+                onResume = { onMenuOpenChange(false) },
+                onQuit = {
+                    onMenuOpenChange(false)
+                    onOpenMenu()
+                },
+            )
         }
 
         if (state.isDead) {
@@ -377,7 +488,7 @@ fun PlayScreenContent(
                             emphasis = ActionEmphasis.SECONDARY,
                         )
                         StratumAction(
-                            label = "Menu",
+                            label = "Save & quit",
                             onClick = onOpenMenu,
                             emphasis = ActionEmphasis.QUIET,
                         )
@@ -386,15 +497,50 @@ fun PlayScreenContent(
             }
         }
 
+        SavedCue(
+            notice = state.saveNotice,
+            // Under the menu button, where "Save & quit" lives: out of both thumbs' way.
+            modifier = Modifier.align(Alignment.TopEnd).safeContent().padding(top = SAVED_CUE_TOP, end = Space.medium),
+        )
     }
 }
 
 /**
- * The play HUD, laid out for the way the phone is held.
- *
- * Portrait: vitals and pause across the top, the dock under them, the stick
- * and the action cluster in the bottom corners. Landscape: the dock joins the
- * top row, since width is plentiful and height is what the world needs.
+ * A quiet word that the world was written down, shown for a moment after
+ * each save lands. Keyed on the notice's serial, so two saves in a row both
+ * show, and nothing shows until the first save of this screen.
+ */
+@Composable
+private fun SavedCue(notice: SaveNotice?, modifier: Modifier = Modifier) {
+    var shown by remember { mutableStateOf<SaveNotice?>(null) }
+    LaunchedEffect(notice?.serial) {
+        if (notice == null) return@LaunchedEffect
+        shown = notice
+        kotlinx.coroutines.delay(SAVED_CUE_MILLIS)
+        shown = null
+    }
+    val visible = shown ?: return
+    val colors = StratumTheme.colors
+    Text(
+        text = "✓ ${visible.message}",
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.accentAlt,
+        modifier = modifier
+            .background(colors.surface.copy(alpha = 0.78f), MaterialTheme.shapes.small)
+            .padding(horizontal = Space.small, vertical = Space.tight),
+    )
+}
+
+private const val SAVED_CUE_MILLIS = 1_500L
+
+/** Below the menu button and its label. */
+private val SAVED_CUE_TOP = 88.dp
+
+/**
+ * The play HUD, laid out for the way the phone is held: vitals and where you
+ * are in the top-left corner, the one menu button top-right, the stick and
+ * Build under the left thumb, Strike with the skills around it under the
+ * right. Hints and news fade in above the world and fade out again.
  */
 @Composable
 private fun Hud(
@@ -406,36 +552,47 @@ private fun Hud(
     onDodge: () -> Unit,
     onAttack: () -> Unit,
     onCastSkill: (String) -> Unit,
+    onUseFlask: (Int) -> Unit,
     onToggleBuild: () -> Unit,
     onSelectBuildTool: (BuildTool) -> Unit,
     onSelectSlot: (Int) -> Unit,
-    onZoom: (Float) -> Unit,
     onOpenMenu: () -> Unit,
-    dock: List<DockEntry>,
+    menuBadge: String?,
     onDrink: () -> Unit,
+    onOpenSandbox: () -> Unit = {},
+    seenHints: Set<String> = emptySet(),
+    onHintSeen: (String) -> Unit = {},
 ) {
-    Box(Modifier.fillMaxSize().safeContent().padding(Space.medium)) {
+    BoxWithConstraints(Modifier.fillMaxSize().safeContent().padding(Space.medium)) {
         Row(Modifier.align(Alignment.TopStart).fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            VitalsCard(state)
-            Spacer(Modifier.weight(1f))
-            if (landscape) {
-                ZoomPair(onZoom, horizontal = true)
-                Spacer(Modifier.width(Space.medium))
-                FeatureDock(dock)
-                Spacer(Modifier.width(Space.medium))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.tight)) {
+                VitalsCard(state)
+                PlaceTag(state)
+                // A sandbox shows its meter under the vitals: the one number a build is being tuned for.
+                if (state.sandbox.active) MeterChip(state.sandbox.meter, onOpenSandbox)
             }
-            GameButton(glyph = "Ⅱ", label = "Menu", onClick = onOpenMenu, size = DOCK_BUTTON)
-        }
-        if (!landscape) {
-            FeatureDock(dock, Modifier.align(Alignment.TopEnd).padding(top = DOCK_TOP_PORTRAIT), perRow = PORTRAIT_DOCK_ROW)
+            Spacer(Modifier.weight(1f))
+            GameButton(
+                glyph = "☰",
+                label = "Menu",
+                onClick = onOpenMenu,
+                size = DOCK_BUTTON,
+                badge = menuBadge,
+                emphasis = if (menuBadge != null) GameEmphasis.PRIMARY else GameEmphasis.NORMAL,
+            )
         }
 
-        RegionBanner(
-            state,
-            Modifier.align(Alignment.TopCenter).padding(top = if (landscape) DOCK_BUTTON + Space.wide else DOCK_TOP_PORTRAIT + (DOCK_BUTTON + Space.wide) * dockRows(dock.size)),
+        // In landscape the top row has room between vitals and menu; in
+        // portrait the news sits a little way down, clear of both.
+        HintAndToast(
+            state = state,
+            seenHints = seenHints,
+            onHintSeen = onHintSeen,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = if (landscape) 0.dp else maxHeight * HINT_TOP_FRACTION)
+                .padding(horizontal = if (landscape) VITALS_WIDTH + Space.medium else 0.dp),
         )
-
-        if (!landscape) ZoomPair(onZoom, Modifier.align(Alignment.CenterEnd))
 
         // Building is a mode, not a move, so it sits with the stick rather
         // than among the fight buttons; it shows what is in hand.
@@ -495,7 +652,7 @@ private fun Hud(
                 primaryGlyph = "⚔",
                 primaryLabel = "Strike",
                 onPrimary = onAttack,
-                around = fightButtons(state, onDodge, onCastSkill) +
+                around = fightButtons(state, onDodge, onCastSkill, onUseFlask) +
                     // Water in reach offers a drink where the thumb already is.
                     listOfNotNull(ArcButton("💧", "Drink", onDrink).takeIf { state.survival.canDrink }),
                 modifier = Modifier.align(Alignment.BottomEnd),
@@ -504,8 +661,8 @@ private fun Hud(
     }
 }
 
-/** Roll first, beside the thumb's rest, then each skill up the arc. */
-private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (String) -> Unit): List<ArcButton> {
+/** Roll first, beside the thumb's rest, then each skill up the arc, then the flasks. */
+private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (String) -> Unit, onUseFlask: (Int) -> Unit): List<ArcButton> {
     val roll = ArcButton("🌀", "Roll", onDodge, cooldown = state.rollCooldownFraction, enabled = state.rollCooldownFraction <= 0f)
     val skills = state.skills.map { skill ->
         ArcButton(
@@ -515,12 +672,38 @@ private fun fightButtons(state: PlayUiState, onDodge: () -> Unit, onCastSkill: (
             tint = Color(skill.color),
             cooldown = state.cooldownFraction(skill),
             enabled = state.canAfford(skill),
+            // Lit while it winds up, so a cast time reads as the skill working rather than the button ignoring the thumb.
+            active = state.isWindingUp(skill),
+            badge = skillBadge(state, skill),
         )
     }
-    return listOf(roll) + skills
+    // A flask's ring drains as its charges do, and its badge counts the drinks left.
+    val flasks = state.flasks.mapIndexed { slot, flask ->
+        ArcButton(
+            glyph = flask.definition.glyph,
+            label = flask.definition.name.substringBefore(' '),
+            onClick = { onUseFlask(slot) },
+            tint = Color(flask.definition.color),
+            cooldown = 1f - flask.fill,
+            enabled = flask.canDrink,
+            badge = flask.uses.toString(),
+        )
+    }
+    return listOf(roll) + skills + flasks
 }
 
-/** The dock's entries, each shown only when the loaded packs give it something to do. */
+/**
+ * A skill button's corner: charges ready for a skill that stores several,
+ * otherwise the life a cast takes when life pays for it -- the one number
+ * that decides whether to press now.
+ */
+internal fun skillBadge(state: PlayUiState, skill: com.stratum.core.domain.actor.SkillDefinition): String? {
+    if (skill.charges > 1) return state.chargesLeft(skill).toString()
+    val life = state.costOf(skill).life
+    return if (life > 0) "♥$life" else null
+}
+
+/** The menu's entries, each shown only when the loaded packs give it something to do. */
 private fun dockEntries(
     state: PlayUiState,
     onToggleSatchel: () -> Unit,
@@ -549,7 +732,5 @@ private fun dockEntries(
     )
 }
 
-private val DOCK_TOP_PORTRAIT = 120.dp
-
-private fun dockRows(entries: Int): Int = (entries + PORTRAIT_DOCK_ROW - 1) / PORTRAIT_DOCK_ROW
-private const val PORTRAIT_DOCK_ROW = 5
+/** How far down a portrait screen the hints sit: under the vitals, above the fight. */
+private const val HINT_TOP_FRACTION = 0.26f

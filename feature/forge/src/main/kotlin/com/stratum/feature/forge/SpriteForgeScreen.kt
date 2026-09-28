@@ -32,6 +32,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.JobProgress
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -85,6 +86,7 @@ fun SpriteForgeScreen(
         onActionChange = viewModel::selectAction,
         onGenerate = viewModel::generate,
         onDelete = viewModel::delete,
+        onShare = viewModel::shareAsPlugin,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
         onToggleDetails = viewModel::toggleDetails,
@@ -92,6 +94,7 @@ fun SpriteForgeScreen(
         onMapFrames = onMapFrames,
         onPoseForge = onPoseForge,
         onWeaponForge = onWeaponForge,
+        onCancel = viewModel::cancel,
     )
 }
 
@@ -106,6 +109,8 @@ fun SpriteForgeContent(
     onActionChange: (AnimationState) -> Unit = {},
     onGenerate: () -> Unit = {},
     onDelete: (String) -> Unit = {},
+    /** Shares every sheet in the library as one installable plugin. */
+    onShare: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onToggleDetails: () -> Unit = {},
@@ -113,6 +118,7 @@ fun SpriteForgeContent(
     onMapFrames: () -> Unit = {},
     onPoseForge: () -> Unit = {},
     onWeaponForge: () -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
 
@@ -124,13 +130,7 @@ fun SpriteForgeContent(
             .verticalScroll(rememberScrollState())
             .padding(Space.large),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            SectionLabel("Sprite forge")
-            StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Sprite forge", onBack = onBack)
 
         Spacer(Modifier.height(Space.medium))
         Text(
@@ -334,7 +334,13 @@ fun SpriteForgeContent(
                 )
             }
 
-            if (state.busy) {
+            val job = state.job
+            if (job != null && (state.busy || job.isActive)) {
+                Spacer(Modifier.height(Space.medium))
+                // Every step the adapter reported, with the seconds it has waited:
+                // which step it is on is the difference between "slow" and "broken".
+                JobProgress(job, showHeader = false, onCancel = onCancel)
+            } else if (state.busy) {
                 Spacer(Modifier.height(Space.medium))
                 // The stage the adapter reported, not a guess. Which step it is
                 // stuck on is the difference between "slow" and "broken".
@@ -453,6 +459,13 @@ fun SpriteForgeContent(
         if (state.sheets.isNotEmpty()) {
             Spacer(Modifier.height(Space.large))
             SectionLabel("Drawn so far")
+            Spacer(Modifier.height(Space.small))
+            StratumAction(
+                label = "Share as plugin",
+                onClick = onShare,
+                emphasis = ActionEmphasis.SECONDARY,
+                enabled = !state.busy,
+            )
             Spacer(Modifier.height(Space.small))
             state.sheets.forEach { sheet ->
                 SheetRow(

@@ -1,7 +1,11 @@
 package com.stratum.engine.world
 
 import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.content.HeroClassDefinition
 import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.tabletop.SkillCheck
+import com.stratum.core.domain.tabletop.Tabletop
+import kotlin.random.Random
 
 /**
  * The tabletop side of a run: which boons and banes are running, and which
@@ -34,6 +38,21 @@ internal class TableState {
             val remaining = entry.value - deltaSeconds
             if (remaining <= 0f) iterator.remove() else entry.setValue(remaining)
         }
+    }
+
+    /**
+     * Rolls [check] with the hero's attributes and level from [random], the
+     * session's own dice, so a seeded run rolls the same. Success grants the
+     * check's boon; a natural one inflicts its bane.
+     */
+    fun attempt(check: SkillCheck?, hero: HeroClassDefinition?, level: Int, alive: Boolean, random: Random): CheckAttempt {
+        check ?: return CheckAttempt.UnknownCheck
+        if (cooldownOf(check.id) > 0f) return CheckAttempt.OnCooldown(cooldownOf(check.id))
+        if (!alive) return CheckAttempt.Refused
+        val result = Tabletop.attempt(check, hero, level, random)
+        startCooldown(check.id, check.cooldownSeconds)
+        result.effect?.let(::grant)
+        return CheckAttempt.Rolled(result)
     }
 
     fun applyTo(stats: CombatStats): CombatStats = boons.fold(stats) { acc, active -> active.boon.applyTo(acc) }

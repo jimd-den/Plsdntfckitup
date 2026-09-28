@@ -71,6 +71,8 @@ data class PoseFrameRequest(
     val styleDirection: String = "",
     val canvas: Int = BasePoseRequest.DEFAULT_CANVAS,
     val modelId: String? = null,
+    /** Which attempt at this frame; see [ImageRequest.take]. */
+    val take: Int = 0,
 )
 
 /**
@@ -187,6 +189,7 @@ class GeneratePoseFrameUseCase(
                 // that order. An image editor handed two pictures with no word
                 // about which is which will cheerfully redraw the stick figure.
                 references = listOfNotNull(request.reference, request.guide),
+                take = request.take,
             ),
             observer,
         ).getOrElse { return Result.failure(it) }

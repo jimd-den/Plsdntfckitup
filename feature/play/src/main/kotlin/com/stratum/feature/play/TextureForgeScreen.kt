@@ -105,15 +105,11 @@ fun TextureForgeContent(state: TextureForgeUiState, actions: TextureForgeActions
 
 @Composable
 private fun Header(onBack: () -> Unit) {
-    val colors = StratumTheme.colors
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        GameButton(glyph = "‹", onClick = onBack, size = 44.dp)
-        Spacer(Modifier.width(Space.medium))
-        Column {
-            Text("Texture forge", style = MaterialTheme.typography.headlineSmall, color = colors.ink)
-            Text("Paint your world's ground, walls and props with AI.", style = MaterialTheme.typography.bodySmall, color = colors.inkMuted)
-        }
-    }
+    com.stratum.core.designsystem.component.StratumTopBar(
+        title = "Texture forge",
+        onBack = onBack,
+        subtitle = "Paint your world's ground, walls and props with AI.",
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

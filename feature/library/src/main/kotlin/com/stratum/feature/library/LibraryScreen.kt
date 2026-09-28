@@ -46,20 +46,11 @@ fun LibraryScreen(
     onShareCreations: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val resolver = LocalContext.current.contentResolver
-    val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            runCatching { withContext(Dispatchers.IO) { PickedArchive.read(resolver, uri) } }
-                .onSuccess { picked -> viewModel.install(picked.name, picked.bytes) }
-                .onFailure { viewModel.reportUnreadable(it.message ?: "That file could not be read") }
-        }
-    }
+    val pickArchive = rememberArchivePicker(viewModel)
     LibraryContent(
         state = state,
         actions = LibraryActions(
-            onImport = { picker.launch(ARCHIVE_TYPES) },
+            onImport = pickArchive,
             onToggle = viewModel::setEnabled,
             onMoveEarlier = viewModel::moveEarlier,
             onMoveLater = viewModel::moveLater,
@@ -70,6 +61,27 @@ fun LibraryScreen(
         ),
         modifier = modifier,
     )
+}
+
+/**
+ * Opens the system file picker and installs whatever archive is picked: a
+ * `.stratum` plugin, or a zip of a Flame game or Tiled maps. Shared by the
+ * library and the app's Import & Share hub, so both install the same way and
+ * report into the same status.
+ */
+@Composable
+fun rememberArchivePicker(viewModel: LibraryViewModel): () -> Unit {
+    val resolver = LocalContext.current.contentResolver
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { PickedArchive.read(resolver, uri) } }
+                .onSuccess { picked -> viewModel.install(picked.name, picked.bytes) }
+                .onFailure { viewModel.reportUnreadable(it.message ?: "That file could not be read") }
+        }
+    }
+    return { picker.launch(ARCHIVE_TYPES) }
 }
 
 /** Everything the library can be asked to do, so the content stays stateless and previewable. */
@@ -105,17 +117,11 @@ fun LibraryContent(state: LibraryUiState, actions: LibraryActions, modifier: Mod
 
 @Composable
 private fun Header(onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Plugins", style = MaterialTheme.typography.headlineSmall, color = StratumTheme.colors.ink)
-            Text(
-                "Worlds, rules and characters made by anyone, loaded in the order you choose.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = StratumTheme.colors.inkMuted,
-            )
-        }
-        StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-    }
+    com.stratum.core.designsystem.component.StratumTopBar(
+        title = "Plugins",
+        onBack = onBack,
+        subtitle = "Worlds, rules and characters made by anyone, loaded in the order you choose.",
+    )
 }
 
 @Composable

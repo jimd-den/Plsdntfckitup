@@ -1,11 +1,13 @@
 package com.stratum.app
 
 import android.content.Context
+import java.io.File
 import com.stratum.core.data.ai.OpenRouterImageModel
 import com.stratum.core.data.ai.OpenRouterVideoModel
 import com.stratum.core.data.ai.OpenRouterLanguageModel
 import com.stratum.core.data.character.CharacterRepositoryImpl
 import com.stratum.core.data.settings.PlayerPreferencesStore
+import com.stratum.core.data.sprite.FileImageCache
 import com.stratum.core.data.sprite.VideoFrameExtractor
 import com.stratum.core.data.sprite.SpriteLibrary
 import com.stratum.core.data.sprite.PoseGuideStore
@@ -15,10 +17,9 @@ import com.stratum.core.data.sprite.WeaponFitStore
 import com.stratum.core.data.sprite.WeaponLibrary
 import com.stratum.core.data.settings.ProviderSettingsStore
 import com.stratum.core.domain.character.CharacterRepository
+import com.stratum.core.domain.ai.CachingImageModel
 import com.stratum.core.domain.ai.GenerateClipRowUseCase
 import com.stratum.core.domain.ai.VideoModelPort
-import com.stratum.core.domain.ai.GenerateContentPackUseCase
-import com.stratum.core.domain.ai.GenerateLoreUseCase
 import com.stratum.core.domain.ai.GenerateBasePoseUseCase
 import com.stratum.core.domain.ai.GeneratePoseFrameUseCase
 import com.stratum.core.domain.ai.GenerateSpriteSheetUseCase
@@ -116,20 +117,31 @@ class AiWiring(context: Context) {
         weaponFits = weaponFits,
     )
 
-    val generateContentPack = GenerateContentPackUseCase(languageModel)
-
-    val generateLore = GenerateLoreUseCase(languageModel)
-
     val generateSpriteSheet = GenerateSpriteSheetUseCase(imageModel)
 
     /** The one drawing a character is built from, and the edits that animate it. */
     val generateBasePose = GenerateBasePoseUseCase(imageModel)
 
-    val generatePoseFrame = GeneratePoseFrameUseCase(imageModel)
+    /**
+     * Pose frames, answered from what was already paid for when the request is
+     * identical. A run killed between a frame arriving and it being written
+     * would otherwise buy the same frame twice; a deliberate redraw asks with
+     * a new take and is never served from here.
+     */
+    val generatePoseFrame = GeneratePoseFrameUseCase(
+        CachingImageModel(
+            delegate = imageModel,
+            cache = FileImageCache(File(context.cacheDir, "generated_images")),
+            resolvedModel = { settings.load().imageModel },
+        ),
+    )
 
     val generateWeapon = GenerateWeaponUseCase(imageModel)
 
     val modelCatalog = languageModel
+
+    /** Generated 3D models: their provider, their store and the pipeline that makes them usable. */
+    val models = ModelWiring(context, settings, imageModel)
 
     fun isConfigured(): Boolean = settings.isConfigured
 }

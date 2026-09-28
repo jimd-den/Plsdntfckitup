@@ -113,7 +113,7 @@ fun AnvilOverlay(
                 color = Color(state.rarityColor(item)),
             )
             Text(
-                text = "${item.minDamage}–${item.maxDamage} damage · ${item.sockets.used}/${item.socketCount} sockets",
+                text = "${item.baseLine} · ${item.sockets.used}/${item.socketCount} sockets",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.inkMuted,
             )

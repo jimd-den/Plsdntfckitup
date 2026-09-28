@@ -4,9 +4,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import com.stratum.engine.render.FrameView
+import com.stratum.engine.render.TerrainLayerPolicy
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import com.stratum.engine.world.Projectile
+import com.stratum.engine.world.Telegraph
+import com.stratum.engine.world.Zone
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Size
@@ -70,6 +78,10 @@ fun WorldCanvas(
     /** Resolves a dropped insert's glyph, so a rune on the ground reads as one. */
     insertGlyph: (String) -> String? = { null },
     feedback: List<FeedbackMark> = emptyList(),
+    /** The combat core's shapes: things in flight, burning ground, and wind-ups to roll out of. */
+    projectiles: List<Projectile> = emptyList(),
+    zones: List<Zone> = emptyList(),
+    telegraphs: List<Telegraph> = emptyList(),
     /** 0..1, how recently the player was hit. Drives the hurt tint. */
     playerFlash: Float = 0f,
     /** Rolling players are drawn flattened and trailing. */
@@ -116,6 +128,17 @@ fun WorldCanvas(
     // allocating, and rebuilding it per draw would throw them away every time.
     val renderer = remember(projection) { WorldFrameRenderer(projection, artDirector) }
     renderer.director = artDirector
+    val layer = remember(projection) { TerrainLayer() }
+
+    // Gestures read the camera and callbacks as they are when the finger
+    // lands. They were keyed on the world revision alone, so after walking
+    // without digging a tap was resolved against where the camera used to
+    // be, and could act on the wrong block.
+    val currentCamera by rememberUpdatedState(camera)
+    val tapBlock by rememberUpdatedState(onTapBlock)
+    val longPressBlock by rememberUpdatedState(onLongPressBlock)
+    val buildDrag by rememberUpdatedState(onBuildDrag)
+    val buildCommit by rememberUpdatedState(onBuildCommit)
 
     Canvas(
         modifier = modifier
@@ -126,19 +149,19 @@ fun WorldCanvas(
                 var anchor: BlockPos? = null
                 detectDragGestures(
                     onDragStart = { offset ->
-                        anchor = pick(world, projection, camera, size.width.toFloat(), size.height.toFloat(), offset)
-                        anchor?.let { onBuildDrag(it, it) }
+                        anchor = pick(world, projection, currentCamera, size.width.toFloat(), size.height.toFloat(), offset)
+                        anchor?.let { buildDrag(it, it) }
                     },
                     onDrag = { change, _ ->
                         change.consume()
                         val start = anchor ?: return@detectDragGestures
                         pick(
-                            world, projection, camera,
+                            world, projection, currentCamera,
                             size.width.toFloat(), size.height.toFloat(), change.position,
-                        )?.let { onBuildDrag(start, it) }
+                        )?.let { buildDrag(start, it) }
                     },
                     onDragEnd = {
-                        onBuildCommit()
+                        buildCommit()
                         anchor = null
                     },
                     onDragCancel = { anchor = null },
@@ -147,12 +170,12 @@ fun WorldCanvas(
             .pointerInput(projection, revision, world) {
             detectTapGestures(
                 onTap = { offset ->
-                    pick(world, projection, camera, size.width.toFloat(), size.height.toFloat(), offset)
-                        ?.let(onTapBlock)
+                    pick(world, projection, currentCamera, size.width.toFloat(), size.height.toFloat(), offset)
+                        ?.let(tapBlock)
                 },
                 onLongPress = { offset ->
-                    pick(world, projection, camera, size.width.toFloat(), size.height.toFloat(), offset)
-                        ?.let(onLongPressBlock)
+                    pick(world, projection, currentCamera, size.width.toFloat(), size.height.toFloat(), offset)
+                        ?.let(longPressBlock)
                 },
             )
         },
@@ -167,17 +190,9 @@ fun WorldCanvas(
 
         // Terrain, props and the sky. The canvas no longer decides what any of
         // it looks like: it hands the world to the renderer, the renderer asks
-        // the art director, and what comes back is a list of shapes.
-        val view = renderer.render(
-            world = world,
-            camera = camera,
-            width = size.width,
-            height = size.height,
-            sink = sink,
-            highlight = highlight,
-            time = worldTime,
-            biomeAt = biomeAt,
-        )
+        // the art director, and what comes back is a list of shapes -- painted
+        // into a layer that is reused until the view or the world changes.
+        val view = layer.draw(this, renderer, world, camera, projection, highlight, worldTime, biomeAt, revision)
         val originX = view.originX
         val originY = view.originY
 
@@ -191,6 +206,10 @@ fun WorldCanvas(
                 drawGhost(originX + screen.x, originY + screen.y, projection, ghost)
             }
         }
+
+        // Markers lie on the ground, under whoever is standing in them.
+        drawZones(zones, projection, originX, originY)
+        drawTelegraphs(telegraphs, projection, originX, originY)
 
         // Actors are drawn after the terrain and sorted among themselves, so a
         // monster standing behind a pillar is still covered by it but a monster
@@ -285,6 +304,8 @@ fun WorldCanvas(
                 }
             }
         }
+
+        drawProjectiles(projectiles, projection, originX, originY)
 
         // Weather and vignette sit over the actors rather than under them.
         // Air in front of the characters is what makes a scene read as a place
@@ -749,6 +770,8 @@ private fun com.stratum.core.domain.item.ItemRarity.beamColor(): Long = when (th
     com.stratum.core.domain.item.ItemRarity.RARE -> 0xFFFFCA28
     com.stratum.core.domain.item.ItemRarity.EPIC -> 0xFFFF7043
     com.stratum.core.domain.item.ItemRarity.RELIC -> 0xFF26A69A
+    com.stratum.core.domain.item.ItemRarity.UNIQUE -> 0xFFE65100
+    com.stratum.core.domain.item.ItemRarity.SET -> 0xFF7CB342
 }
 
 private const val DEFAULT_INSERT_TINT = 0xFF7FD4E0L
@@ -1034,3 +1057,79 @@ internal fun facingOf(dx: Float, dy: Float): SpriteFacing = SpriteFacing.of(
     if (dx > 0f) 1 else if (dx < 0f) -1 else 0,
     if (dy > 0f) 1 else if (dy < 0f) -1 else 0,
 )
+
+
+/**
+ * The painted terrain, kept between frames.
+ *
+ * Painting the terrain is thousands of filled paths; sliding a picture of it
+ * is one image draw. [TerrainLayerPolicy] says when the picture is stale.
+ */
+private class TerrainLayer {
+    private var bitmap: ImageBitmap? = null
+    private var policy: TerrainLayerPolicy? = null
+    private val painter = CanvasDrawScope()
+
+    fun draw(
+        scope: DrawScope,
+        renderer: WorldFrameRenderer,
+        world: World,
+        camera: WorldPoint,
+        projection: IsometricProjection,
+        highlight: BlockPos?,
+        time: WorldTime,
+        biomeAt: (Int, Int) -> BiomeDefinition?,
+        revision: Int,
+    ): FrameView {
+        val width = scope.size.width
+        val height = scope.size.height
+        val cameraScreen = projection.project(camera)
+        val originX = width / 2f - cameraScreen.x
+        val originY = height / 2f - cameraScreen.y
+        val eyeLevel = kotlin.math.floor(camera.z).toInt()
+        val margin = (maxOf(width, height) * MARGIN_SHARE).coerceAtLeast(MIN_MARGIN)
+        val rules = policy?.takeIf { it.margin == margin } ?: TerrainLayerPolicy(margin).also { policy = it; bitmap = null }
+        val key = TerrainLayerPolicy.Key(
+            worldRevision = revision,
+            width = width.toInt(),
+            height = height.toInt(),
+            zoom = projection.zoom,
+            eyeLevel = eyeLevel,
+            biomeId = biomeAt(camera.x.toInt(), camera.y.toInt())?.id,
+            dayStep = rules.dayStep(time.dayFraction),
+            underground = time.isUnderground,
+            highlight = highlight,
+            director = renderer.director,
+        )
+        if (bitmap == null || rules.needsPaint(key, originX, originY)) {
+            val layerWidth = (width + 2 * margin).toInt().coerceAtLeast(1)
+            val layerHeight = (height + 2 * margin).toInt().coerceAtLeast(1)
+            val target = bitmap?.takeIf { it.width == layerWidth && it.height == layerHeight }
+                ?: ImageBitmap(layerWidth, layerHeight).also { bitmap = it }
+            painter.draw(scope, scope.layoutDirection, androidx.compose.ui.graphics.Canvas(target), Size(layerWidth.toFloat(), layerHeight.toFloat())) {
+                renderer.render(
+                    world = world,
+                    camera = camera,
+                    width = layerWidth.toFloat(),
+                    height = layerHeight.toFloat(),
+                    sink = ComposeFrameSink(this),
+                    highlight = highlight,
+                    time = time,
+                    biomeAt = biomeAt,
+                )
+            }
+            rules.painted(key, originX, originY)
+        }
+        scope.drawImage(
+            image = bitmap!!,
+            topLeft = Offset(rules.layerOffsetX(originX), rules.layerOffsetY(originY)),
+        )
+        return FrameView(width, height, originX, originY, eyeLevel)
+    }
+
+    private companion object {
+        /** A tenth of the long side each way: repainted about once a second at a walk. */
+        const val MARGIN_SHARE = 0.1f
+        const val MIN_MARGIN = 64f
+    }
+}

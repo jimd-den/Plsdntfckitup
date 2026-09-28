@@ -34,6 +34,15 @@ data class WorldRules(
     val experienceMultiplier: Float = 1f,
     /** Share of progress toward the next level lost on death. */
     val deathPenalty: Float = 0.25f,
+    /** Caps and guards on every fight: resistance ceilings, cooldown floors, leech rates, trigger depth. */
+    val combat: com.stratum.core.domain.combat.CombatRules = com.stratum.core.domain.combat.CombatRules(),
+    /**
+     * A build sandbox: the player may respec freely, conjure any item at any
+     * level, grant themselves currency, supports and levels, and set up
+     * training dummies and a damage meter. For making a build and seeing
+     * what it does before taking it anywhere that counts.
+     */
+    val sandbox: Boolean = false,
 ) {
     init {
         require(townDensity in 0f..MAX_DENSITY) { "townDensity $townDensity is outside 0..$MAX_DENSITY" }
@@ -68,5 +77,15 @@ object RulesPresets {
         "conqueror", "Conqueror", "Many towns, frequent raids. Take strongholds, build outposts, hold the land.",
         WorldRules(survival = SurvivalMode.GENTLE, townDensity = 1.8f, monsterDensity = 1.2f, raids = true),
     )
-    val all = listOf(adventure, story, survivor, conqueror)
+    val unbound = RulesPreset(
+        "unbound", "Unbound", "Every combat cap lifted: immunity, endless leech, deep trigger chains. For breaking builds on purpose.",
+        WorldRules(combat = com.stratum.core.domain.combat.CombatRules.UNBOUND),
+    )
+    val sandbox = RulesPreset(
+        "sandbox", "Sandbox", "A quiet world with every build tool: free respecs, any item, training dummies, a damage meter.",
+        WorldRules(
+            survival = SurvivalMode.OFF, monsterDensity = WorldRules.MIN_MONSTERS, raids = false, deathPenalty = 0f, sandbox = true,
+        ),
+    )
+    val all = listOf(adventure, story, survivor, conqueror, unbound, sandbox)
 }

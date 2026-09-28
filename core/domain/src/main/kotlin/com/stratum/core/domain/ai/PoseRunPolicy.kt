@@ -1,5 +1,7 @@
 package com.stratum.core.domain.ai
 
+import com.stratum.core.domain.sprite.FrameDefect
+
 /** What a run should do about a frame that did not come back. */
 enum class RunDecision {
     /** Wait and ask again for the same frame. */
@@ -17,6 +19,12 @@ data class RunOutcome(
     val drawn: Int,
     val failed: List<String>,
     val abandonedBecause: String? = null,
+    /** Why each failed key failed, in the provider's words where there are any. */
+    val reasons: Map<String, String> = emptyMap(),
+    /** Frames kept despite defects a redraw did not fix, so a person can pick them out. */
+    val flagged: Map<String, List<FrameDefect>> = emptyMap(),
+    /** The take each redrawn key ended on, to be remembered for the next run. */
+    val takes: Map<String, Int> = emptyMap(),
 ) {
     val isComplete: Boolean get() = failed.isEmpty() && abandonedBecause == null
 }

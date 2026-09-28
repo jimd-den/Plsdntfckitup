@@ -21,6 +21,33 @@ class StreamingWorldTest {
     )
 
     @Test
+    fun `crossing a border generates the ground near the player now and the far edge a few chunks at a time`() {
+        val cfg = WorldConfig(seed = 4242L, simulationRadius = 4)
+        val world = world(cfg)
+        world.focusOn(ChunkPos(0, 0))
+        assertEquals(81, world.loadedChunks.size, "a new world loads its whole window")
+
+        world.focusOn(ChunkPos(1, 0), urgentRadius = 2)
+        assertEquals(72, world.loadedChunks.size, "the far column waits; the near ones were already there")
+        assertEquals(9, world.pendingCount)
+
+        assertEquals(2, world.pump(2))
+        assertTrue(world.isLoaded(ChunkPos(5, 0)), "nearest first: the chunk level with the player")
+        while (world.pendingCount > 0) world.pump(2)
+        assertEquals(81, world.loadedChunks.size)
+    }
+
+    @Test
+    fun `a quick run that outpaces the queue still stands on generated ground`() {
+        val world = world(WorldConfig(seed = 4242L, simulationRadius = 4))
+        world.focusOn(ChunkPos(0, 0))
+        for (x in 1..6) {
+            world.focusOn(ChunkPos(x, 0), urgentRadius = 2)
+            for (dx in -2..2) for (dy in -2..2) assertTrue(world.isLoaded(ChunkPos(x + dx, dy)))
+        }
+    }
+
+    @Test
     fun `focusing loads exactly the configured window`() {
         val world = world()
         val delta = world.focusOn(ChunkPos(0, 0))
@@ -133,6 +160,22 @@ class StreamingWorldTest {
     }
 
     @Test
+    fun `restored chunks wait for the window and are used instead of generating, and stay dirty`() {
+        val world = world()
+        val far = ChunkPos(8, 0)
+        val restored = com.stratum.core.domain.world.Chunk(far).apply { setBlock(0, 0, 1, registry.indexOf(TestContent.stone.id)) }
+        world.restoreEdited(listOf(restored))
+        world.focusOn(ChunkPos(0, 0))
+
+        assertFalse(world.isLoaded(far), "a restored chunk is not made resident")
+        assertEquals(listOf(far), world.dirtyChunks().map { it.pos }, "but it is still saved")
+
+        world.focusOn(far)
+        assertEquals(TestContent.stone.id, world.blockAt(BlockPos(far.originX, 0, 1)).id)
+        assertEquals(listOf(far), world.dirtyChunks().map { it.pos })
+    }
+
+    @Test
     fun `a larger simulation radius loads the square it promises`() {
         val wide = WorldConfig(seed = 1L, simulationRadius = 3)
         assertEquals(49, wide.loadedChunkCount)
@@ -146,5 +189,15 @@ class StreamingWorldTest {
         val world = world()
         world.focusOn(BlockPos(-1, -1, 5))
         assertEquals(ChunkPos(-1, -1), world.focus)
+    }
+}
+
+class StreamingRevisionTest {
+    @Test
+    fun `walking into new ground changes the world revision, so a painted layer repaints`() {
+        val session = WorldSession(TestContent.assembled, com.stratum.core.domain.world.WorldConfig(seed = 3L, simulationRadius = 1))
+        val before = session.snapshot().worldRevision
+        repeat(40) { session.move(1f, 0f); session.tick(0.1f) }
+        assertTrue(session.snapshot().worldRevision != before, "new chunks streamed in without the revision noticing")
     }
 }

@@ -11,6 +11,14 @@ import com.stratum.core.domain.map.MarkerKind
 import com.stratum.core.domain.map.TileLayer
 import com.stratum.core.domain.map.TileMap
 import com.stratum.core.domain.world.BlockMaterial
+import com.stratum.core.domain.world.CarverRule
+import com.stratum.core.domain.world.ClimatePoint
+import com.stratum.core.domain.world.ClimateSpec
+import com.stratum.core.domain.world.LiquidRule
+import com.stratum.core.domain.world.LiquidTarget
+import com.stratum.core.domain.world.OreRule
+import com.stratum.core.domain.world.PassSpec
+import com.stratum.core.domain.world.TreeRule
 import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockType
 import com.stratum.core.domain.world.NoiseLayer
@@ -139,6 +147,113 @@ internal data class NoiseSchema(val scale: Float, val amplitude: Float, val seed
 internal data class StratumSchema(val block: String, val thickness: Int)
 
 @Serializable
+internal data class PassSchema(val id: String, val options: Map<String, String> = emptyMap()) {
+    fun toDomain() = PassSpec(id, options)
+
+    companion object {
+        fun of(p: PassSpec) = PassSchema(p.id, p.options)
+    }
+}
+
+@Serializable
+internal data class ClimatePointSchema(
+    val biome: String,
+    val temperature: Float,
+    val moisture: Float,
+    val minDepth: Int? = null,
+    val maxDepth: Int? = null,
+) {
+    fun toDomain() = ClimatePoint(biome, temperature, moisture, minDepth, maxDepth)
+
+    companion object {
+        fun of(p: ClimatePoint) = ClimatePointSchema(p.biomeId, p.temperature, p.moisture, p.minDepth, p.maxDepth)
+    }
+}
+
+private val CLIMATE = ClimateSpec()
+
+@Serializable
+internal data class ClimateSchema(
+    val points: List<ClimatePointSchema> = emptyList(),
+    val scale: Float = CLIMATE.scale,
+    val blend: Float = CLIMATE.blend,
+) {
+    fun toDomain() = ClimateSpec(points.map { it.toDomain() }, scale, blend)
+
+    companion object {
+        fun of(c: ClimateSpec) = ClimateSchema(c.points.map(ClimatePointSchema::of), c.scale, c.blend)
+    }
+}
+
+private val CARVER = CarverRule(kind = "caves")
+
+@Serializable
+internal data class CarverSchema(
+    val kind: String,
+    val minZ: Int = CARVER.minZ,
+    val maxZ: Int = CARVER.maxZ,
+    val amount: Float = CARVER.amount,
+    val size: Float = CARVER.size,
+    val headroom: Int = CARVER.headroom,
+    val options: Map<String, String> = emptyMap(),
+) {
+    fun toDomain() = CarverRule(kind, minZ, maxZ, amount, size, headroom, options)
+
+    companion object {
+        fun of(c: CarverRule) = CarverSchema(c.kind, c.minZ, c.maxZ, c.amount, c.size, c.headroom, c.options)
+    }
+}
+
+@Serializable
+internal data class OreSchema(
+    val block: String,
+    val minZ: Int,
+    val maxZ: Int,
+    val veinsPerChunk: Float,
+    val veinSize: Int = 6,
+    val biomes: List<String> = emptyList(),
+    val replaces: List<String> = emptyList(),
+) {
+    fun toDomain() = OreRule(block, minZ, maxZ, veinsPerChunk, veinSize, biomes, replaces)
+
+    companion object {
+        fun of(o: OreRule) = OreSchema(o.blockId, o.minZ, o.maxZ, o.veinsPerChunk, o.veinSize, o.biomeIds, o.replaces)
+    }
+}
+
+@Serializable
+internal data class TreeSchema(
+    val trunk: String,
+    val leaves: String,
+    val chance: Float,
+    val minHeight: Int = 3,
+    val maxHeight: Int = 5,
+    val canopyRadius: Int = 2,
+    val biomes: List<String> = emptyList(),
+) {
+    fun toDomain() = TreeRule(trunk, leaves, chance, minHeight, maxHeight, canopyRadius, biomes)
+
+    companion object {
+        fun of(t: TreeRule) = TreeSchema(t.trunkBlockId, t.leafBlockId, t.chance, t.minHeight, t.maxHeight, t.canopyRadius, t.biomeIds)
+    }
+}
+
+@Serializable
+internal data class LiquidSchema(
+    val block: String,
+    val maxZ: Int,
+    val minZ: Int = 1,
+    val target: String = SchemaValues.name(LiquidTarget.OPEN),
+    val share: Float = 1f,
+) {
+    fun toDomain() = LiquidRule(block, maxZ, minZ, SchemaValues.enum<LiquidTarget>(target, "liquid '$block' target"), share)
+
+    companion object {
+        fun of(l: LiquidRule) = LiquidSchema(l.blockId, l.maxZ, l.minZ, SchemaValues.name(l.target), l.share)
+    }
+}
+
+@Serializable
 internal data class TerrainSchema(
     val generator: String = RECIPE.generatorId,
     val elevation: List<NoiseSchema> = RECIPE.elevation.map { NoiseSchema(it.scale, it.amplitude, it.seedOffset) },
@@ -148,16 +263,26 @@ internal data class TerrainSchema(
     val scatterClustering: Float = RECIPE.scatterClustering,
     val scatterClusterScale: Float = RECIPE.scatterClusterScale,
     val options: Map<String, String> = emptyMap(),
+    val passes: List<PassSchema> = emptyList(),
+    val climate: ClimateSchema? = null,
+    val carvers: List<CarverSchema> = emptyList(),
+    val ores: List<OreSchema> = emptyList(),
+    val trees: List<TreeSchema> = emptyList(),
+    val liquids: List<LiquidSchema> = emptyList(),
 ) {
     fun toDomain() = TerrainRecipe(
         generator, elevation.map { NoiseLayer(it.scale, it.amplitude, it.seedOffset) }, terraceStep,
         strata.map { Stratum(it.block, it.thickness) }, caveDensity, scatterClustering, scatterClusterScale, options,
+        passes.map { it.toDomain() }, climate?.toDomain(), carvers.map { it.toDomain() }, ores.map { it.toDomain() },
+        trees.map { it.toDomain() }, liquids.map { it.toDomain() },
     )
 
     companion object {
         fun of(r: TerrainRecipe) = TerrainSchema(
             r.generatorId, r.elevation.map { NoiseSchema(it.scale, it.amplitude, it.seedOffset) }, r.terraceStep,
             r.strata.map { StratumSchema(it.blockId, it.thickness) }, r.caveDensity, r.scatterClustering, r.scatterClusterScale, r.options,
+            r.passes.map(PassSchema::of), r.climate?.let(ClimateSchema::of), r.carvers.map(CarverSchema::of), r.ores.map(OreSchema::of),
+            r.trees.map(TreeSchema::of), r.liquids.map(LiquidSchema::of),
         )
     }
 }

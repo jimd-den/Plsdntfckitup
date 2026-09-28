@@ -19,6 +19,9 @@ import com.stratum.core.domain.item.InsertDefinition
 import com.stratum.core.domain.item.ItemInstance
 import com.stratum.core.domain.item.ItemRarity
 import com.stratum.core.domain.session.HeroSave
+import com.stratum.core.domain.session.WorldIdentity
+import com.stratum.core.domain.session.WorldSave
+import com.stratum.core.domain.session.WorldSaveRepository
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.tabletop.ActiveBoon
@@ -29,6 +32,7 @@ import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
 import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.world.AttackReport
+import com.stratum.engine.world.FlaskResult
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
 import com.stratum.engine.world.CheckAttempt
@@ -60,6 +64,9 @@ import com.stratum.engine.world.WorldSession
 import com.stratum.feature.play.gl.AndroidImageCodec
 import com.stratum.feature.play.gl.ForgedKits
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,8 +83,9 @@ import kotlinx.coroutines.launch
  */
 class PlayViewModel(
     private val content: AssembledContent,
-    private val config: WorldConfig,
-    private val heroClassId: String? = null,
+    /** The world to make when nothing is resumed; a resumed world brings its own. */
+    config: WorldConfig,
+    heroClassId: String? = null,
     /**
      * Resolves an actor to drawable art. Supplied by the composition root,
      * because decoding a bitmap is a platform concern and this view model is
@@ -110,22 +118,51 @@ class PlayViewModel(
     private val saveStyle: (String) -> Unit = {},
     /** The character carried in from earlier play, or null for a new one. */
     hero: HeroSave? = null,
-    /** Keeps the character for next time. Called off the main thread except when the screen closes. */
-    private val saveHero: (HeroSave) -> Unit = {},
+    /** Keeps the character for next time, in the roster that carries heroes between worlds. Called off the main thread. */
+    saveHero: (HeroSave) -> Unit = {},
+    /** Prop blocks drawn as generated 3D models, by block id. */
+    private val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Structures made from generated models, which the build tray can raise. */
+    private val blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+    /** A saved world to resume, or null to make a new one from [config] and [hero]. */
+    resume: WorldSave? = null,
+    /** Where this world is kept, or null for a run with no save slot (the hero is still kept). */
+    private val worlds: WorldSaveRepository? = null,
+    /** The slot a new world saves into; ignored when resuming. Null makes one up. */
+    slot: WorldIdentity? = null,
+    /**
+     * Where saves are written. Outlives the view model on purpose: the save
+     * taken as the screen closes must land after the screen is gone.
+     */
+    saveScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /** Ids for worlds this screen starts itself: a new run, or a tier opened. */
+    private val newWorldId: () -> String = { java.util.UUID.randomUUID().toString() },
 ) : ViewModel() {
 
     private val initialQuality = quality
+
+    /** The hero class this run plays: a resumed world's own, else the one asked for. */
+    private val heroClassId: String? = resume?.heroClassId ?: heroClassId
+
+    /** The world's settings now: a sandbox that lifts its caps is rebuilt with different ones. */
+    private var worldConfig = resume?.config ?: config
 
     /**
      * Replaced wholesale by [newRun]. Every reader goes through this field
      * rather than capturing it, so starting a fresh world cannot leave a lambda
      * pointing at the world the player just left.
      */
-    private var session = WorldSession(content, config, heroClassId, hero = hero)
+    private var session = resume?.let { WorldSession.restore(content, it) } ?: WorldSession(content, worldConfig, this.heroClassId, hero = hero)
 
-    /** When the hero was last written down, in play seconds, and at what level. */
-    private var savedAtElapsed = 0f
-    private var savedLevel = session.player.level
+    /** The slot this world saves into. Changes only when the player leaves for a new world from inside play. */
+    private var identity: WorldIdentity = resume?.identity ?: slot ?: WorldIdentity(
+        id = newWorldId(), name = DEFAULT_WORLD_NAME, createdAt = System.currentTimeMillis(), heroName = heroName(),
+    )
+
+    /** The last save that landed, read into the state on the next publish so the cue never races the game loop. */
+    private val lastSave = MutableStateFlow<SaveNotice?>(null)
+
+    private val saver = WorldSaver(worlds, saveHero, saveScope, onSaved = { lastSave.value = it })
 
     /**
      * The ingredients each region is drawn from, read out of the loaded packs.
@@ -169,7 +206,13 @@ class PlayViewModel(
     private val rarityColors: (com.stratum.core.domain.item.ItemRarity) -> Long =
         { rarity -> session.content.rarityColor(rarity) }
 
+    /** Damage types by id, for the gear panel's resistance lines and the sandbox's pickers. Above [init]: the first publish reads them. */
+    private val damageTypeNames: Map<String, String> = content.damageTypes.associate { it.id to it.name }
+    private val damageTypeChoices = content.damageTypes.map { NamedChoice(it.id, it.name, color = it.color) }
+
     init {
+        // A new world is written at once, so it is in the list even if the app dies in its first minute.
+        if (resume == null && worlds != null) persist(SaveReason.NEW_WORLD) else saver.mark(elapsed, session.player.level)
         publish()
         startLoop()
     }
@@ -430,7 +473,8 @@ class PlayViewModel(
                 elapsed += delta
 
                 val events = session.tick(delta)
-                autosave()
+                session.sandbox?.advance(delta)
+                if (events.any { it is CombatEvent.PlayerDied }) persist(SaveReason.DEATH) else autosave()
                 if (events.isEmpty()) {
                     publish()
                 } else {
@@ -453,6 +497,7 @@ class PlayViewModel(
         is CombatEvent.InsertTaken -> "Picked up ${event.insert.name}"
         is CombatEvent.TownLiberated -> "${event.town.name} is liberated, and yours to hold"
         is CombatEvent.Realm -> describe(event.event)
+        is CombatEvent.BossPhaseBegan -> event.announcement.ifBlank { "${event.enemyName}: ${event.phaseName}" }
     }
 
     // ---- dying -----------------------------------------------------------
@@ -462,7 +507,9 @@ class PlayViewModel(
      * it. The engine decides what that costs.
      */
     fun revive() {
-        when (val result = session.revive()) {
+        val result = session.revive()
+        if (result is ReviveResult.Revived) persist(SaveReason.REVIVE)
+        when (result) {
             is ReviveResult.Revived -> publish(
                 message = if (result.experienceLost > 0) {
                     "You rise. ${result.experienceLost} experience stayed behind."
@@ -484,8 +531,16 @@ class PlayViewModel(
     private fun newWorld(difficulty: Difficulty) {
         miningJob?.cancel()
         loopJob?.cancel()
-        session = WorldSession(content, config.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
-        persist()
+        // The world being left is kept in its own slot; the new one gets a slot of its own.
+        persist(SaveReason.EXIT)
+        val base = identity.name.substringBefore(TIER_SEPARATOR)
+        identity = identity.copy(
+            id = newWorldId(),
+            name = if (difficulty.isBase) base else "$base$TIER_SEPARATOR${difficulty.tier}",
+            createdAt = System.currentTimeMillis(),
+        )
+        session = WorldSession(content, worldConfig.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
+        persist(SaveReason.NEW_WORLD)
         // The panels belong to the run that just ended; a fresh world opens on
         // the world, not on someone else's bag.
         _state.value = initialState(content)
@@ -501,8 +556,61 @@ class PlayViewModel(
         publish()
     }
 
+    /** Wears a bagged item: in the slot the gear panel is looking at when it fits there, or wherever it goes. */
     fun equip(instanceId: String) {
-        publish(message = describe(session.equip(instanceId)))
+        val slot = _state.value.gearSlot?.takeIf { slot -> session.player.itemById(instanceId)?.slot?.fits?.contains(slot) == true }
+        _state.value = _state.value.copy(gearInspected = null)
+        publish(message = describe(session.equip(instanceId, slot)))
+    }
+
+    /** Looks at one place on the paper doll; the same one again looks at the whole bag. */
+    fun selectGearSlot(slot: com.stratum.core.domain.item.EquipmentSlot?) {
+        val current = _state.value.gearSlot
+        _state.value = _state.value.copy(gearSlot = if (slot == current) null else slot, gearInspected = null)
+        publish()
+    }
+
+    /** Reads one item in full; null puts it down. */
+    fun inspectItem(instanceId: String?) {
+        _state.value = _state.value.copy(gearInspected = instanceId.takeIf { it != _state.value.gearInspected })
+        publish()
+    }
+
+    /** What the satchel draws, worked out only while it is open. */
+    // The satchel compares every bagged item against the whole character. That
+    // answer changes when the gear, the bag, the passives or the selection do,
+    // not sixty times a second while the panel is open.
+    private var gearKey: List<Any?>? = null
+
+    /** Keys of immutable state compare by identity: a new object is the only way any of it changes, and deep equality cost as much as it saved. */
+    private fun sameObjects(a: List<Any?>, b: List<Any?>?): Boolean =
+        b != null && a.size == b.size && a.indices.all { i -> a[i] === b[i] || (a[i] is Number || a[i] is Boolean || a[i] is Enum<*>) && a[i] == b[i] }
+    private var gearCache = GearPanelState()
+
+    private fun gearPanel(): GearPanelState {
+        if (!_state.value.satchelOpen) return GearPanelState().also { gearKey = null }
+        val player = session.player
+        val key = listOf(player.equipment, player.bag, player.insertBag, player.build, player.level, _state.value.gearSlot, _state.value.gearInspected)
+        if (sameObjects(key, gearKey)) return gearCache
+        gearKey = key
+        val catalogue = session.content.itemCatalogue
+        return gearPanelUncached(catalogue).also { gearCache = it }
+    }
+
+    private fun gearPanelUncached(catalogue: com.stratum.core.domain.item.ItemCatalogue): GearPanelState {
+        return GearPanelBuilder.build(
+            player = session.player,
+            selectedSlot = _state.value.gearSlot,
+            inspectedId = _state.value.gearInspected,
+            inserts = insertFor,
+            setInfo = { id -> catalogue.set(id)?.let { SetInfo(it.name, catalogue.piecesOf(id).size) } },
+            statsOf = session::statsFor,
+            damageTypeNames = damageTypeNames,
+        )
+    }
+
+    fun unequip(slot: com.stratum.core.domain.item.EquipmentSlot) {
+        publish(message = describe(session.unequip(slot)))
     }
 
     fun discard(instanceId: String) {
@@ -511,8 +619,12 @@ class PlayViewModel(
 
     private fun describe(result: EquipResult): String = when (result) {
         is EquipResult.Equipped -> "Equipped ${result.item.name}"
+        is EquipResult.Unequipped -> "Took off ${result.item.name}"
         is EquipResult.Discarded -> "Dropped ${result.item.name}"
         EquipResult.NotInBag -> "That is not in your bag"
+        is EquipResult.TooLowLevel -> "${result.item.name} needs level ${result.requiredLevel}"
+        is EquipResult.WrongSlot -> "${result.item.name} is not worn there"
+        EquipResult.NothingWorn -> "Nothing is worn there"
     }
 
     // ---- the anvil -------------------------------------------------------
@@ -564,6 +676,9 @@ class PlayViewModel(
         styleSummary = artDirector.direction.summary,
         kit = ForgedKits.kitFor(artDirector.direction, kitDirectory),
         kitOverlays = kitOverlays,
+        propModels = propModels,
+        blueprints = blueprints.map { BlueprintChoice(it.id, it.name, it.filledCount) },
+        onRaiseBlueprint = ::raiseBlueprint,
         quality = initialQuality,
         checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
@@ -669,6 +784,17 @@ class PlayViewModel(
             AttackReport.OnCooldown -> Unit
             AttackReport.NotReady -> Unit
             AttackReport.UnknownSkill -> publish(message = "That skill is not available")
+            is AttackReport.Cast -> publish()
+            AttackReport.Stunned -> publish(message = "Stunned")
+        }
+    }
+
+    /** Drinks from the flask in [slot] on the belt. */
+    fun useFlask(slot: Int) {
+        when (val result = session.useFlask(slot)) {
+            is FlaskResult.Drunk -> publish(message = result.flask.name)
+            is FlaskResult.Empty -> publish(message = "${result.flask.name} is empty")
+            FlaskResult.NoSuchFlask -> Unit
         }
     }
 
@@ -722,6 +848,13 @@ class PlayViewModel(
         }
     }
 
+    /** Raises a model's blueprint in front of the player; see [WorldSession.raise]. */
+    fun raiseBlueprint(id: String) {
+        val blueprint = blueprints.firstOrNull { it.id == id } ?: return
+        val placed = session.raise(blueprint)
+        publish(message = if (placed > 0) "Raised ${blueprint.name}: $placed blocks" else "No room to raise ${blueprint.name} here")
+    }
+
     fun place(target: BlockPos) {
         // The session stops its own mining, but the coroutine driving it lives
         // here and would otherwise keep calling mine() on the old target.
@@ -773,9 +906,19 @@ class PlayViewModel(
             realm = realmPanel(),
             settlementName = snapshot.settlement?.name,
             settlementHostile = snapshot.settlementHostile,
+            projectiles = snapshot.projectiles,
+            zones = snapshot.zones,
+            telegraphs = snapshot.telegraphs,
+            flasks = snapshot.flasks,
+            maxHealth = snapshot.maxHealth,
+            maxResource = snapshot.maxResource,
             hero = heroPanel(),
+            gear = gearPanel(),
+            sandbox = sandboxPanel(),
+            lifePaysCosts = com.stratum.core.domain.combat.Keystone.LIFE_PAYS_COSTS in session.keystones,
             frame = _state.value.frame + 1,
             message = message ?: _state.value.message,
+            saveNotice = lastSave.value,
         )
     }
 
@@ -790,7 +933,15 @@ class PlayViewModel(
             heldSupports = session.heldSupports,
             tier = session.difficulty.tier,
             worldMods = session.difficulty.mods,
+            breakdown = if (panel.tab == HeroTab.STATS) session.explain(panel.query) else null,
+            damageTypes = damageTypeChoices,
         )
+    }
+
+    /** Explains another number on the stats page. */
+    fun explainHeroStat(query: com.stratum.core.domain.sandbox.StatQuery) {
+        _state.value = _state.value.copy(hero = _state.value.hero.copy(query = query))
+        publish()
     }
 
     private fun displayName(blockId: String): String =
@@ -824,6 +975,7 @@ class PlayViewModel(
 
     fun selectHeroTab(tab: HeroTab) {
         _state.value = _state.value.copy(hero = _state.value.hero.copy(tab = tab))
+        publish()
     }
 
     /** Selects a node and lights the path to it, so the player sees the cost before paying it. */
@@ -856,7 +1008,7 @@ class PlayViewModel(
 
     private fun afterPassiveChange(message: String?) {
         _state.value.hero.selectedNode?.let(::selectPassive)
-        persist()
+        persist(SaveReason.BUILD_CHANGE)
         publish(message = message)
     }
 
@@ -869,12 +1021,12 @@ class PlayViewModel(
     fun linkSupport(supportId: String) {
         val skillId = _state.value.hero.selectedSkill ?: session.skills.firstOrNull()?.id ?: return
         publish(message = describe(session.linkSupport(skillId, supportId)))
-        persist()
+        persist(SaveReason.BUILD_CHANGE)
     }
 
     fun unlinkSupport(skillId: String, supportId: String) {
         publish(message = describe(session.unlinkSupport(skillId, supportId)))
-        persist()
+        persist(SaveReason.BUILD_CHANGE)
     }
 
     private fun describe(result: SupportResult): String = when (result) {
@@ -883,7 +1035,7 @@ class PlayViewModel(
         SupportResult.SkillFull -> "That skill holds ${com.stratum.core.domain.crafting.StandardCrafting.MAX_SUPPORTS_PER_SKILL} supports"
         SupportResult.AlreadyLinked -> "Already linked there"
         SupportResult.NoneHeld -> "You hold none of those"
-        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked -> "That does not fit"
+        SupportResult.UnknownSkill, SupportResult.UnknownSupport, SupportResult.NotLinked, SupportResult.DoesNotFit -> "That does not fit"
     }
 
     /** Spends currency on the item the anvil is showing. */
@@ -895,7 +1047,7 @@ class PlayViewModel(
             CraftResult.NoneHeld -> "You hold none of those"
             CraftResult.NoSuchItem, CraftResult.NoSuchCurrency -> null
         }
-        persist()
+        persist(SaveReason.BUILD_CHANGE)
         publish(message = message)
     }
 
@@ -911,25 +1063,196 @@ class PlayViewModel(
         newWorld(Difficulty.of(waystone))
     }
 
-    /** Writes the hero down now and then: on a level, and every minute of play. */
+    /** Writes the world and the hero down now and then: on a level, and every minute of play. */
     private fun autosave() {
-        val levelled = session.player.level != savedLevel
-        if (levelled || elapsed - savedAtElapsed > AUTOSAVE_SECONDS) persist()
+        saver.due(elapsed, session.player.level)?.let(::persist)
     }
 
-    private fun persist() {
-        savedAtElapsed = elapsed
-        savedLevel = session.player.level
-        val save = session.heroSave(savedAt = System.currentTimeMillis())
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { saveHero(save) }
+    /** Saves now: for the shell, when it knows the player is about to leave. */
+    fun saveNow() = persist(SaveReason.EXIT)
+
+    /** The app went into the background, where it may be killed without warning. */
+    fun onBackground() = persist(SaveReason.BACKGROUND)
+
+    /**
+     * Takes the snapshot here, on the thread that ticks the world, and hands
+     * the writing to [saver]. The world's copy of the hero is the one kept in
+     * the roster too, so the two can never disagree about the same moment. A
+     * sandbox saves its world to its own slot, and never its hero: a conjured
+     * character never writes over the real one.
+     */
+    private fun persist(reason: SaveReason) {
+        val now = System.currentTimeMillis()
+        val world = worlds?.let { session.worldSave(identity, savedAt = now) }
+        val hero = world?.hero ?: session.heroSave(savedAt = now)
+        saver.write(world, hero, sandbox = session.rules.sandbox, reason = reason, elapsed = elapsed, level = session.player.level)
     }
 
     override fun onCleared() {
-        // Straight away rather than launched: the scope is about to be cancelled.
-        saveHero(session.heroSave(savedAt = System.currentTimeMillis()))
+        // Written in the save scope, which outlives this one: leaving to the menu is a save.
+        persist(SaveReason.EXIT)
         miningJob?.cancel()
         loopJob?.cancel()
         super.onCleared()
+    }
+
+    /** What the menu calls the hero of a world this screen names itself. */
+    private fun heroName(): String =
+        content.heroClasses.firstOrNull { it.id == session.player.heroClassId }?.name ?: session.player.heroClassId
+
+    // ---- the build sandbox ----------------------------------------------------
+
+    fun toggleSandbox() {
+        val panel = _state.value.sandbox
+        _state.value = _state.value.copy(sandbox = panel.copy(open = !panel.open))
+        publish()
+    }
+
+    fun selectSandboxTab(tab: SandboxTab) = updateSandbox { it.copy(tab = tab) }
+
+    fun filterSandboxSlot(slot: com.stratum.core.domain.item.ItemSlot?) = updateSandbox { it.copy(slotFilter = slot) }
+
+    fun setSandboxItemLevel(level: Int) = updateSandbox { it.copy(itemLevel = level.coerceIn(1, com.stratum.engine.world.SandboxTools.MAX_ITEM_LEVEL)) }
+
+    fun setSandboxRarity(rarity: ItemRarity) = updateSandbox { it.copy(rarity = rarity) }
+
+    fun setDummy(spec: com.stratum.core.domain.sandbox.DummySpec) = updateSandbox { it.copy(dummy = spec) }
+
+    fun explainSandboxStat(query: com.stratum.core.domain.sandbox.StatQuery) = updateSandbox { it.copy(query = query) }
+
+    fun spawnBase(baseId: String) = sandboxDo {
+        val panel = _state.value.sandbox
+        it.spawnItem(com.stratum.engine.world.ItemRequest(baseId = baseId, itemLevel = panel.itemLevel, rarity = panel.rarity))
+    }
+
+    fun spawnUnique(uniqueId: String) = sandboxDo { it.spawnItem(com.stratum.engine.world.ItemRequest(uniqueId = uniqueId, itemLevel = _state.value.sandbox.itemLevel)) }
+
+    fun rerollItem(instanceId: String) = sandboxDo { it.reroll(instanceId) }
+
+    fun setHeroLevel(level: Int) = sandboxDo { it.setLevel(level) }
+
+    fun respec() = sandboxDo { it.respec() }
+
+    fun grantCurrency(currencyId: String) = sandboxDo { it.grantCurrency(currencyId) }
+
+    fun grantSupport(supportId: String) = sandboxDo { it.grantSupport(supportId) }
+
+    fun grantEverything() = sandboxDo { it.grantEverything() }
+
+    fun spawnDummy() = sandboxDo { it.spawnDummy(_state.value.sandbox.dummy) }
+
+    fun healDummies() = sandboxDo { it.healDummies() }
+
+    fun clearDummies() = sandboxDo { it.clearDummies() }
+
+    fun spawnMonster(definitionId: String) = sandboxDo { it.spawnMonster(definitionId) }
+
+    fun resetMeter() {
+        session.sandbox?.meter?.reset()
+        publish(message = "Meter reset")
+    }
+
+    /** Writes the build down as a one-line code, shown in the panel to copy. */
+    fun exportBuild(): String? {
+        val tools = session.sandbox ?: return null
+        val code = com.stratum.core.domain.sandbox.BuildCode.toCode(tools.exportBuild())
+        _state.value = _state.value.copy(sandbox = _state.value.sandbox.copy(exported = code))
+        publish(message = "Build code ready to copy")
+        return code
+    }
+
+    /**
+     * Takes on a shared build. A class is chosen when a world is made, so the
+     * build arrives in a new sandbox world rather than on this body.
+     */
+    fun importBuild(text: String) {
+        val tools = session.sandbox ?: return publish(message = "Builds are tried on in a sandbox world")
+        tools.importBuild(text).fold(
+            onSuccess = { imported ->
+                val skipped = imported.skipped.takeIf { it.isNotEmpty() }?.let { " (${it.size} pieces left out: ${it.joinToString("; ")})" }.orEmpty()
+                replaceWorld(worldConfig, imported.hero, "Build imported$skipped")
+            },
+            onFailure = { publish(message = it.message ?: "That is not a build") },
+        )
+    }
+
+    /** Lifts every cap or puts them back. Caps are a rule of the world, so the world is made again around the same hero. */
+    fun toggleCaps() {
+        if (session.sandbox == null) return
+        val lifted = worldConfig.rules.combat == com.stratum.core.domain.combat.CombatRules.UNBOUND
+        val combat = if (lifted) com.stratum.core.domain.combat.CombatRules() else com.stratum.core.domain.combat.CombatRules.UNBOUND
+        replaceWorld(worldConfig.copy(rules = worldConfig.rules.copy(combat = combat)), session.heroSave(), if (lifted) "Caps restored" else "Every cap lifted")
+    }
+
+    /**
+     * The same world again, with [config] and [hero]: resumed from a save of
+     * itself, so the ground dug and built and where the player stands are
+     * all kept -- only the rules change.
+     */
+    private fun replaceWorld(config: WorldConfig, hero: HeroSave, message: String) {
+        miningJob?.cancel()
+        loopJob?.cancel()
+        worldConfig = config
+        session = WorldSession.restore(content, session.worldSave(identity).copy(config = config, hero = hero))
+        val panel = _state.value.sandbox
+        _state.value = initialState(content).copy(sandbox = panel.copy(exported = null))
+        publish(message = message)
+        startLoop()
+    }
+
+    private fun updateSandbox(change: (SandboxPanelState) -> SandboxPanelState) {
+        _state.value = _state.value.copy(sandbox = change(_state.value.sandbox))
+        publish()
+    }
+
+    private fun sandboxDo(action: (com.stratum.engine.world.SandboxTools) -> com.stratum.engine.world.SandboxResult) {
+        val tools = session.sandbox ?: return
+        publish(message = describe(action(tools)))
+    }
+
+    private fun describe(result: com.stratum.engine.world.SandboxResult): String = when (result) {
+        is com.stratum.engine.world.SandboxResult.ItemMade -> "Made ${result.item.name}"
+        is com.stratum.engine.world.SandboxResult.Rerolled -> "Rerolled into ${result.after.name}"
+        is com.stratum.engine.world.SandboxResult.Granted -> "Granted ${result.name}" + if (result.count > 1) " ×${result.count}" else ""
+        is com.stratum.engine.world.SandboxResult.LevelSet -> "Level ${result.level}"
+        is com.stratum.engine.world.SandboxResult.Respecced -> "Gave back ${result.nodes} passives"
+        is com.stratum.engine.world.SandboxResult.Spawned -> result.enemies.singleOrNull()?.let { "${it.name} stands ready" } ?: "${result.enemies.size} stand ready"
+        is com.stratum.engine.world.SandboxResult.Cleared -> "${result.count} dummies"
+        com.stratum.engine.world.SandboxResult.NotFound -> "The loaded packs have no such thing"
+        is com.stratum.engine.world.SandboxResult.Refused -> result.reason
+    }
+
+    /** What the sandbox panel and the meter chip draw; lists only for the page that is open. */
+    // The sandbox's lists change with the tab and filter; its meter and
+    // numbers are read by a person, so four refreshes a second is plenty.
+    private var sandboxKey: List<Any?>? = null
+    private var sandboxRefreshedAt = -1f
+
+    private fun sandboxPanel(): SandboxPanelState {
+        val tools = session.sandbox ?: return SandboxPanelState()
+        val panel = _state.value.sandbox
+        val key = listOf(panel.open, panel.tab, panel.slotFilter, panel.query, tools.capsLifted, tools.dummies.size,
+            session.player.currency, session.player.supportBag)
+        if (sameObjects(key, sandboxKey) && elapsed - sandboxRefreshedAt < SANDBOX_REFRESH_SECONDS) return panel
+        sandboxKey = key
+        sandboxRefreshedAt = elapsed
+        val open = panel.open
+        val catalogue = session.content.itemCatalogue
+        return panel.copy(
+            active = true,
+            capsLifted = tools.capsLifted,
+            meter = tools.meter.report(),
+            damageTypes = damageTypeChoices,
+            dummies = tools.dummies.size,
+            bases = if (open && panel.tab == SandboxTab.ITEMS) tools.bases.filter { panel.slotFilter == null || it.slot == panel.slotFilter }
+                .map { NamedChoice(it.id, it.name, "${it.slot.name.lowercase()} · level ${it.requiredLevel}") } else emptyList(),
+            uniques = if (open && panel.tab == SandboxTab.ITEMS) tools.uniques.filter { unique -> panel.slotFilter == null || catalogue.base(unique.baseId)?.slot == panel.slotFilter }
+                .map { NamedChoice(it.id, it.name, it.setId?.let { id -> "set: ${catalogue.set(id)?.name ?: id}" } ?: "unique", color = session.content.rarityColor(if (it.setId != null) ItemRarity.SET else ItemRarity.UNIQUE)) } else emptyList(),
+            currencies = if (open && panel.tab == SandboxTab.HERO) session.content.currencies.map { NamedChoice(it.id, it.name, "×${session.player.currencyCount(it.id)}", it.color) } else emptyList(),
+            supports = if (open && panel.tab == SandboxTab.HERO) session.content.supports.map { NamedChoice(it.id, it.name, "×${session.player.supportCount(it.id)}", it.color) } else emptyList(),
+            monsters = if (open && panel.tab == SandboxTab.TARGETS) tools.monsters.map { NamedChoice(it.id, it.name, if (tools.isBoss(it)) "boss" else it.rank.name.lowercase(), it.bodyColor) } else emptyList(),
+            breakdown = if (open && panel.tab == SandboxTab.BREAKDOWN) session.explain(panel.query) else null,
+        )
     }
 
     companion object {
@@ -940,7 +1263,11 @@ class PlayViewModel(
         private const val MAX_STEP = 1f / 15f
         private const val MIN_ZOOM = 0.6f
         private const val MAX_ZOOM = 2.2f
-        private const val AUTOSAVE_SECONDS = 60f
+        private const val DEFAULT_WORLD_NAME = "New world"
+
+        /** Between a world's name and the tier a waystone or the tier list opened it at. */
+        private const val TIER_SEPARATOR = ", tier "
+        private const val SANDBOX_REFRESH_SECONDS = 0.25f
 
         fun factory(
             content: AssembledContent,
@@ -957,13 +1284,23 @@ class PlayViewModel(
             saveHero: (HeroSave) -> Unit = {},
             stylePrompt: String = "",
             saveStyle: (String) -> Unit = {},
+            propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+            blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+            /** A saved world to resume. Its seed, rules, hero class and hero win over [config], [heroClassId] and [loadHero]. */
+            resume: WorldSave? = null,
+            /** Where worlds are kept; null plays without a world slot, as before world saving. */
+            worlds: WorldSaveRepository? = null,
+            /** The slot a new world saves into, from the world library; ignored when resuming. */
+            slot: WorldIdentity? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
-                quality = quality, saveQuality = saveQuality, hero = loadHero(), saveHero = saveHero,
+                quality = quality, saveQuality = saveQuality, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
+                propModels = propModels, blueprints = blueprints,
+                resume = resume, worlds = worlds, slot = slot,
             ) as T
         }
     }
@@ -995,6 +1332,14 @@ data class PlayUiState(
     val isInvulnerable: Boolean = false,
     val rollCooldownFraction: Float = 0f,
     val feedback: List<FeedbackMark> = emptyList(),
+    /** Things in flight, burning ground and wind-ups, from the combat core. */
+    val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
+    val zones: List<com.stratum.engine.world.Zone> = emptyList(),
+    val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
+    val flasks: List<com.stratum.engine.world.FlaskView> = emptyList(),
+    /** The bars' ceilings with traits and boons counted, from the session; the player's own fields cannot see those. */
+    val maxHealth: Int = player.maxHealthWithGear,
+    val maxResource: Int = player.resourceCeiling,
     val playerFlash: Float = 0f,
     /** Per-actor hit flash, read by the renderer for each visible monster. */
     val flashFor: (String) -> Float = { 0f },
@@ -1051,16 +1396,44 @@ data class PlayUiState(
     /** The tree, skills and worlds panel. */
     val hero: HeroPanelState = HeroPanelState(),
     val message: String? = null,
+    /** Prop blocks drawn as generated 3D models, by block id. */
+    val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Blueprints the build tray offers to raise. */
+    val blueprints: List<BlueprintChoice> = emptyList(),
+    val onRaiseBlueprint: (String) -> Unit = {},
+    /** Skills cost life rather than resource: a keystone or a piece of gear says so. */
+    val lifePaysCosts: Boolean = false,
+    /** The paper doll and the bag, compared against the whole character. */
+    val gear: GearPanelState = GearPanelState(),
+    /** The place on the doll the satchel is looking at; null looks at the whole bag. */
+    val gearSlot: com.stratum.core.domain.item.EquipmentSlot? = null,
+    val gearInspected: String? = null,
+    /** The build sandbox, in a world that has one. */
+    val sandbox: SandboxPanelState = SandboxPanelState(),
+    /** The last save that landed, for a moment's "Saved"; null until the first. */
+    val saveNotice: SaveNotice? = null,
 ) {
     val isDead: Boolean get() = !player.isAlive
 
     fun cooldownFraction(skill: SkillDefinition): Float = player.cooldowns.fractionRemaining(skill)
 
-    fun canAfford(skill: SkillDefinition): Boolean = player.resource >= skill.resourceCost
+    /** What one use of [skill] costs now: in life, when a keystone says skills are paid for in blood. */
+    fun costOf(skill: SkillDefinition): com.stratum.core.domain.actor.SkillCost =
+        com.stratum.core.domain.actor.SkillCost.of(skill, lifePaysCosts)
 
-    /** Everything the player could craft on or socket, equipped weapon first. */
+    /** Whether the cast would be paid for: the same rule the cast itself applies, so a lit button is a castable skill. */
+    fun canAfford(skill: SkillDefinition): Boolean = costOf(skill).affordable(player.resource, player.health)
+
+    /** Charges ready now, for a skill that stores more than one. */
+    fun chargesLeft(skill: SkillDefinition): Int = player.cooldowns.chargesLeft(skill)
+
+    /** Whether the player is winding [skill] up this moment. */
+    fun isWindingUp(skill: SkillDefinition): Boolean =
+        telegraphs.any { !it.hostile && it.casterId == com.stratum.engine.world.WorldSession.PLAYER_ACTOR_ID && it.skillId == skill.id }
+
+    /** Everything the player could craft on or socket, worn gear first. */
     val anvilItems: List<ItemInstance>
-        get() = listOfNotNull(player.equippedWeapon) + player.bag
+        get() = player.equipment.all + player.bag
 
     /**
      * The item the anvil is showing. Falls back rather than showing nothing when
@@ -1077,3 +1450,6 @@ data class PlayUiState(
 
 /** Used before a pack is resolved, and by previews. */
 private const val DEFAULT_RARITY_TINT = 0xFFB0BEC5L
+
+/** A blueprint as the build tray lists it. */
+data class BlueprintChoice(val id: String, val name: String, val blocks: Int)

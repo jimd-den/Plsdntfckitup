@@ -55,6 +55,16 @@ internal data class PackSchema(
     val structures: List<StructureSchema> = emptyList(),
     val units: List<UnitSchema> = emptyList(),
     val agents: List<AgentRoleSchema> = emptyList(),
+    val itemBases: List<ItemBaseSchema> = emptyList(),
+    val uniques: List<UniqueSchema> = emptyList(),
+    val itemSets: List<ItemSetSchema> = emptyList(),
+    val itemNames: List<NamePoolSchema> = emptyList(),
+    val baseTiers: List<BaseTierSchema> = emptyList(),
+    val structureTemplates: List<StructureTemplateSchema> = emptyList(),
+    val models: List<ModelSchema> = emptyList(),
+    val statuses: List<StatusSchema> = emptyList(),
+    val traits: List<TraitSchema> = emptyList(),
+    val flasks: List<FlaskSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -70,6 +80,11 @@ internal data class PackSchema(
         forageRules = forage.map { it.toDomain() }, recipes = recipes.map { it.toDomain() },
         resources = resources.map { it.toDomain() }, structures = structures.map { it.toDomain() }, units = units.map { it.toDomain() },
         agentRoles = agents.map { it.toDomain() },
+        itemBases = itemBases.map { it.toDomain() }, uniques = uniques.map { it.toDomain() }, itemSets = itemSets.map { it.toDomain() },
+        itemNames = itemNames.map { it.toDomain() }, baseTiers = baseTiers.map { it.toDomain() },
+        structureTemplates = structureTemplates.map { it.toDomain() },
+        models = models.map { it.toDomain() },
+        statuses = statuses.map { it.toDomain() }, traits = traits.map { it.toDomain() }, flasks = flasks.map { it.toDomain() },
     )
 
     companion object {
@@ -86,6 +101,11 @@ internal data class PackSchema(
             p.forageRules.map(ForageSchema::of), p.recipes.map(RecipeSchema::of),
             p.resources.map(ResourceSchema::of), p.structures.map(StructureSchema::of), p.units.map(UnitSchema::of),
             p.agentRoles.map(AgentRoleSchema::of),
+            p.itemBases.map(ItemBaseSchema::of), p.uniques.map(UniqueSchema::of), p.itemSets.map(ItemSetSchema::of),
+            p.itemNames.map(NamePoolSchema::of), p.baseTiers.map(BaseTierSchema::of),
+            p.structureTemplates.map(StructureTemplateSchema::of),
+            models = p.models.map(ModelSchema::of),
+            statuses = p.statuses.map(StatusSchema::of), traits = p.traits.map(TraitSchema::of), flasks = p.flasks.map(FlaskSchema::of),
         )
     }
 }

@@ -32,8 +32,13 @@ data class SceneCamera(
     val near: Float = 4f,
     val far: Float = 90f,
 ) {
-    val eye: Vec3
-        get() {
+    // Everything below is derived once per camera rather than on every read.
+    // A frame reads them for every prop and every projected sprite, and as
+    // plain getters they rebuilt vectors and matrices thousands of times a
+    // frame -- most of the garbage the scene made. Callers must not modify
+    // the arrays; nothing does.
+
+    val eye: Vec3 by lazy(LazyThreadSafetyMode.PUBLICATION) {
             val p = Math.toRadians(pitch.toDouble())
             val y = Math.toRadians(yaw.toDouble())
             // The camera sits *behind* the view direction: yaw names where it
@@ -41,10 +46,10 @@ data class SceneCamera(
             val dx = (-cos(y) * cos(p)).toFloat()
             val dy = (-sin(y) * cos(p)).toFloat()
             val dz = sin(p).toFloat()
-            return target + Vec3(dx, dy, dz) * distance
+            target + Vec3(dx, dy, dz) * distance
         }
 
-    val view: FloatArray get() = Mat4.lookAt(eye, target, Vec3.UP)
+    val view: FloatArray by lazy(LazyThreadSafetyMode.PUBLICATION) { Mat4.lookAt(eye, target, Vec3.UP) }
 
     /**
      * The perspective, mirrored left to right.
@@ -58,16 +63,18 @@ data class SceneCamera(
      * lit from the upper right. Flipping screen X gives the 3D view the 2D
      * view's handedness, so one set of rules is right in both.
      */
-    val projection: FloatArray get() = Mat4.perspective(fovY, aspect, near, far).also { it[0] = -it[0] }
+    val projection: FloatArray by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        Mat4.perspective(fovY, aspect, near, far).also { it[0] = -it[0] }
+    }
 
-    val viewProjection: FloatArray get() = Mat4.multiply(projection, view)
+    val viewProjection: FloatArray by lazy(LazyThreadSafetyMode.PUBLICATION) { Mat4.multiply(projection, view) }
 
     /** The unmirrored camera's right, which [projection] shows on the left. */
-    private val lensRight: Vec3 get() = (target - eye).cross(Vec3.UP).normalized()
+    private val lensRight: Vec3 by lazy(LazyThreadSafetyMode.PUBLICATION) { (target - eye).cross(Vec3.UP).normalized() }
 
     /** The screen's right and up directions in world space, for billboards and input. */
-    val right: Vec3 get() = lensRight * -1f
-    val up: Vec3 get() = lensRight.cross(target - eye).normalized()
+    val right: Vec3 by lazy(LazyThreadSafetyMode.PUBLICATION) { lensRight * -1f }
+    val up: Vec3 by lazy(LazyThreadSafetyMode.PUBLICATION) { lensRight.cross(target - eye).normalized() }
 
     /** Zoom as a distance multiplier, clamped to what still reads. */
     fun zoomed(factor: Float): SceneCamera = copy(distance = (distance * factor).coerceIn(MIN_DISTANCE, MAX_DISTANCE))

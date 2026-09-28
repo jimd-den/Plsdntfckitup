@@ -2,6 +2,7 @@ package com.stratum.app
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -17,11 +18,21 @@ import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.world.IsometricProjection
 import com.stratum.engine.world.WorldSession
-import com.stratum.core.domain.ai.GeneratedPackDto
-import com.stratum.core.domain.ai.toDomain
-import com.stratum.feature.forge.ForgeScreenContent
-import com.stratum.feature.forge.ForgeStatus
-import com.stratum.feature.forge.ForgeUiState
+import com.stratum.agents.forge.Creations
+import com.stratum.agents.forge.ForgeCards
+import com.stratum.agents.forge.ForgeKind
+import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.content.LoreCategory
+import com.stratum.core.domain.content.LoreEntry
+import com.stratum.core.domain.item.ModifierRange
+import com.stratum.core.domain.item.PowerTier
+import com.stratum.core.domain.item.UniqueDefinition
+import com.stratum.core.domain.stats.BuildFlag
+import com.stratum.core.domain.stats.ModifierKind
+import com.stratum.core.domain.stats.Stat
+import com.stratum.feature.forge.ContentForgeActions
+import com.stratum.feature.forge.ContentForgeContent
+import com.stratum.feature.forge.ContentForgeUiState
 import com.stratum.feature.forge.SpriteForgeContent
 import com.stratum.feature.forge.SpriteForgeUiState
 import com.stratum.core.domain.content.ClassDraft
@@ -49,44 +60,6 @@ import org.robolectric.annotation.GraphicsMode
 class StratumScreenshotTest {
 
     @get:Rule val composeTestRule = createComposeRule()
-
-    @Test
-    fun home_screen() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                StratumApp(modifier = Modifier.fillMaxSize())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home.png")
-    }
-
-    @Test
-    @Config(qualifiers = "+land")
-    fun home_screen_landscape() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                StratumApp(modifier = Modifier.fillMaxSize())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/home_landscape.png")
-    }
-
-    @Test
-    fun world_setup() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(com.stratum.core.designsystem.theme.StratumTheme.colors.surface).padding(16.dp)) {
-                    WorldSetupCard(
-                        rules = com.stratum.core.domain.world.RulesPresets.survivor.rules.copy(raids = false),
-                        suggested = com.stratum.core.domain.world.WorldRules(),
-                        onRulesChange = {},
-                        startExpanded = true,
-                    )
-                }
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/world_setup.png")
-    }
 
     @Test
     fun agent_studio() {
@@ -354,6 +327,7 @@ class StratumScreenshotTest {
                     onSave = {},
                     onBack = {},
                     modifier = Modifier.fillMaxSize(),
+                    onChooseGraphics = {},
                 )
             }
         }
@@ -501,6 +475,47 @@ class StratumScreenshotTest {
             recipes = session.content.recipes.mapIndexed { i, r -> com.stratum.engine.world.RecipeOption(r, haveIngredients = i == 0, atStation = true) },
         ),
     )
+
+    /** The pause sheet: every system behind the one menu button, with a point to spend calling from Hero. */
+    @Test
+    fun play_pause_menu() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session), world = session.world, modifier = Modifier.fillMaxSize(), menuOpen = true)
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_pause.png")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun play_pause_menu_landscape() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(state = fightState(content, session), world = session.world, modifier = Modifier.fillMaxSize(), menuOpen = true)
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_pause_landscape.png")
+    }
+
+    /** Once every hint has been taught, the HUD is only the controls and the world. */
+    @Test
+    fun play_screen_hints_learned() {
+        val (content, session) = fight()
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = fightState(content, session),
+                    world = session.world,
+                    modifier = Modifier.fillMaxSize(),
+                    seenHints = com.stratum.feature.play.Hints.all,
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/play_quiet.png")
+    }
 
     @Test
     @Config(qualifiers = "+land")
@@ -653,6 +668,46 @@ class StratumScreenshotTest {
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_tree_landscape.png")
     }
 
+    /** Changing look mid-world: the hero panel's Look page, a drawn look worn. */
+    @Test
+    fun hero_look() {
+        val content = GameSetup.assemble()
+        val session = WorldSession(content, WorldConfig(seed = 99L, simulationRadius = 2))
+        repeat(10) { session.tick(0.2f) }
+        val looks = listOf(
+            Triple("hero:bronze_warden", "Bronze Warden", 0xFFC8872E.toInt()),
+            Triple("hero:storm_caller", "Storm Caller", 0xFF2FB5A4.toInt()),
+        ).map { (id, name, body) ->
+            val bitmap = android.graphics.Bitmap.createBitmap(16, 24, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val paint = android.graphics.Paint()
+            paint.color = 0xFFE9D5B5.toInt(); canvas.drawRect(6f, 1f, 10f, 5f, paint)
+            paint.color = body; canvas.drawRect(4f, 6f, 12f, 16f, paint)
+            paint.color = 0xFF3A2A1C.toInt(); canvas.drawRect(5f, 16f, 7f, 23f, paint); canvas.drawRect(9f, 16f, 11f, 23f, paint)
+            com.stratum.core.designsystem.component.LookChoice(id, name, bitmap.asImageBitmap(), com.stratum.core.domain.sprite.FrameRect(0, 0, 16, 24))
+        }
+
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = PlayUiState(
+                        player = session.player,
+                        camera = session.player.position,
+                        projection = IsometricProjection(zoom = 1f),
+                        palette = content.palette,
+                        biomeName = session.currentBiome.name,
+                        skills = session.skills,
+                        hero = com.stratum.feature.play.HeroPanelState(open = true, tab = com.stratum.feature.play.HeroTab.LOOK),
+                    ),
+                    world = session.world,
+                    looks = com.stratum.feature.play.HeroLooks(looks = looks, wornId = "hero:storm_caller"),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_look.png")
+    }
+
     @Test
     fun anvil_screen() {
         val content = GameSetup.assemble()
@@ -744,55 +799,42 @@ class StratumScreenshotTest {
     }
 
     @Test
-    fun forge_screen() {
-        // Rendered with a result in hand, because the preview after generation
-        // is the part of this screen worth guarding against regressions.
-        val generated = GeneratedPackDto(
-            id = "glasswake",
-            name = "Glasswake",
-            description = "A drowned city of glass beneath a frozen sea.",
-            blocks = listOf(
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:silt", name = "Black Silt", material = "SOIL",
-                    hardness = 0.4f, topColor = "#2b2f3a", sideColor = "#1d2029",
-                ),
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:pane", name = "Cathedral Pane", material = "STONE",
-                    hardness = 2.0f, opaque = false, topColor = "#5f8ea8", sideColor = "#3f6274",
-                ),
-                com.stratum.core.domain.ai.GeneratedBlockDto(
-                    id = "glasswake:coldlight", name = "Coldlight Vein", material = "ORE",
-                    hardness = 4.5f, requiredTier = 2, light = 10,
-                    topColor = "#7fd4e0", sideColor = "#4a9aa6",
-                ),
-            ),
-            biomes = listOf(
-                com.stratum.core.domain.ai.GeneratedBiomeDto(
-                    id = "glasswake:nave", name = "The Flooded Nave",
-                    surfaceBlock = "glasswake:silt", subsurfaceBlock = "glasswake:silt",
-                    fillerBlock = "glasswake:pane",
-                ),
-            ),
-            heroClasses = listOf(
-                com.stratum.core.domain.ai.GeneratedClassDto(
-                    id = "glasswake:tidewright", name = "Tidewright", health = 220,
-                ),
-            ),
-        ).toDomain("glasswake")
+    fun content_forge_screen() {
+        // Rendered with a result in hand, because the cards after forging are
+        // the part of this screen worth guarding against regressions.
+        val unique = UniqueDefinition(
+            "${Creations.ID}:kiln_heart", "Heart of the Last Kiln", "igbo:bronze_ring",
+            modifiers = listOf(ModifierRange(Stat.DAMAGE, ModifierKind.MORE, 0.6f), ModifierRange(Stat.MAX_HEALTH, ModifierKind.FLAT, 20f, 35f)),
+            flags = setOf(BuildFlag.SKILLS_COST_HEALTH), flavour = "It burned for a hundred years. Then it was worn.", minItemLevel = 8,
+        )
+        val story = LoreEntry("${Creations.ID}:kiln", "The Last Kiln", "When the kilns of Awka went cold, one ember was kept.", LoreCategory.ARTIFACT, unique.id)
+        val fragment = ContentPack(Creations.ID, Creations.NAME, "forge", uniques = listOf(unique), loreEntries = listOf(story))
 
         composeTestRule.setContent {
             StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                ForgeScreenContent(
-                    state = ForgeUiState(
-                        theme = "A drowned city of glass beneath a frozen sea",
-                        status = ForgeStatus.READY,
-                        result = generated,
+                ContentForgeContent(
+                    state = ContentForgeUiState(
+                        kind = ForgeKind.UNIQUE,
+                        prompt = "A ring that makes every skill cost blood",
+                        budget = PowerTier.STRONG,
+                        drafts = listOf(
+                            com.stratum.feature.forge.ForgeDraft(
+                                key = "draft-1", kind = ForgeKind.UNIQUE,
+                                order = ForgeKind.UNIQUE.order("A ring that makes every skill cost blood"),
+                                context = com.stratum.agents.forge.ForgeContext(budget = PowerTier.STRONG),
+                                placeholder = com.stratum.agents.forge.ForgePlaceholder.of(ForgeKind.UNIQUE, "A ring that makes every skill cost blood"),
+                                result = fragment,
+                                cards = ForgeCards.of(fragment, listOf(IgboContentPack.pack)),
+                            ),
+                        ),
                         providerConfigured = true,
+                        kept = 3,
                     ),
+                    actions = ContentForgeActions(),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/forge.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/content_forge.png")
     }
 }

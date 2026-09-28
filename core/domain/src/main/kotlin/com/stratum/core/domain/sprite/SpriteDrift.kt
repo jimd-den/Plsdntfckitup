@@ -94,16 +94,24 @@ object SpriteDrift {
     fun authoredHeightsFor(state: AnimationState, frameCount: Int): List<Float> {
         if (frameCount <= 0) return emptyList()
         val skeleton = Skeleton()
-        return (0 until frameCount).map { index ->
-            val joints = skeleton.pose(MocapPoses.poseFor(state, index, frameCount)).joints.values
-            if (joints.isEmpty()) {
-                1f
-            } else {
-                val top = joints.minOf { it.y }
-                val bottom = joints.maxOf { it.y }
-                (bottom - top).coerceAtLeast(MIN_HEIGHT)
-            }
-        }
+        return (0 until frameCount).map { index -> heightOf(skeleton.pose(MocapPoses.poseFor(state, index, frameCount))) }
+    }
+
+    /**
+     * The same, from whichever poses the frames were actually drawn against.
+     *
+     * A set guided by imported or motion-captured poses was not drawn against
+     * the built-in skeleton, and comparing its art with the built-in heights
+     * would "correct" a real crouch the import asked for.
+     */
+    fun authoredHeightsFor(guides: PoseGuides, state: AnimationState, frameCount: Int): List<Float> =
+        (0 until frameCount.coerceAtLeast(0)).map { index -> heightOf(guides.riggingPoseFor(state, index, frameCount)) }
+
+    /** Top of the highest joint to the bottom of the lowest. */
+    fun heightOf(pose: Pose): Float {
+        val joints = pose.joints.values
+        if (joints.isEmpty()) return 1f
+        return (joints.maxOf { it.y } - joints.minOf { it.y }).coerceAtLeast(MIN_HEIGHT)
     }
 
     private fun medianOf(values: List<Float>): Float {

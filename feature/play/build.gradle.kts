@@ -14,6 +14,8 @@ dependencies {
 
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.compose)
+  // BackHandler: the back gesture closes panels and opens the menu instead of leaving the world.
+  implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.kotlinx.coroutines.android)
 

@@ -135,6 +135,21 @@ internal class LootDrops(
         return options.firstOrNull { roll -= weight(it).coerceAtLeast(0); roll < 0 }
     }
 
+    /**
+     * What a chest at [at] holds: one item at chest quality, deeper chests
+     * reaching higher item levels as deeper kills do. Null when nothing can
+     * roll at that level.
+     */
+    fun chestAt(at: WorldPoint, playerLevel: Int, random: Random, find: LootFind = LootFind.NONE): GroundLoot? {
+        val itemLevel = Progression.itemLevelFor(playerLevel + difficulty.monsterLevelBonus, (seaLevel - at.z.toInt()).coerceAtLeast(0))
+        val item = roller.roll(
+            itemLevel, random,
+            rarityBonus = find.rarityBonus(MarkerEncounter.CHEST_RARITY_BONUS),
+            floor = MarkerEncounter.CHEST_FLOOR,
+        ) ?: return null
+        return GroundLoot(item, at)
+    }
+
     /** Deeper kills and harder worlds drop better gear. */
     private fun itemLevelFor(enemy: EnemyInstance, playerLevel: Int): Int =
         Progression.itemLevelFor(playerLevel + difficulty.monsterLevelBonus, (seaLevel - enemy.blockPos.z).coerceAtLeast(0))

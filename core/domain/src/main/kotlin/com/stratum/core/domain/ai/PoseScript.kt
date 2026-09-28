@@ -19,6 +19,17 @@ data class PoseStep(
     val instruction: String,
     /** Which way the body is turned. Defaulted, so the front is unchanged. */
     val view: PoseView = PoseView.FRONT,
+    /**
+     * How many frames the animation this step belongs to has.
+     *
+     * Carried on the step because the guide for frame [index] depends on it:
+     * the skeleton samples its cycle at `index / frameCount`, and a guide drawn
+     * against any other length is a different pose from the one the prose
+     * describes. It used to be looked up from the default length at the call
+     * site, so a twelve-frame walk was guided through its first six poses and
+     * then held the last one for the remaining six.
+     */
+    val frameCount: Int = PoseScript.DEFAULT_FRAMES,
 ) {
     /** Stable across runs, so a stored pose can be matched to the step that asked for it. */
     val key: String get() = PoseCell.keyOf(state, index, view.keySuffix)
@@ -132,10 +143,10 @@ data class PoseScript(val steps: List<PoseStep>) {
                 AnimationState.generatedRowOrder
                     .filter { it in states }
                     .flatMap { state ->
-                        posesFor(state, frames[state] ?: DEFAULT_FRAMES)
-                            .mapIndexed { index, instruction ->
-                                PoseStep(state, index, instruction, view)
-                            }
+                        val instructions = posesFor(state, frames[state] ?: DEFAULT_FRAMES)
+                        instructions.mapIndexed { index, instruction ->
+                            PoseStep(state, index, instruction, view, instructions.size)
+                        }
                     }
             },
         )

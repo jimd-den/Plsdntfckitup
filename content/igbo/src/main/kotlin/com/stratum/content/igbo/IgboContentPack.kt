@@ -2,7 +2,10 @@ package com.stratum.content.igbo
 
 import com.stratum.core.domain.combat.CombatStats
 import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.world.ClimatePoint
+import com.stratum.core.domain.world.ClimateSpec
 import com.stratum.core.domain.world.NoiseLayer
+import com.stratum.core.domain.world.OreRule
 import com.stratum.core.domain.world.Stratum
 import com.stratum.core.domain.world.TerrainRecipe
 import com.stratum.core.domain.content.HeroClassDefinition
@@ -77,7 +80,8 @@ object IgboContentPack {
             agility = 12,
             insight = 18,
             startingBlockIds = listOf(IgboPackBlocks.obsidianCrag.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
-            abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark"),
+            abilityIds = listOf("$NS:thunder_spear", "$NS:shockwave_spark", "$NS:ogene_bolt"),
+            traitIds = listOf("$NS:storm_caller"),
             baseStats = CombatStats(
                 maxHealth = 180,
                 attackPower = 18,
@@ -103,7 +107,7 @@ object IgboContentPack {
             agility = 13,
             insight = 17,
             startingBlockIds = listOf(IgboPackBlocks.nsibidiSeal.id, IgboPackBlocks.groveTurf.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
-            abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova"),
+            abilityIds = listOf("$NS:venom_geyser", "$NS:solar_supernova", "$NS:seed_volley"),
             baseStats = CombatStats(
                 maxHealth = 200,
                 attackPower = 15,
@@ -131,6 +135,7 @@ object IgboContentPack {
             insight = 6,
             startingBlockIds = listOf(IgboPackBlocks.catacombMasonry.id, IgboPackBlocks.mudWall.id, IgboPackBlocks.lateritePaving.id),
             abilityIds = listOf("$NS:ikenga_tremor", "$NS:mma_nkwu_cleave"),
+            traitIds = listOf("$NS:blood_of_ala"),
             baseStats = CombatStats(
                 maxHealth = 300,
                 attackPower = 20,
@@ -210,6 +215,10 @@ object IgboContentPack {
      * ground flat enough to build on.
      */
     val terrain = TerrainRecipe(
+        // The staged generator: the same ground, paths and shrines as the
+        // layered one, with caves and tunnels under it, ore veins in the rock,
+        // and catacombs and ruined Mbari houses built into it.
+        generatorId = TerrainRecipe.OVERWORLD,
         elevation = listOf(
             // One broad landform, so a region has a shape rather than a texture.
             NoiseLayer(scale = 0.008f, amplitude = 0.7f),
@@ -229,6 +238,28 @@ object IgboContentPack {
         strata = listOf(
             Stratum(IgboPackBlocks.redEarth.id, thickness = 2),
             Stratum(IgboPackBlocks.riverClay.id, thickness = 2),
+        ),
+        // Regions by heat and wet: the cold ash peaks and the hot dry
+        // courtyards at opposite corners, the marsh where it is wettest, the
+        // grove warm and damp beside it, and the catacombs in the temperate
+        // middle, where every other region can border them.
+        climate = ClimateSpec(
+            points = listOf(
+                ClimatePoint(IgboPackBiomes.sacredGrove.id, temperature = 0.65f, moisture = 0.68f),
+                ClimatePoint(IgboPackBiomes.ozoCourtyard.id, temperature = 0.82f, moisture = 0.22f),
+                ClimatePoint(IgboPackBiomes.thunderPeak.id, temperature = 0.15f, moisture = 0.2f),
+                ClimatePoint(IgboPackBiomes.bronzeCatacombs.id, temperature = 0.45f, moisture = 0.45f),
+                ClimatePoint(IgboPackBiomes.mistMarsh.id, temperature = 0.35f, moisture = 0.88f),
+            ),
+        ),
+        // Deep iron veins under everything, and storm crystal in the peaks'
+        // roots, on top of each region's own deposits.
+        ores = listOf(
+            OreRule(IgboPackBlocks.ironOre.id, minZ = 2, maxZ = 9, veinsPerChunk = 1.5f, veinSize = 8),
+            OreRule(
+                IgboPackBlocks.stormCrystal.id, minZ = 3, maxZ = 12, veinsPerChunk = 1f, veinSize = 5,
+                biomeIds = listOf(IgboPackBiomes.thunderPeak.id),
+            ),
         ),
     )
 
@@ -250,11 +281,20 @@ object IgboContentPack {
         inserts = IgboPackCombat.inserts,
         weapons = IgboPackCombat.weapons,
         enemies = IgboPackCombat.enemies + IgboPackWorld.people,
-        skills = IgboPackCombat.skills,
+        skills = IgboPackAbilities.skills,
+        statuses = IgboPackAbilities.statuses,
+        traits = IgboPackAbilities.traits,
+        flasks = IgboPackAbilities.flasks,
         rarityStyles = IgboPackCombat.rarityStyles,
         terrain = terrain,
         factions = IgboPackWorld.factions,
         enemyPacks = IgboPackWorld.packs,
         settlements = IgboPackWorld.settlements,
+        itemBases = IgboPackGear.bases,
+        uniques = IgboPackGear.uniques,
+        itemSets = IgboPackGear.sets,
+        itemNames = IgboPackGear.namePools,
+        baseTiers = IgboPackGear.baseTiers,
+        structureTemplates = IgboPackStructures.all,
     )
 }

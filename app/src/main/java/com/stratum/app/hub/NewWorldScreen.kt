@@ -1,0 +1,288 @@
+package com.stratum.app.hub
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.stratum.app.WorldDials
+import com.stratum.app.DialRow
+import com.stratum.app.summaryOf
+import com.stratum.app.world.NewWorldDraft
+import com.stratum.app.world.NewWorldStep
+import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.ChoiceCard
+import com.stratum.core.designsystem.component.LinkPill
+import com.stratum.core.designsystem.component.LocalJobsTray
+import com.stratum.core.designsystem.component.SectionHeader
+import com.stratum.core.designsystem.component.StatusChip
+import com.stratum.core.designsystem.component.StatusTone
+import com.stratum.core.designsystem.component.StepIndicator
+import com.stratum.core.designsystem.component.StratumAction
+import com.stratum.core.designsystem.component.StratumDivider
+import com.stratum.core.designsystem.component.StratumPanel
+import com.stratum.core.designsystem.component.StratumScreen
+import com.stratum.core.designsystem.component.LookChoice
+import com.stratum.core.designsystem.component.LookRow
+import com.stratum.core.designsystem.theme.Space
+import com.stratum.core.designsystem.theme.StratumTheme
+import com.stratum.core.domain.world.RulesPresets
+
+/** A class as the hero step lists it: who, what they are, and how far the kept hero got. */
+data class HeroChoice(
+    val id: String,
+    val name: String,
+    /** "Titled Bladesman · 260 health · 14 attack". */
+    val line: String,
+    /** The kept hero's level, or null for a class never played. */
+    val level: Int? = null,
+)
+
+/** What the new-world flow can be asked to do. */
+data class NewWorldActions(
+    val onBack: () -> Unit = {},
+    val onChange: (NewWorldDraft) -> Unit = {},
+    /** Detours to the class forge; the draft waits here for the new class. */
+    val onQuickMake: () -> Unit = {},
+    val onGo: () -> Unit = {},
+    /** Wears a look, or null for the class's own art. */
+    val onPickLook: (String?) -> Unit = {},
+    /** Detours to the sprite forge to draw a new look. */
+    val onMakeLook: () -> Unit = {},
+)
+
+/**
+ * A new world in three steps: who you are, what world, go. Each step is one
+ * screenful with one decision on it and a Next that is always in the same
+ * place, so a player who takes every default is in a world in three taps.
+ */
+@Composable
+fun NewWorldScreen(
+    draft: NewWorldDraft,
+    heroes: List<HeroChoice>,
+    actions: NewWorldActions,
+    modifier: Modifier = Modifier,
+    /** How many worlds exist, for the default name "World N". */
+    existingWorlds: Int = 0,
+    /** Whether a model is connected, so a described world also gets the crew writing it. */
+    modelReady: Boolean = false,
+    /** Character art the hero can wear, and which is worn; null is the class's own art. */
+    looks: List<LookChoice> = emptyList(),
+    lookId: String? = null,
+    jobsTray: @Composable () -> Unit = LocalJobsTray.current,
+) {
+    val heroId = draft.heroClassId ?: heroes.firstOrNull()?.id
+    val back = { if (draft.step == NewWorldStep.HERO) actions.onBack() else actions.onChange(draft.back()) }
+    StratumScreen(
+        title = "New world",
+        onBack = back,
+        modifier = modifier,
+        jobsTray = jobsTray,
+        bottomBar = {
+            if (draft.step != NewWorldStep.HERO) {
+                StratumAction(label = "Back", onClick = back, emphasis = ActionEmphasis.QUIET)
+            }
+            if (draft.step == NewWorldStep.GO) {
+                StratumAction(label = "Go", onClick = actions.onGo, emphasis = ActionEmphasis.PRIMARY, modifier = Modifier.weight(1f).height(GO_HEIGHT))
+            } else {
+                val next = NewWorldStep.entries[draft.step.ordinal + 1]
+                StratumAction(
+                    label = "Next: ${next.label}",
+                    onClick = { actions.onChange(draft.copy(heroClassId = heroId).next()) },
+                    emphasis = ActionEmphasis.PRIMARY,
+                    enabled = heroId != null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
+    ) {
+        StepIndicator(
+            steps = NewWorldStep.entries.map { it.label },
+            current = draft.step.ordinal,
+            onStep = { actions.onChange(draft.copy(step = NewWorldStep.entries[it])) },
+        )
+        when (draft.step) {
+            NewWorldStep.HERO -> {
+                HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
+                LookStep(looks, lookId, actions.onPickLook, actions.onMakeLook)
+            }
+            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange)
+            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, looks.firstOrNull { it.id == lookId }, existingWorlds, modelReady)
+        }
+    }
+}
+
+@Composable
+private fun HeroStep(heroes: List<HeroChoice>, selected: String?, onPick: (String) -> Unit, onQuickMake: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Who are you?", actionLabel = "Quick-make a hero", onAction = onQuickMake)
+        heroes.forEach { hero ->
+            ChoiceCard(
+                title = hero.name,
+                body = hero.line,
+                selected = hero.id == selected,
+                onClick = { onPick(hero.id) },
+                glyph = hero.name.first().uppercase(),
+                tag = hero.level?.let { "Lv $it" } ?: "New",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * How the hero looks. The class's own art is always the first choice, so a
+ * player with nothing drawn yet still sees a complete step, and one tap on
+ * the worn look goes back to it.
+ */
+@Composable
+private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String?) -> Unit, onMake: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Your look", actionLabel = "Make a look", onAction = onMake)
+        LookRow(looks, selected, onPick)
+        if (looks.isEmpty()) {
+            Text(
+                "Draw your hero once in the sprite forge and they will stand here to be picked.",
+                style = MaterialTheme.typography.bodySmall,
+                color = StratumTheme.colors.inkMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boolean, onChange: (NewWorldDraft) -> Unit) {
+    var fineTune by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("What kind of world?")
+        RulesPresets.all.forEach { preset ->
+            ChoiceCard(
+                title = preset.name,
+                body = PRESET_LINES[preset.id] ?: preset.description,
+                selected = draft.presetId == preset.id && draft.rules == preset.rules,
+                onClick = { onChange(draft.choosePreset(preset)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                summaryOf(draft.rules),
+                style = MaterialTheme.typography.labelSmall,
+                color = StratumTheme.colors.accent,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(Space.small))
+            LinkPill(if (fineTune) "Done" else "Fine-tune", onClick = { fineTune = !fineTune })
+        }
+        if (fineTune) {
+            StratumPanel(Modifier.fillMaxWidth()) {
+                WorldDials.all.forEach { dial -> DialRow(dial, draft.rules) { onChange(draft.copy(rules = it)) } }
+            }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Describe it (optional)")
+        OutlinedTextField(
+            value = draft.prompt,
+            onValueChange = { onChange(draft.copy(prompt = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            maxLines = 4,
+            label = { Text("Describe a world") },
+            placeholder = { Text("A drowned bronze city under a red moon") },
+            supportingText = {
+                Text(
+                    if (modelReady) "Plays at once in the look your words suggest. The AI crew writes the rest while you play." else "Plays at once in the look your words suggest.",
+                )
+            },
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Name it")
+        OutlinedTextField(
+            value = draft.name,
+            onValueChange = { onChange(draft.copy(name = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("World name") },
+            placeholder = { Text(draft.resolvedName(existingWorlds)) },
+        )
+        OutlinedTextField(
+            value = draft.seedText,
+            onValueChange = { onChange(draft.copy(seedText = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Seed (optional)") },
+            placeholder = { Text("Blank for a surprise") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+        )
+    }
+}
+
+@Composable
+private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, existingWorlds: Int, modelReady: Boolean) {
+    val colors = StratumTheme.colors
+    StratumPanel(Modifier.fillMaxWidth()) {
+        Text(draft.resolvedName(existingWorlds), style = MaterialTheme.typography.displaySmall, color = colors.ink)
+        Spacer(Modifier.height(Space.medium))
+        SummaryRow("Hero", hero?.let { h -> h.name + (h.level?.let { " · Lv $it" } ?: " · new") } ?: "—")
+        StratumDivider()
+        SummaryRow("Wears", look?.name ?: "Class art")
+        StratumDivider()
+        SummaryRow("World", draft.presetLabel().ifEmpty { NewWorldDraft.CUSTOM })
+        StratumDivider()
+        SummaryRow("Seed", draft.seedText.trim().ifEmpty { "A surprise" })
+        draft.described?.let { world ->
+            StratumDivider()
+            SummaryRow("Look", world.styleSummary.ifBlank { "Read from your words" })
+        }
+        Spacer(Modifier.height(Space.medium))
+        Text(summaryOf(draft.rules), style = MaterialTheme.typography.labelSmall, color = colors.accent)
+    }
+    if (draft.described != null && modelReady) {
+        StatusChip("AI crew writes the rest as you play", tone = StatusTone.BUSY)
+    }
+    Text(
+        "Your hero keeps their level, gear and points in every world they enter.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colors.inkMuted,
+    )
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = Space.tight), verticalAlignment = Alignment.CenterVertically) {
+        Text(label.uppercase(), style = MaterialTheme.typography.labelMedium, color = StratumTheme.colors.inkMuted, modifier = Modifier.width(80.dp))
+        Text(value, style = MaterialTheme.typography.titleMedium, color = StratumTheme.colors.ink, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    }
+}
+
+private val GO_HEIGHT = 56.dp
+
+/** One line each for the built-in presets, so the cards scan; a preset not listed shows its own description. */
+private val PRESET_LINES = mapOf(
+    "adventure" to "Fights, loot and towns. The default.",
+    "story" to "Few monsters, no hunger. Explore and read.",
+    "survivor" to "Harsh needs, long nights, few towns.",
+    "conqueror" to "Many towns, raids. Take and hold the land.",
+    "unbound" to "Every combat cap lifted. Break builds.",
+    "sandbox" to "Every build tool, training dummies, a meter.",
+)

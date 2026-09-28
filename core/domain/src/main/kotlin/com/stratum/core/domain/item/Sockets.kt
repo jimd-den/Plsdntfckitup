@@ -1,10 +1,9 @@
 package com.stratum.core.domain.item
 
-import com.stratum.core.domain.combat.CombatStats
-import kotlin.math.roundToInt
+import com.stratum.core.domain.stats.StatModifier
 
 /**
- * Something you slot into a weapon.
+ * Something you slot into an item.
  *
  * Packs define these, so a pack can ship bronze studs where another ships
  * runes. An insert is an item in its own right: it drops, it stacks in the bag,
@@ -14,15 +13,14 @@ data class InsertDefinition(
     val id: String,
     val name: String,
     val description: String = "",
-    val stat: AffixStat,
-    val value: Float,
-    /** Set for resistance inserts, and for inserts that add a damage type. */
-    val damageTypeId: String? = null,
+    /** What it grants whoever wears the item it sits in. */
+    val modifiers: List<StatModifier> = emptyList(),
     /**
-     * Whether slotting this changes what the weapon deals, rather than only
-     * adding numbers. A weapon carries at most one, the most recently slotted.
+     * Changes what a weapon deals, rather than only adding numbers. A weapon
+     * carries at most one conversion, the most recently slotted; in armour or
+     * jewellery a converter only grants its modifiers.
      */
-    val convertsDamageType: Boolean = false,
+    val convertsToDamageTypeId: String? = null,
     val tier: Int = 1,
     val glyph: String = "💠",
     val color: Long = 0xFF7FD4E0,
@@ -30,16 +28,17 @@ data class InsertDefinition(
     val weight: Int = 100,
 ) {
     /**
-     * How the insert's effect reads in a tooltip. Borrows [AffixRoll]'s wording
-     * so a "+12 attack" rune and a "+12 attack" affix read identically; the
-     * player should not have to learn two vocabularies for one number.
+     * How the insert's effect reads in a tooltip. The same wording as an
+     * affix, so a "+12 damage" rune and a "+12 damage" affix read
+     * identically; the player should not have to learn two vocabularies for
+     * one number.
      */
     val statLine: String
-        get() = AffixRoll(id, name, AffixKind.SUFFIX, stat, value, damageTypeId).description
+        get() = modifiers.joinToString(", ") { it.describe() }
 }
 
 /**
- * Sockets on a specific weapon.
+ * Sockets on a specific item.
  *
  * Held separately from the affixes an item rolled: affixes are fixed at the
  * drop, sockets are the part the player owns. Keeping them apart is what makes
@@ -51,7 +50,7 @@ data class SocketSet(
     val filled: List<String?> = List(capacity) { null },
 ) {
     init {
-        require(capacity >= 0) { "A weapon cannot have negative sockets" }
+        require(capacity >= 0) { "An item cannot have negative sockets" }
     }
 
     val used: Int get() = filled.count { it != null }
@@ -77,9 +76,13 @@ data class SocketSet(
         return copy(filled = filled.toMutableList().also { it[socketIndex] = null }) to insertId
     }
 
-    /** Empties everything, for a player taking a weapon apart before selling it. */
+    /** Empties everything, for a player taking an item apart before selling it. */
     fun cleared(): Pair<SocketSet, List<String>> =
         copy(filled = List(capacity) { null }) to insertIds
+
+    /** Sockets only ever grow, and what is slotted stays slotted. */
+    fun grownTo(capacity: Int): SocketSet =
+        if (capacity <= this.capacity) this else SocketSet(capacity, filled + List(capacity - this.capacity) { null })
 
     companion object {
         val NONE = SocketSet(capacity = 0, filled = emptyList())
@@ -99,50 +102,21 @@ data class SocketSet(
             ItemRarity.RARE -> 2
             ItemRarity.EPIC -> 3
             ItemRarity.RELIC -> 4
+            // A unique's definition can say otherwise; this is what it gets when it does not.
+            ItemRarity.UNIQUE, ItemRarity.SET -> 2
         }
     }
 }
 
 /**
- * Applies a weapon's inserts on top of its own stats.
+ * What an item's inserts add on top of its own rolls.
  *
- * Separate from [ItemInstance.toStats] so the base item stays a pure function of
- * what it rolled, and a socketed weapon's contribution can be explained to the
- * player line by line.
+ * Separate from [ItemInstance] so the item stays a record of what it rolled,
+ * and a socketed item's contribution can be explained to the player line by line.
  */
 object SocketResolver {
 
-    fun statsFor(inserts: List<InsertDefinition>): CombatStats {
-        var stats = CombatStats(
-            maxHealth = 0, attackPower = 0, armour = 0,
-            critChance = 0f, critMultiplier = 0f, attackSpeed = 0f, attackRange = 0,
-        )
-        val resistances = mutableMapOf<String, Float>()
-
-        inserts.forEach { insert ->
-            stats = when (insert.stat) {
-                AffixStat.ATTACK_POWER -> stats.copy(attackPower = stats.attackPower + insert.value.roundToInt())
-                AffixStat.MAX_HEALTH -> stats.copy(maxHealth = stats.maxHealth + insert.value.roundToInt())
-                AffixStat.ARMOUR -> stats.copy(armour = stats.armour + insert.value.roundToInt())
-                AffixStat.CRIT_CHANCE -> stats.copy(critChance = stats.critChance + insert.value)
-                AffixStat.CRIT_MULTIPLIER -> stats.copy(critMultiplier = stats.critMultiplier + insert.value)
-                AffixStat.ATTACK_SPEED -> stats.copy(attackSpeed = stats.attackSpeed + insert.value)
-                AffixStat.LIFE_STEAL -> stats.copy(lifeSteal = stats.lifeSteal + insert.value)
-                AffixStat.RESISTANCE -> {
-                    insert.damageTypeId?.let { resistances[it] = (resistances[it] ?: 0f) + insert.value }
-                    stats
-                }
-                AffixStat.MINING_SPEED -> stats
-            }
-        }
-        return stats.copy(resistances = resistances)
-    }
-
-    /** Extra mining speed from inserts, applied by the interaction system. */
-    fun miningBonusFor(inserts: List<InsertDefinition>): Float =
-        inserts.filter { it.stat == AffixStat.MINING_SPEED }
-            .sumOf { it.value.toDouble() }
-            .toFloat()
+    fun modifiersFor(inserts: List<InsertDefinition>): List<StatModifier> = inserts.flatMap { it.modifiers }
 
     /**
      * The damage type a socketed weapon deals.
@@ -151,7 +125,5 @@ object SocketResolver {
      * player changes their element rather than having to find a new weapon.
      */
     fun damageTypeFor(base: String, inserts: List<InsertDefinition>): String =
-        inserts.lastOrNull { it.convertsDamageType && it.damageTypeId != null }
-            ?.damageTypeId
-            ?: base
+        inserts.lastOrNull { it.convertsToDamageTypeId != null }?.convertsToDamageTypeId ?: base
 }

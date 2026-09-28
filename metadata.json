@@ -1,8 +1,6 @@
 {
-  "name": "Igbo ARPG Engine",
-  "description": "Clean architecture ARPG game engine with Diablo 1-4 Chameleon HUD, AI Theme Weaver, OpenRouter sprite sheet studio, and authentic Igbo-Ukwu bronze art.",
+  "name": "Stratum",
+  "description": "An isometric voxel action-RPG sandbox for Android: mine, build and fight through a streamed block world with a Path of Exile style build core, staged world generation with dungeons, and content packs that AI tools can write and paint.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": []
 }

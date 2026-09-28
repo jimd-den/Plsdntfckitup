@@ -2,6 +2,7 @@ package com.stratum.agents
 
 import com.stratum.core.domain.ai.AgentRoleDefinition
 import com.stratum.core.domain.ai.CrewPlan
+import com.stratum.core.domain.ai.GenerationObserver
 import com.stratum.core.domain.ai.LanguageModelPort
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.PackOrigin
@@ -25,6 +26,8 @@ class StudioPipeline(
     private val model: LanguageModelPort,
     base: List<ContentPack>,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Mends each reply before it is checked; the crew takes replies as written. */
+    private val repair: FragmentRepair = FragmentRepair.None,
 ) {
     private val check = DraftCheck(base)
 
@@ -32,6 +35,11 @@ class StudioPipeline(
         brief: StudioBrief,
         crew: List<AgentRoleDefinition>,
         gate: ApprovalGate = ApprovalGate.ApproveAll,
+        /**
+         * Handed to every model call, so what the provider is doing -- sending,
+         * waiting, reading -- reaches a job's steps as well as the journal.
+         */
+        observer: GenerationObserver = GenerationObserver.None,
         onProgress: (StudioJournal) -> Unit = {},
     ): StudioOutcome {
         val plan = CrewPlan.of(crew)
@@ -51,7 +59,7 @@ class StudioPipeline(
                 report(journal.with(journal.step(role.id)!!.copy(status = StepStatus.SKIPPED, reason = "needs ${journal.step(blockedBy)?.role?.name ?: blockedBy}, which did not finish")))
                 continue
             }
-            val (step, fragment) = work(role, brief, draft, journal, gate) { report(it) }
+            val (step, fragment) = work(role, brief, draft, journal, gate, observer) { report(it) }
             if (step.status == StepStatus.DONE && fragment != null) {
                 draft = PackSections.merge(draft, fragment, role.sections)
                 report(journal.with(step).copy(draftJson = PackSections.render(draft)))
@@ -76,6 +84,7 @@ class StudioPipeline(
         draft: JsonObject,
         start: StudioJournal,
         gate: ApprovalGate,
+        observer: GenerationObserver,
         report: (StudioJournal) -> Unit,
     ): Pair<StudioStep, JsonObject?> {
         var journal = start
@@ -90,17 +99,22 @@ class StudioPipeline(
             val request = PromptComposer.compose(role, brief, draft, check.baseJson, feedback)
             val started = clock()
             val attempt = AgentAttempt(step.attempts.size + 1, request.systemPrompt, request.userPrompt)
-            val reply = model.complete(request).getOrElse { failure ->
+            val reply = model.complete(request, observer).getOrElse { failure ->
                 update(step.copy(attempts = step.attempts + attempt.copy(problems = listOf("the model could not be reached: ${failure.message}"), durationMillis = clock() - started)))
                 return step.copy(status = StepStatus.FAILED, reason = "the model could not be reached") to null
             }
-            val parsed = runCatching { PackSections.parse(extractObject(reply)) }
-            val fragment = parsed.getOrNull()
-            val problems = if (fragment == null) listOf("the reply was not a JSON object: ${parsed.exceptionOrNull()?.message}")
-            else check.problems(draft, fragment, role.sections, brief.packId)
+            val parsed = runCatching { PackSections.parse(extractObject(reply, role)) }
+            val repaired = parsed.getOrNull()?.let { repair.repair(it, role, brief) }
+            val fragment = repaired?.fragment
+            val problems = when {
+                repaired == null -> listOf("the reply was not a JSON object: ${parsed.exceptionOrNull()?.message}")
+                repaired.rejections.isNotEmpty() -> repaired.rejections
+                else -> check.problems(draft, repaired.fragment, role.sections, brief.packId)
+            }
             val done = attempt.copy(
                 reply = fragment?.let(PackSections::render) ?: reply,
                 problems = problems,
+                repairs = repaired?.notes.orEmpty(),
                 added = fragment?.let { PackSections.added(it, role.sections) }.orEmpty(),
                 durationMillis = clock() - started,
             )
@@ -123,8 +137,19 @@ class StudioPipeline(
         return step.copy(status = StepStatus.FAILED, reason = "still wrong after ${role.maxAttempts} tries") to null
     }
 
-    private fun extractObject(reply: String): String {
+    /**
+     * The JSON in a reply, fences and commentary stripped. A bare list is
+     * read as the role's first section, since that is what a model that
+     * forgot the wrapper meant.
+     */
+    private fun extractObject(reply: String, role: AgentRoleDefinition): String {
         val start = reply.indexOf('{')
+        val list = reply.indexOf('[')
+        if (list >= 0 && (start < 0 || list < start)) {
+            val end = reply.lastIndexOf(']')
+            require(end > list) { "no JSON object in the reply" }
+            return "{\"${role.sections.first()}\": ${reply.substring(list, end + 1)}}"
+        }
         val end = reply.lastIndexOf('}')
         require(start >= 0 && end > start) { "no JSON object in the reply" }
         return reply.substring(start, end + 1)

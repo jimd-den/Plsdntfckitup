@@ -130,6 +130,12 @@ class PluginFormatTest {
     }
 
     @Test
+    fun `a pack can suggest a build sandbox`() {
+        val pack = IgboContentPack.pack.copy(rules = RulesPresets.sandbox.rules)
+        assertEquals(RulesPresets.sandbox.rules, PackJson.decode(PackJson.encode(pack)).rules)
+    }
+
+    @Test
     fun `resources, structures and units survive the trip`() {
         val pack = IgboContentPack.pack.copy(
             resources = com.stratum.core.domain.strategy.StandardStrategy.resources,

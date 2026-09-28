@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.nativeCanvas
@@ -82,6 +83,12 @@ data class Scene3DInput(
     val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
     /** The player's graphics choice, or null to let the device decide. */
     val quality: QualityTier? = null,
+    /** Prop blocks drawn as 3D models instead of sprites, by block id. */
+    val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
+    /** Things in flight, burning ground and wind-ups, drawn as the 2D canvas draws them. */
+    val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
+    val zones: List<com.stratum.engine.world.Zone> = emptyList(),
+    val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
 )
 
 /**
@@ -125,8 +132,8 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
-    val builder = remember(input.director, library, settings) {
-        SceneBuilder(input.director, library, input.biomeAt, settings = settings)
+    val builder = remember(input.director, library, settings, input.propModels) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)
@@ -151,9 +158,27 @@ fun Scene3DView(
             ghostsAffordable = input.buildAffordable,
             highlight = input.highlight,
             effects = theatre.track.active,
+            marks = combatMarksOf(input.projectiles, input.zones, input.telegraphs),
         )
         renderer.submit(frame)
         surface?.requestRender()
+    }
+
+    // Gesture detectors read the camera as it is when the finger lands. Keyed
+    // on the camera itself they were torn down and restarted every time it
+    // moved -- every step the player took -- which could drop a tap mid-press.
+    val currentCamera by rememberUpdatedState(camera)
+    val currentSize by rememberUpdatedState(size)
+    val tapBlock by rememberUpdatedState(onTapBlock)
+    val longPressBlock by rememberUpdatedState(onLongPressBlock)
+    val buildDrag by rememberUpdatedState(onBuildDrag)
+    val buildCommit by rememberUpdatedState(onBuildCommit)
+    val labelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
     }
 
     Box(modifier = modifier.onSizeChanged { size = it }) {
@@ -175,27 +200,27 @@ fun Scene3DView(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(input.buildMode, camera) {
+                .pointerInput(input.buildMode, world) {
                     if (!input.buildMode) return@pointerInput
                     var anchor: BlockPos? = null
                     detectDragGestures(
                         onDragStart = { offset ->
-                            anchor = pick(world, camera, offset.x, offset.y, size)
-                            anchor?.let { onBuildDrag(it, it) }
+                            anchor = pick(world, currentCamera, offset.x, offset.y, currentSize)
+                            anchor?.let { buildDrag(it, it) }
                         },
                         onDrag = { change, _ ->
                             change.consume()
                             val start = anchor ?: return@detectDragGestures
-                            pick(world, camera, change.position.x, change.position.y, size)?.let { onBuildDrag(start, it) }
+                            pick(world, currentCamera, change.position.x, change.position.y, currentSize)?.let { buildDrag(start, it) }
                         },
-                        onDragEnd = { onBuildCommit(); anchor = null },
+                        onDragEnd = { buildCommit(); anchor = null },
                         onDragCancel = { anchor = null },
                     )
                 }
-                .pointerInput(camera) {
+                .pointerInput(world) {
                     detectTapGestures(
-                        onTap = { offset -> pick(world, camera, offset.x, offset.y, size)?.let(onTapBlock) },
-                        onLongPress = { offset -> pick(world, camera, offset.x, offset.y, size)?.let(onLongPressBlock) },
+                        onTap = { offset -> pick(world, currentCamera, offset.x, offset.y, currentSize)?.let(tapBlock) },
+                        onLongPress = { offset -> pick(world, currentCamera, offset.x, offset.y, currentSize)?.let(longPressBlock) },
                     )
                 },
         ) {
@@ -214,11 +239,7 @@ fun Scene3DView(
                 }
             }
 
-            val paint = Paint().apply {
-                isAntiAlias = true
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.DEFAULT_BOLD
-            }
+            val paint = labelPaint
             input.feedback.forEach { mark ->
                 val (x, y) = ScenePicker.project(
                     camera, mark.origin.x, mark.origin.y, mark.origin.z + 1.6f + mark.progress * 0.9f,

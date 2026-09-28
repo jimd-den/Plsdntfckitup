@@ -76,6 +76,8 @@ internal class CrowdControl(
     world: World,
     private val director: EnemyDirector,
     config: CrowdConfig = CrowdConfig(),
+    /** How far a body fights from: its swing, or its longest skill for a monster that casts from range. */
+    private val reachOf: (EnemyInstance) -> Float = { it.stats.attackRange.toFloat() },
 ) {
     private val brain = CrowdBrain(config)
     private val fighting = CrowdMemory()
@@ -142,7 +144,7 @@ internal class CrowdControl(
             squadId = enemy.squadId,
             isLeader = enemy.isLeader,
             speed = definition?.moveSpeed ?: DEFAULT_SPEED,
-            reach = enemy.stats.attackRange.toFloat(),
+            reach = reachOf(enemy),
             aggroRange = (definition?.aggroRange ?: DEFAULT_AGGRO).toFloat(),
             healthFraction = enemy.healthFraction,
             fleeBelow = if (definition?.canFlee == true) definition.fleeBelowHealth else 0f,
@@ -154,7 +156,7 @@ internal class CrowdControl(
         val speed = (director.definition(enemy.definitionId)?.moveSpeed ?: DEFAULT_SPEED) * intent.speedFactor * deltaSeconds
         val toTarget = enemy.position.horizontalDistanceTo(target)
         // Never run past what it is running at; closing to its reach is the most it wants.
-        val step = if (intent.stance == CrowdStance.ADVANCE) speed.coerceAtMost((toTarget - enemy.stats.attackRange).coerceAtLeast(0f)) else speed
+        val step = if (intent.stance == CrowdStance.ADVANCE) speed.coerceAtMost((toTarget - reachOf(enemy)).coerceAtLeast(0f)) else speed
         val position = director.stepAlong(enemy.position, intent.direction, step)
         val dx = position.x - enemy.position.x
         val dy = position.y - enemy.position.y

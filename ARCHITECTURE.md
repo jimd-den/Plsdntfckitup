@@ -6,77 +6,73 @@ wrapped in an ARPG shell, where the content is data rather than code.
 ## The module graph
 
 ```
-                       :app  (Activity, navigation, composition root)
-                        │
-        ┌───────────────┼───────────────┬──────────────────┐
-        │               │               │                  │
-  :feature:play   :feature:forge  :feature:studio    :core:data
-        │               │               │                  │
-        │               │       ┌───────┴──────┐           │
-        │               │  :legacy:data   :legacy:domain    │
-        │               │       │                           │
-        └───────┬───────┴───────┴───────────┬───────────────┘
-                │                           │
-        :core:designsystem            :core:domain ◄── :content:igbo
-                │                           ▲
-                └───────────────────────────┤
-                                     :engine:world ──► :engine:settlement, :engine:crowd
-                                            ▲                 (both -> :core:domain only)
-                                     :engine:render ◄── :tools:artpreview
-                                                                │
-                                     :engine:scene ◄────────────┘
-                                   (3D: -> :core:domain only)
+                          :app  (Activity, navigation, composition root)
+                           │
+     ┌──────────────┬──────┴───────┬───────────────┬───────────────┬──────────────┐
+     │              │              │               │               │              │
+ :feature:play  :feature:forge  :feature:hero  :feature:library  :core:data   :agents, :plugins
+     │              │              │               │               │          :engine:model
+     │              │              └───────┬───────┘               │
+     │              │                      │                       │
+     │              ├──► :agents ──► :plugins ──► :importer:flame ──► :importer:tiled
+     │              │                                                   │
+     │              └──► :engine:model ──► :engine:scene                │
+     │                                                          :importer:common
+     ├──► :engine:render ──► :engine:world ──► :engine:worldgen ──► :engine:settlement
+     │                            │
+     ├──► :engine:scene           ├──► :engine:settlement, :engine:crowd
+     │                            │
+     └──► :core:designsystem      ▼
+                            :core:domain  ◄── every module above; :content:igbo
 
-  Importers, beside the engine rather than in it:
+  Tools, never shipped:  :tools:artpreview ──► :engine:render, :engine:scene, :engine:world, :plugins, :content:igbo
 
-    :plugins ──► :importer:flame ──► :importer:tiled ──► :importer:common ──► :core:domain
-          ▲                                        ▲
-        :app (registers them)          :core:data (keeps archives)
-                                                   ▲
-                                   :feature:library (-> :core:domain only)
-
-  The studio crew, beside the plugin format it writes:
-
-    :feature:forge ──► :agents ──► :plugins, :core:domain
+  Frozen, built but reached by nothing:  :feature:studio ──► :legacy:data ──► :legacy:domain
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
-Room, OkHttp or Compose exist.
+Room, OkHttp or Compose exist. Every `:engine:*` module depends on
+`:core:domain` and on no Android module; `:engine:world` builds on the
+world generator, towns and the crowd brain, and `:engine:render` and
+`:engine:scene` read a world without being able to change it.
 
 ## The modules
 
 | Module | Kind | Holds |
 | --- | --- | --- |
 | `:core:domain` | Pure Kotlin | The voxel model, content packs, combat and itemisation, enemies, skills, progression, player state, the AI ports and the generation use cases. |
-| `:engine:world` | Pure Kotlin | Terrain generation, chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, and the play session that joins them. |
+| `:engine:world` | Pure Kotlin | Chunk streaming, mining and building rules, isometric projection, combat, loot rolling, the monster director, dungeon population, and the play session: `WorldSession` and the systems it orchestrates (see [The session is an orchestrator](#the-session-is-an-orchestrator)). |
+| `:engine:worldgen` | Pure Kotlin | The staged world generator: passes over a chunk (climate, shape, surface, carvers, liquids, ores, decoration, trees, structures, towns, spawn markers), their registries, the presets built from them, and the noise they share. |
 | `:engine:settlement` | Pure Kotlin | Towns: site selection on a coarse grid, the layouts (grid, organic, fortress, camp), lot packing, and stamping buildings, roads and walls into any terrain source. |
 | `:engine:crowd` | Pure Kotlin | Crowd AI: flow fields over height steps, a spatial hash, attack tokens, roles, squads and morale. Never sees a block. |
-| `:agents` | Pure Kotlin | The agent studio: crew ordering, prompts, fragment checks, retries, approval gates and the journal. |
 | `:engine:render` | Pure Kotlin | Frame planning: walks the world, asks the art director how each thing looks, and emits drawing primitives. Knows nothing about Compose or Android. |
-| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, and the asset forge that turns image-model output into usable textures. |
-| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:engine:scene` | Pure Kotlin | The 3D world: voxel meshing with ambient occlusion, the action-RPG camera, sprites, lights, ray picking, the shared lighting equation, combat effects, and the asset forge that turns image-model output into usable textures. |
+| `:engine:model` | Pure Kotlin | Generated 3D models: a guarded GLB and OBJ reader, normalising to blocks, decimation for phones, voxelising into pack blocks, and a software rasteriser that bakes eight-direction sprites. |
+| `:agents` | Pure Kotlin | The agent studio and the content forge: crew ordering, prompts, fragment checks, repair, retries, approval gates, the power budget's use and the journal. |
+| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
 | `:importer:common` | Pure Kotlin | Import sources (a zip, a folder, memory) and the path and naming rules every format shares. |
 | `:importer:tiled` | Pure Kotlin | Tiled `.tmx`/`.tmj` maps and tilesets, and turning flat layers into a level with height. |
 | `:importer:flame` | Pure Kotlin | Flame games: their Tiled levels, and characters from Aseprite, TexturePacker and Dart. |
-| `:plugins` | Pure Kotlin | The `.stratum` plugin format and its schema, and the registry of every importer. |
-| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style. Never shipped in the app. |
-| `:core:data` | Android library | Adapters: the OpenAI-compatible model client and provider settings. |
+| `:content:igbo` | Pure Kotlin | The built-in content pack, and the asset kits forged for it (`src/main/resources/forge`). |
+| `:tools:artpreview` | Pure Kotlin | Renders the world headlessly to PNGs, one per style, and imports projects on the JVM. Never shipped in the app. |
+| `:core:data` | Android library | Adapters: the OpenAI-compatible model client, image, video and 3D model providers, provider settings, hero saves and stores. |
 | `:core:designsystem` | Android library | The visual language, driven entirely by the loaded pack's palette. |
-| `:feature:play` | Android library | The play screen, and the Compose backend that puts the renderer's primitives on a canvas. |
-| `:feature:forge` | Android library | AI pack generation and its preview. |
+| `:feature:play` | Android library | The play screen, the build sandbox's panels, and the GL and Compose backends that draw the renderer's output. |
+| `:feature:forge` | Android library | The AI forges: textures, sprites, poses, models, the agent studio and the content forge. |
+| `:feature:hero` | Android library | The class builder and the character screens. |
 | `:feature:library` | Android library | The Plugins screen: install, order, switch, remove and share plugins. |
-| `:legacy:domain` | Pure Kotlin | The original engine's rules, pending port. |
-| `:legacy:data` | Android library | The original engine's Room and network layer. |
-| `:feature:studio` | Android library | The original creator studio screens. |
 | `:app` | Android app | The Activity, navigation between destinations, and the wiring that connects ports to adapters. |
+| `:legacy:domain` | Pure Kotlin | **Frozen.** The original engine's rules. Still compiles; nothing depends on it but the frozen modules below. |
+| `:legacy:data` | Android library | **Frozen.** The original engine's Room and network layer. |
+| `:feature:studio` | Android library | **Frozen.** The original creator studio. Disconnected from `:app`: no tile, no destination, no Gemini wiring. Whether to delete the three frozen modules is an open decision; until then they stay in `settings.gradle.kts` so they keep compiling. |
 
 ## How the boundary is enforced
 
-Not by review. `:core:domain`, `:engine:world`, `:engine:render`, `:engine:scene`,
-`:content:igbo`, the three `:importer:*` modules, `:plugins`, `:tools:artpreview` and
-`:legacy:domain` apply only the Kotlin
-JVM plugin, so the Android SDK is not on
-their compile classpath and `import android.*` fails to compile.
+Not by review. `:core:domain`, every `:engine:*` module, `:content:igbo`,
+the three `:importer:*` modules, `:plugins`, `:agents`, `:tools:artpreview`
+and the frozen `:legacy:domain` apply only the Kotlin JVM plugin, so the
+Android SDK is not on their compile classpath and `import android.*` fails
+to compile.
 
 `./gradlew architectureCheck` closes the loophole around that: it fails the
 build if one of those modules picks up an Android plugin or an Android artifact.
@@ -120,15 +116,56 @@ with no network and no Android.
 
 ## Swapping world generation
 
-Terrain has two seams, because there are two different things people want to
-change.
+Terrain has three seams, because there are three different things people
+want to change.
 
 **Describe a different landscape.** A pack ships a `TerrainRecipe`: elevation
-noise layers, a terrace step, material strata. No code, so the AI pack forge or
-a JSON file can author one. `terraceStep` is the important knob — smooth noise
-produces a landscape of one-block steps that reads as texture and cannot be
-walked or built on, while snapping heights to plateaus gives ledges you can see
-and ground you can use.
+noise layers, a terrace step, material strata, and for the staged generators
+its climate, carvers, ores, trees and liquids. No code, so the AI pack forge
+or a JSON file can author one. `terraceStep` is the important knob — smooth
+noise produces a landscape of one-block steps that reads as texture and
+cannot be walked or built on, while snapping heights to plateaus gives
+ledges you can see and ground you can use.
+
+**Rearrange the stages.** The built-in generators other than
+`stratum:layered` and `stratum:tilemap` are pipelines of passes, in
+`:engine:worldgen`, in the order Minecraft stages a chunk: climate and
+biomes, base shape, surface and strata, carvers, liquids, ores, decoration,
+trees, structures, towns, spawn markers. The presets — `stratum:overworld`,
+`stratum:islands`, `stratum:caverns` (also `stratum:underworld`) and
+`stratum:flat` — are only lists of pass ids. A recipe that lists passes
+replaces its preset's list, so a pack reorders, drops, adds or configures a
+stage in data, and a pass registered in code is named like a built-in one:
+
+```kotlin
+StratumWorldgen.passes.register("mypack:lava_lakes") { setup -> MyLavaLakes(setup.options) }
+```
+
+Passes share a `ChunkContext` of per-column arrays (biome, blended height
+parameters, ground height) rather than recomputing or allocating per block,
+and publish services — the biome map, the height field, paths and
+clearings, planned structures — that later passes read. Every service
+answers for any column in the world without generating a chunk, which is
+the rule that keeps the world seam-free: a tunnel, a canopy or a dungeon
+that crosses a border is derived from the seed and the region or cell it
+starts in, never from which chunks were made first, and each chunk draws
+its own part. Seam tests generate the same area in several orders, and
+alone, and compare every block.
+
+Biomes are chosen by climate — two smooth fields, heat and wet, and the
+biome nearest in climate wins — and heights blend between biomes near each
+other in climate, so a border is a slope as wide as the climate takes to
+cross, not a wall. Structures are pack data too: room-and-corridor dungeons
+entered by a stair, and small jigsaw pieces joined at connectors, placed by
+biome, depth, spacing and rarity. What they mark — monster spawns, the boss
+room, loot, the entrance — comes out through `MarkedWorld`, by chunk, and
+the session peoples it as the player arrives (see
+[The session is an orchestrator](#the-session-is-an-orchestrator)).
+
+Chunks must stay cheap on a phone, so cave noise is sampled on a coarse
+lattice and interpolated, as Minecraft does, and a test counts noise
+samples per chunk against a budget. Work, not time: a count cannot be
+flaky.
 
 **Replace the algorithm entirely.** Register a factory and name it in a recipe:
 
@@ -144,9 +181,13 @@ concept of biomes — a dungeon builder, a flat sandbox — does not have to inv
 them. `WorldSession` also takes a generator directly, which is how tests run on
 terrain they control.
 
-An unknown generator id is an error rather than a silent fallback. A pack asking
-for something this build does not have should say so, not quietly hand the
-player a different world.
+Towns are laid over whatever the generator built, by the settlement layer,
+unless the generator builds its own — a pipeline with the
+`stratum:settlements` pass — in which case the session leaves them alone.
+
+An unknown generator, pass or carver id is an error rather than a silent
+fallback. A pack asking for something this build does not have should say
+so, not quietly hand the player a different world.
 
 ## Importing Flame games and Tiled maps
 
@@ -272,15 +313,116 @@ where the GPU's limits can be read, and reports them back.
 
 ## The session is an orchestrator
 
-`WorldSession` owns the player and decides the order things happen in a
-tick. It does not hold the rules. Each concern keeps its own state and rules
-in its own part: `PlayerMotion` (movement, the roll), `MiningProgress`,
-`BuildSession` (tool, ghost preview, commit), `GroundItems` and `LootDrops`,
-`PlayerGear` (equip and sockets, as pure functions over `PlayerState`),
-`ActorAnimator`, and `SessionCues` (every floating number, named for what
-happened). The player is passed through them and handed back, because it is
-the one thing they all touch. Adding a system means adding a part and one
-line to the tick, not another two hundred lines to the session.
+`WorldSession` decides the order things happen in a tick, starts and
+revives the run, and takes snapshots. It does not hold the rules. Those live
+in systems that share the player and the bodies through one `SessionState`
+(the player is the one thing they all touch, and two copies of it would be
+two players), built and joined once by `SessionParts`, the session's own
+composition root:
+
+| System | Owns |
+| --- | --- |
+| `BuildingSystem` | Digging, placing, the drag-to-build tools, raising blueprints, room scans. |
+| `GearSystem` | Equip and unequip, the bag, sockets, currency crafting, support links, pickups. |
+| `SurvivalFacade` | Needs, eating, drinking, recipes. With survival off it is one flag check. |
+| `ProgressionSystem` | Experience and levels, the passive tree, world tiers, waystones, what a kill pays. |
+| `PoliticsSystem` | Factions and standing, towns and garrisons, outposts, followers and raids. Without outposts the realm clock does not run. |
+| `EncounterSystem` | The director, placed and marker spawns, the crowd, and the spoils of the dead. |
+| `FightSystem` | The player's swings, casts and flasks, and the monsters' turn, each resolved by `CombatSystem` on one `Battlefield`. |
+
+Each system's verbs are a small public interface (`SessionBuilding`,
+`SessionGear`, `SessionSurvival`, `SessionProgression`, `SessionPolitics`,
+`SessionFight`) that `WorldSession` implements by delegation, so feature code
+calls one object and the session file stays a page of orchestration. Below
+the systems are the parts they were already made of: `PlayerMotion`,
+`MiningProgress`, `BuildSession`, `GroundItems`, `LootDrops`, `PlayerGear`,
+`Workbench`, `ActorAnimator` and `SessionCues`. Adding a system means a part,
+a line in `SessionParts` and, if it runs every frame, a line in the tick.
+
+**One set of ceilings.** How much life and resource the player can have is
+answered in one place, `PlayerProfile`, counting gear, inserts, passives,
+traits, needs and boons exactly as a hit counts them. Regeneration, flasks,
+a level's refill, revival, the snapshot and the HUD all ask it, and a change
+of gear or of the tree holds the bars under the new ceilings. The player's
+own `maxHealthWithGear` cannot see traits or boons and is not used for play.
+
+**Followers fight like everyone else.** Followers, summons and defenders
+are bodies of the player's faction and act through `CombatSystem` on the
+player's side, with the skills their definitions give them. Monsters' skills
+go for the nearest of the player's side; a monster swings at a follower when
+the player is out of reach. A fallen follower is nobody's kill.
+
+**Dungeons are peopled.** `MarkerPopulation` learns a generated world's
+markers as chunks stream in and wakes them as the player comes near, in
+height too, so a crypt fills as the player descends. `MarkerEncounters`
+decides who stands at each: the marker's own monster, else its structure's
+list or boss, else the region's. A boss marker's monster fights at boss rank
+with its phases; placed monsters take their definition's rank rather than
+the director's dice; chests roll through the item generator with a rarity
+floor. Each marker is peopled once a session, with dice from the seed and
+the marker, so a cleared room stays cleared when its chunk reloads.
+
+## Saving a world
+
+A hero is kept on its own (`HeroSave`, one file per class under `heroes/`)
+so a character carries its levels, tree and gear into a fresh seed. A world
+is kept as well: `WorldSave` in `core/domain/.../session` holds what a hero
+cannot -- the ground the player changed, where they stand with how much
+life, resource and hunger, the blocks in their pockets, the outposts and
+followers, the towns freed, the markers already peopled, the clock, the
+seed and rules, and this world's own copy of the hero. A new world starts
+from the roster's hero; a saved world resumes from its own copy.
+
+**Only what changed is stored.** Terrain is a function of the seed, so the
+save keeps only the chunks the player edited (`StreamingWorld.dirtyChunks`,
+resident or not) and regenerates everything else byte for byte. Cells are
+stored against the block ids at save time, not the registry's indices, and
+remapped on load (`SavedChunk.remapTable`): a pack that adds a block between
+two sessions does not turn a wall into something else, and a block whose
+pack is gone comes back as air rather than failing the load.
+
+**One road into a world.** `WorldSession.worldSave(identity, savedAt)`
+copies all of that on the ticking thread -- block cells included -- so the
+result can be written anywhere without tearing. `WorldSession.restore`
+builds the session exactly as a new one is built, from the saved seed, rules,
+difficulty and hero, then lays the save over it: the saved chunks go to
+`StreamingWorld.restoreEdited` before the first chunk streams, markers are
+marked consumed before any is learnt, and the player, clock and realm are
+put back. Followers are kept by unit id and raised beside the player; a
+garrison that turned out for a raid goes back in its outpost, since the raid
+itself is not kept. Loot on the ground, statuses and wandering monsters are
+not kept: the director refills the wilds.
+
+**On disk** (`FileWorldSaveStore` in `core/data/.../save`) each world is a
+folder under `files/worlds/`: `summary.json` for the menu, `world.json` for
+the state, and `chunks-N.bin`, the changed chunks deflated behind a magic
+number and a version. Every file is written beside itself and renamed into
+place, and the chunk file takes a new name each save and is written before
+the state that points at it, so a phone that dies mid-save keeps the last
+good world whole. `list()` reads only the summaries. A world that will not
+read -- bad JSON, a newer format, a damaged chunk file -- is logged and
+skipped, never fatal. The JSON is its own schema, versioned, with the hero
+written by the hero store's schema so the two never disagree about an item.
+
+**When play saves.** `PlayViewModel` takes a snapshot on the game loop and
+`WorldSaver` writes it in a scope that outlives the screen, each write
+waiting for the one before so an older world never lands over a newer one:
+every minute of play and on a level, when the build changes, on death and
+on revive, when the app goes to the background (`ON_STOP`), when the player
+leaves for a new world, and when the screen closes. A sandbox world saves to
+its own slot and still never writes its conjured hero over the real one. A
+"Saved" cue shows for a moment when a save lands. Without a repository the
+screen saves only the hero, as it did before worlds were kept.
+
+**Wiring it.** The app makes one `WorldLibrary.inFiles(context.filesDir)`
+and lists, loads, renames and deletes through it. "Continue" is
+`library.latest()`; resuming passes the save to
+`PlayViewModel.factory(..., resume = save, worlds = library.repository)`,
+whose seed, rules, hero class and hero win over the ones passed in. A new
+world is named with `library.create(name, presetName, heroName, packIds)`
+and started with `factory(..., config = ..., worlds = library.repository,
+slot = identity)`; the screen writes its first save at once, so the world is
+in the list before the player has done anything.
 
 ## Progression: one modifier formula for everything
 
@@ -322,6 +464,39 @@ Currency, supports and waystones go straight into the pouch when a monster
 dies. Gear still lands on the ground, because choosing gear is a decision
 and picking up a pebble in a crowd, with a thumb, is not.
 
+## A sandbox for breaking builds
+
+The engine allows broken builds; the sandbox is where a player makes one
+and sees what it does. It is a world rule (`WorldRules.sandbox`), so a pack
+can suggest it and the home screen offers it as a preset, and its tools
+(`SandboxTools`) exist only in a world that has it. They work on the
+session's player through the same seams persistence does and roll from
+their own seeded dice, so conjuring an item never shifts the world's drops.
+
+- **The damage meter** (`core.domain.sandbox.DamageMeter`) counts what
+  combat reports -- `CombatSystem.onDealt` names each hit and each tick of
+  damage over time with its source: the swing, a skill, a triggered cast,
+  an ailment, a minion. It keeps its own clock, advanced by the caller, so a
+  replayed fight reads the same, and running totals, so a build landing
+  hundreds of hits a second costs it only its rolling window.
+- **The breakdown** (`BuildBreakdown`, fed by `BuildInspector`) explains a
+  number by computing it: every modifier by source, in the order and
+  stages combat resolves them -- the build sheet, then survival's, then a
+  boon for the fought-with stats; the one combined sheet for evasion, block
+  and resistance caps; supports for a skill's power -- with the sheet's own
+  filter, sums and bounds. A test holds each explained number to the one
+  combat uses, so the explanation cannot drift from the fight.
+- **Caps** are a rule of the world, read by every combat system when it is
+  made, so lifting them rebuilds the world on the same seed around the same
+  hero rather than threading a mutable rule through the fight.
+- **Builds are shared** (`BuildCode`) as recipes against the loaded packs,
+  and a shared build arrives in a new world, because a class is chosen when
+  a world is made. A sandbox never writes its hero back to the save.
+
+Dummies are the sandbox's own target, not content: they have no attack and
+no skills, and the sandbox stands them back where they were put after each
+tick, so knockback and the crowd cannot turn a measurement into a chase.
+
 ## A handheld's interface, not a toolbar's
 
 The play screen is the world, edge to edge, in portrait or landscape; the
@@ -333,17 +508,43 @@ sweep for a cooldown.
 
 - **Left thumb:** the stick, with Build (showing the block in hand) above it.
 - **Right thumb:** one big button for what the current mode is for -- Strike,
-  or Done while building -- and the rest fanned around it on rings sized so no
-  two buttons or labels touch (`clusterOffsets`).
-- **Top:** vitals in the corner, and the dock -- Bag, Anvil, Hero, Table,
-  Style, View -- under it in portrait or beside it in landscape.
+  or Done while building -- and the skills, roll and flasks fanned around it on
+  rings sized so no two buttons or labels touch (`clusterOffsets`).
+- **Top:** vitals and the place name in the corner, and one Menu button in the
+  other. Bag, Anvil, Hero, Table, Camp, Realm, Style, View, zoom and Save &
+  quit live in the pause sheet behind it (`PauseMenu`); the Menu button wears
+  the badge of whatever inside is calling, so "points to spend" is not hidden
+  by being tidied away. Pinch zooms.
+- **Hints** teach in play: each appears when it first matters, fades, and is
+  never shown again (`PlayHints`, persisted by the app). News from the game
+  fades after a moment. There is no permanent caption over the world.
+- **Back** closes the open panel, then opens the menu; it never drops the
+  player out of a world.
 - **Build mode** swaps the fan for a tray of shapes and blocks.
 
-Play view models are scoped to the play screen (`ScopedViewModels`), not the
-activity, so leaving play saves the hero and frees the world, and the next
-visit starts a fresh one. Home is laid out as a title menu: the hero and one
-button to play, a seven-line how-to-play whose glyphs match the HUD, and every
-creation tool as a tile that says what it does and what state it is in.
+Play view models are scoped to the world being played (`ScopedViewModels`,
+keyed on the world id), not the activity, so leaving play takes the exit save
+and frees the world, and the next visit starts a fresh one.
+
+## The app shell
+
+`StratumApp` is a dispatcher over a sealed `Route` hierarchy and a small
+in-house `BackStack` that the system back gesture pops. In-house rather than
+Navigation-Compose because the routes carry Kotlin values (a world launch),
+there are no deep links, and play sessions are already scoped by
+`ScopedViewModels`. State that outlives a screen lives in `AppViewModel`:
+`AppGraph` holds the adapters, `GameState` the assembled content, the chosen
+hero and look, the world style and the forged models, and `SavedWorlds` the
+world list over the world-save `WorldLibrary`. Each tool's wiring sits in its
+own route file under `app/.../tools`.
+
+The title screen has three doors -- Play, Create, Import & Share -- and a gear
+for settings; "Continue" is the primary action whenever a world is saved.
+Behind Play is the saved-world list and a three-step new world (hero, world,
+go); behind Create, the studio's tools as five cards with a status each;
+behind Import & Share, installing, importing, sharing and the plugin manager.
+Every screen wears `StratumTopBar`, whose slot for the creation-jobs tray is
+provided once by the shell through `LocalJobsTray`.
 
 The **texture forge** is its own screen: describe a look, choose regions,
 paint, and watch a progress bar and a gallery fill as textures arrive.
@@ -486,6 +687,102 @@ renders as markdown. The finished pack installs as an ordinary plugin
 that names its dependency, so it can be shared, disabled or deleted like
 anything else.
 
+There is one way AI writes content, and this is it. The old world
+generator is now a crew preset (`CrewPresets.world`, the standard crew)
+rather than a second generator with its own schema, and its result is an
+installed plugin rather than state that died with the process.
+
+### The content forge
+
+`agents/forge` puts short, focused requests on the same pipeline: a lore
+entry or set, a weapon or armour base (or a ladder of one family), tiered
+affixes, a unique, an item set. Each `ForgeOrder` becomes a one-role crew
+(`ForgeRoles`) -- the same composer, checks, retries and journal -- with
+two additions the studio makes room for:
+
+- **The brief carries the vocabulary.** `StudioBrief.guidance` and
+  `.vocabulary` list the exact stats, modifier kinds, slots, flags, damage
+  types, tags, bases and lore the reply may use, read from the assembled
+  content by `ForgeVocabulary`. A model that is shown every real word has
+  less room to invent a plausible one.
+- **A repair step before the checks.** `FragmentRepair` is a hook on
+  `StudioPipeline`; the crew uses none. `ForgeRepair` reads the reply
+  leniently into domain objects (fences, bare lists, "20%", "10-25",
+  "life" for health, "fire_resistance", missing namespaces, a base named
+  by its name), clamps numbers to sanity limits, matches or drops dangling
+  references, ties a unique or set to a lore entry about it, and writes the
+  result back as plugin JSON. Every change is a note on the attempt;
+  whatever cannot be saved is a rejection fed back to the model like any
+  other problem, and after the last try the person gets that reason.
+
+**Power is a budget, not a cap.** `PowerBudget` (in `core/domain/item`)
+measures every modifier in affix points against item level, weighs build
+flags, and labels affixes, uniques, bases and sets balanced, strong or
+broken. A balanced request is scaled into the budget (helpful numbers
+only; penalties stay, and the strongest flags go first when scaling alone
+cannot), a strong one only past strong, and a broken one is let through,
+labelled. The sandbox welcomes broken builds; the label makes sure one is
+chosen rather than stumbled on. It is calibrated so the built-in pack's own
+gear never reads as broken, and a test keeps it that way.
+
+What is kept goes into **one** plugin, `user.creations` (`Creations`),
+that grows -- a second "ember edge" is renamed, references following --
+and is checked to assemble before it is installed. Sharing exports it with
+the player's classes, moved to a namespace of its own so a friend's copy
+sits beside theirs. `ForgeCards` renders results with the item model's
+own tooltip wording, so the forge shows what the satchel will.
+
+## Creation jobs
+
+Creating a hero, a world or a line of lore has to feel instant and never
+be a spinner. Two rules hold that up: every creator produces something
+usable locally first and lets the AI enrich it afterwards, and everything
+the AI does is a **job** a player can watch, leave and come back to.
+
+The model is in `core/domain/.../creation/`. A `CreationJob` is a titled
+list of `JobStep`s -- "Writing the request", "Waiting for <model>" with the
+seconds counting, "Checking the reply", "Repairing 2 fields" -- each with a
+status and one live detail line, plus elapsed time and, once it settles, a
+one-line summary of what came back or why it did not. `JobCenter` is what a
+screen watches (a `StateFlow` of jobs and `cancel`); `JobLauncher` adds
+`launch`, and `InMemoryJobCenter` is the implementation: each job a
+coroutine, cancelled by coroutine cancellation, finished jobs kept for half
+an hour and capped at twenty. Work reports through a `JobReporter` whose
+`begin` finishes the previous step, so a job reads as straight-line code.
+It takes its clock and scope, and is tested on virtual time.
+
+No port changed shape. The provider adapters already report stages to a
+`GenerationObserver`; `JobGenerationObserver` is one more observer that
+turns them into steps, and a retry into steps of its own. The pipeline
+knows what the provider does not, so `:agents` adds `ForgeJobReport` (the
+repair and the check after each reply) and `CrewJobReport` (one step per
+role, its attempt, its wait for approval, what it wrote). `StudioPipeline`
+and `ContentForge` take the observer and hand it to every call.
+
+Instant first, AI second:
+
+- **Lore and gear**: a request appears at once as a card named from its
+  prompt (`ForgePlaceholder`) with the job's steps under it, and the reply
+  replaces it. Several run side by side; the button is never swapped for Stop.
+- **Worlds**: "Play now" in the agent studio plays an `InstantWorld` at once:
+  the loaded packs, the chosen rules, and the look `StyleLexicon` reads from
+  the same sentence. The crew keeps writing as a job. When it finishes,
+  `PackInbox` installs the pack straight away if nothing is being played, so
+  the world is built with it, or holds it and installs it when play ends.
+  A pack is never swapped in under a running session.
+- **Heroes**: the class builder stays local and instant; "Make a look" queues
+  the sprite sheet as a job and picks it for the hero when it lands.
+- **Art**: the texture, sprite and 3D model forges run on the job centre and
+  show the timeline; a pose run keeps its own lifetime (`PoseRun`) and is
+  mirrored as a job with its frames counted.
+
+`:app` holds one process-wide centre (`CreationJobs`), so jobs survive the
+activity being recreated, and hands it to every creator. The design system
+draws them: `JobProgress` (the timeline, elapsed, stop, the outcome in plain
+words) and `JobsTray` (a pill saying how many are running that opens into a
+sheet of every job). The shell places the tray through its `jobsTray` slot,
+as `StratumJobsTray()`.
+
 ## Why the renderer draws into a sink
 
 `WorldFrameRenderer` walks a read-only `World` and emits primitives to a
@@ -626,6 +923,86 @@ An actor is drawn from the best art it has:
 Animated sheets are drawn over the scene rather than inside it, so a character
 standing behind a wall shows through it. That is a known limitation, chosen
 because it reuses the proven sprite code rather than duplicating it on the GPU.
+
+## 3D models from AI endpoints
+
+Image models paint the world; mesh models can now build parts of it. The
+shape is the same as everything else the AI does: a port in the domain, a
+thin adapter in `:core:data`, and the real work in a pure module.
+
+**The port.** `ModelGenerationPort` is shaped like the video port, because
+every mesh provider sells models as jobs: submit, wait a minute or five,
+download. One suspend call hides that; `ModelGenerationObserver` extends the
+shared `GenerationObserver` with job progress (`ModelJobProgress`: queued,
+running, texturing, downloading, and a fraction when the provider gives
+one). The port reports its `ModelCapabilities`, so `GenerateModelUseCase` —
+which owns the prompt, because what a game needs from a mesh is a fact
+about the game — can draw a reference picture with the image model first
+when the configured mesh model only takes pictures. What comes back is
+checked by its bytes (`ModelFormat.sniff`): a 200 carrying an HTML error
+page is refused at the call that caused it.
+
+**The adapters.** `HttpModelGeneration` moves bytes for every provider;
+each provider's REST dialect is a small pure `ModelJobProtocol` that builds
+calls and reads replies, tested against recorded JSON with no network:
+Meshy (text-to-3D as a preview then a chained refine pass; image-to-3D with
+the picture inline), Tripo3D (pictures uploaded first; a nonzero `code` is
+a refusal even on HTTP 200), fal.ai's queue (submit, poll the status URL,
+fetch the response URL, find the GLB in whatever the model returned) and
+Replicate (`owner/name` or `owner/name:version`). The finished mesh is
+downloaded without the API key — it is a signed link on a storage host the
+player never configured — and capped in size.
+
+**Configuring a provider.** Settings has a *3D model provider* section: pick
+Meshy, Tripo3D, fal.ai or Replicate, paste that account's key, and
+optionally change the model id and endpoint. Each provider keeps its own
+key, endpoint and model (`ProviderSettingsStore.loadModelProvider`), so
+trying one does not lose another. Defaults: Meshy `latest`, Tripo
+`v2.5-20250123`, fal `fal-ai/trellis` (picture-only: the image model draws
+the reference), Replicate `firtoz/trellis`.
+
+**The pipeline.** `:engine:model` turns bytes into things the game uses,
+deterministically and with every length in the file checked before it is
+read (chunk sizes, buffer views, accessors, indices, node cycles) and with
+limits on file size, vertices, triangles and texture size, because the file
+came from a network and a phone has little memory. Draco and external files
+are refused by name. Then:
+
+- *normalise*: glTF is Y-up, the world Z-up; the model is turned upright,
+  centred on its cell, grounded at z = 0 and scaled to a height in blocks,
+  held to a footprint so a model that came back lying flat does not become
+  a prop thirty blocks wide;
+- *prop*: colours are sampled from the full mesh (material × texture ×
+  vertex colour, glTF's linear factors converted to display colour), then
+  vertex clustering brings it under about two thousand triangles. The result
+  is a `PropModel` of flat-coloured triangles that `SceneBuilder` emits into
+  one opaque batch per terrain revision — lit, shadowed and fogged by the
+  one lighting equation, kept on the GPU like a chunk, and drawn by both
+  backends through `SceneFrame.opaque` with no new shader;
+- *voxelise*: triangles are sampled densely into a grid, each cell taking
+  the average surface colour, and the inside is filled by flooding the
+  outside; `BlockPalette` maps each cell to the nearest plain building block
+  of the loaded packs (never lights, liquids, props or bedrock), giving a
+  `VoxelBlueprint` that `WorldSession.raise` builds in front of the player,
+  only into air;
+- *bake*: a small software rasteriser with a depth buffer draws the prop
+  from the game's camera in eight directions at one scale, lit like the
+  house style and outlined like the forged sprites. That is the fallback
+  that lets a model feed every path that takes sprites.
+
+**In the game.** Packs name models in `models` (see
+[`docs/PLUGINS.md`](docs/PLUGINS.md)); the model forge (a home tile) makes
+them on the device, keeps them in `ModelAssetStore`, and binds them — *use
+as prop* stands the model in for a prop block wherever that block is,
+*voxelise into blocks* makes a blueprint the build tray offers to raise. A
+forged binding becomes an ordinary `ModelDefinition` beside the packs' own,
+so there is one road from a definition to the renderer. Models bound to a
+monster are baked to `actor:<id>` and drawn by the existing sprite path.
+
+What is not done: plugin archives do not yet carry model files (only
+`asset:` sources resolve), structure and weapon bindings are validated but
+not drawn, raising a blueprint costs nothing, and nothing is rigged or
+animated — these are props, statues and still creatures.
 
 ## A world you cannot get stuck in
 
@@ -887,18 +1264,84 @@ resumable at frame thirty-one and lets one bad frame be redrawn on its own.
 `PoseLibrary` writes every pose to disk as it arrives, at full size, so a set can
 be re-packed at another frame size later without paying for anything twice.
 
-`PoseSheetComposer` does the part that needs pixels: chroma key, measure, scale,
-pack. The measuring pass is the point. Each pose arrives on its own canvas with
+`PoseSheetLayout` decides where every frame goes and `PoseSheetComposer` only
+moves the pixels there: decode, chroma key, measure, draw. The measuring is the
+point, and it is arithmetic over rectangles, so it lives in the domain and is
+tested there. Each pose arrives on its own canvas with
 the figure at whatever size and height the model felt like, and dropping those
 into cells as they arrive gives a character that pulses in size and bobs off the
 floor — which reads as broken in a way the individual frames never hint at. So
-the whole set is measured first, scaled by one factor, and hung from one
-baseline.
+the whole set is measured first (`FrameAnalyser`, once per frame), each row is
+pulled toward the heights its authored poses say it should have
+(`SpriteDrift`, against whichever guides the art was actually drawn under),
+scaled by one factor, and every frame is hung from its ground contact at the
+centre of its cell.
+
+Colour drifts the same way size does: one frame a little warmer, one a little
+darker, and played back the character flickers. `PaletteMatch` summarises each
+frame's colours and nudges it toward the consensus of the set with a clamped
+gain and offset per channel — enough to remove a tint, not enough to erase a
+real change in what the pose shows. Identity still comes from the star of edits
+off one reference; chaining each frame off the previous one would compound the
+drift this is correcting.
 
 The background is asked for as flat chroma green rather than as transparency.
 Models answer a request for alpha by *drawing* the editor checkerboard at least
 as often as they return a real alpha channel, and a drawn checkerboard is
-unrecoverable; a flat colour is unambiguous to produce and trivial to key out.
+unrecoverable; a flat colour is unambiguous to produce and trivial to key out. Trivial but
+not free: an antialiased outline blends into the green, and cleared by range
+alone it leaves a thin green halo round every sprite. `SpriteKeying` despills
+the rim — pulls green down to the other channels and fades pixels that were
+mostly backdrop — within two pixels of what it cleared, so green the character
+actually wears is untouched.
+
+## Why a frame is checked before it is kept
+
+The run used to accept whatever came back and count it as drawn. A frame
+returned blank, cropped at the head, drawn twice side by side, shrunk to a
+distant figure, or handed back as the reference T-pose untouched was then
+indistinguishable from a good one until the sheet was packed and the character
+vanished for a frame. Every one of those is measurable from pixels, so
+`FrameQuality` measures them as each frame arrives, and `PoseFrameRun` asks
+again for just that frame — the cheapest moment there will ever be to fix it.
+Two redraws, then the last attempt is kept and flagged by name: a flawed frame
+in its cell is better than a hole, and the person is told which to redraw. The
+checks are conservative on purpose; a false alarm costs one generation, while a
+crouch or a body lying flat must never be rejected for being unusual.
+
+The loop itself — retry a rate limit, skip a broken frame, abandon on a bad
+key, redraw a bad picture — is `PoseFrameRun` in the domain, with every
+collaborator (drawing, judging, saving, waiting) passed in as a function. It
+lived in the view model, where none of it could be exercised; now a test plays
+a forty-frame run in microseconds.
+
+## Why a run survives the process
+
+Poses were always written the moment they arrived, and written atomically now,
+because a truncated file still exists and existence is what marks a pose done.
+What was lost when the system reclaimed the process was everything that said
+what the poses were *for*: twelve walk frames rather than six, the away angle,
+the cell size, which frames had been thrown away. `PoseRunRecord` keeps that
+beside the poses, marked active while a run is in flight. A record still active
+when the forge opens is a run that was killed, and the forge offers to resume
+it exactly as it was set up. Offered, never started: resuming spends money.
+
+Pose frames go through `CachingImageModel`, which keeps each answer against a
+fingerprint of the whole request, references included. A frame that arrived
+just before the process died, or whose save failed, is then free the second
+time. `ImageRequest.take` is part of the fingerprint, and a deliberate redraw
+asks with the next take — otherwise the cache would hand back the very picture
+the person had just rejected.
+
+## Sharing a character
+
+The `.stratum` format always had `art/sheets/` and the importer always read it,
+but nothing on the device wrote one, so a generated character could only leave
+as a loose PNG. `SpritePluginExport` bundles the sprite library into a pack and
+runs the importer's own checks before sending: an image that is not a PNG (some
+providers answer in JPEG whatever was asked) is re-encoded, one smaller than
+its grid is left out and named. The sprite forge's share action writes it with
+`PluginArchive` and the ordinary share sheet.
 
 ## Why there is a skeleton
 
@@ -914,6 +1357,10 @@ rather than coordinates, because bone lengths are then fixed: no authored pose
 can stretch a forearm, and a guide with wrong proportions teaches the model
 wrong proportions. The prose instruction is still sent, generated from the same
 skeleton, so the two can never disagree about what frame three of a walk is.
+That only holds if both sample the cycle at the same length, which is why a
+`PoseStep` carries its animation's `frameCount`: the guide used to be drawn at
+the default six, so a twelve-frame walk followed its guides for six frames and
+then held the last pose for the other six.
 
 The second reason is the one that pays for it. A weapon is held in a hand and
 points along a forearm, and a skeleton knows exactly where both are.

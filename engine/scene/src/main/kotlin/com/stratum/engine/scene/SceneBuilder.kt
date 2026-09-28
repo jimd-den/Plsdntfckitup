@@ -14,6 +14,7 @@ import com.stratum.core.domain.art.Tint
 import com.stratum.core.domain.art.WorldArtDirector
 import com.stratum.core.domain.art.WorldTime
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.World
 import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.scene.quality.RenderSettings
@@ -67,9 +68,33 @@ class SceneFrame(
     val cutout: MeshBatch,
     val decals: MeshBatch,
     val glows: MeshBatch,
+    /**
+     * Props drawn as 3D models, one batch for the view. The same object from
+     * frame to frame until the terrain changes, like [terrain], so a backend
+     * can keep it on the GPU.
+     */
+    val models: List<MeshBatch> = emptyList(),
+    /**
+     * Every terrain batch still in the meshed square, drawn or not. [terrain]
+     * holds only the chunks the camera can see; this is what a backend keeps
+     * on the GPU, so a chunk that slides out of view and back is not uploaded
+     * again.
+     */
+    val residentTerrain: List<MeshBatch> = terrain,
 ) {
-    /** Everything opaque: the terrain, then the actors. */
-    val opaque: List<MeshBatch> get() = terrain + listOfNotNull(actors)
+    /** Everything opaque: the terrain, the model props, then the actors. */
+    val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
+
+    /**
+     * Returns this frame's per-frame batches to be reused. Call once, when
+     * nothing will read this frame again; terrain and models are kept.
+     */
+    fun release() {
+        actors?.release()
+        cutout.release()
+        decals.release()
+        glows.release()
+    }
 
     companion object {
         const val MAX_LIGHTS = 8
@@ -92,6 +117,12 @@ class SceneBuilder(
         ?: error("${director::class.simpleName} cannot describe a 3D scene"),
     /** How much this device can afford: view distance, lights, litter and motes. */
     private val settings: RenderSettings = RenderSettings.of(QualityTier.HIGH),
+    /**
+     * The 3D model a prop block is drawn as, by block id, or null for the
+     * painted sprite. Models go through the opaque path, so they are lit,
+     * shadowed and fogged exactly like the terrain.
+     */
+    private val propModels: (String) -> PropModel? = { null },
 ) {
     private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
 
@@ -101,15 +132,35 @@ class SceneBuilder(
         val props: List<PropInstance>,
         val lights: List<PointLight>,
         val details: List<GroundDetail>,
+        val models: MeshBatch? = null,
+        /** Each mesh's box, six floats apiece (min x, y, z, max x, y, z), for culling against the view. */
+        val bounds: FloatArray = FloatArray(0),
     )
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
     private var terrainGeneration = Long.MIN_VALUE
 
+    /** Each mesh's box, measured once per mesh rather than whenever any chunk changes. */
+    private var meshBounds = java.util.IdentityHashMap<MeshBatch, FloatArray>()
+
+    /**
+     * Each prop's style, asked of the director once per eye level; see [prop].
+     * Keyed by the prop itself, which a chunk keeps until it is remeshed, so
+     * the styles outlive the terrain lists being gathered again.
+     */
+    private var propStyles = java.util.IdentityHashMap<PropInstance, PropStyle?>()
+    private var styledAtEye = Int.MIN_VALUE
+
+    /** A prop block's paintings, by block id; the library does not change under a builder. */
+    private val paintingsByBlock = HashMap<String, IntArray>()
+
     private val cutout = MeshBuilder(MaterialKind.CUTOUT)
     private val decals = MeshBuilder(MaterialKind.DECAL)
     private val glows = MeshBuilder(MaterialKind.GLOW)
     private val actorMesh = MeshBuilder(MaterialKind.OPAQUE)
+
+    /** Arrays for the per-frame batches; the backend returns them through [SceneFrame.release]. */
+    private val recycler = MeshRecycler()
 
     // This frame's sun on the ground: which way shadows fall, how long they
     // are per unit of height, and how dark. Set at the start of build().
@@ -141,14 +192,21 @@ class SceneBuilder(
         highlight: com.stratum.core.domain.world.BlockPos? = null,
         /** Combat theatre in progress; see [EffectTrack]. */
         effects: List<ActiveEffect> = emptyList(),
+        /** Projectiles in flight, pulsing ground and wind-ups; see [CombatMark]. */
+        marks: List<CombatMark> = emptyList(),
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
         // The view is centred on a region-quantised position, so walking a few
         // blocks keeps the same chunks in view; within it, only chunks that
         // changed are meshed again.
+        // Only what the lens can see, or can reach into it, is built. The
+        // meshed square is many times the screen, and every prop in it used
+        // to be turned to the camera, shadowed and uploaded every frame.
+        val volume = ViewVolume.of(camera)
         val terrain = terrainAround(
             world, Math.floorDiv(cx, REGION_STEP) * REGION_STEP, Math.floorDiv(cy, REGION_STEP) * REGION_STEP, radius, worldRevision,
+            volume, camera.target.z,
         )
 
         val biome = biomeAt(cx, cy)
@@ -183,11 +241,24 @@ class SceneBuilder(
             shadowOpacity = SPRITE_SHADOW_OPACITY * lighting.shadowStrength
         }
         val eyeLevel = floor(camera.target.z).toInt()
+        frameNormal = billboardNormal(camera)
 
         val forward = (camera.target - camera.eye).let { Vec3(it.x, it.y, 0f).normalized() }
-        if (settings.groundLitter) terrain.details.forEach(::litter)
-        terrain.props.forEach { prop(it, camera, eyeLevel, occlusionFade(it, actors, forward)) }
+        if (settings.groundLitter) terrain.details.forEach { if (volume.mayShow(it.x, it.y, it.z, it.size, it.size)) litter(it) }
+        if (eyeLevel != styledAtEye) {
+            // A prop's look depends on how far below the eye it stands, so a step up or down restyles.
+            propStyles.clear()
+            styledAtEye = eyeLevel
+        }
+        terrain.props.forEachIndexed { index, prop ->
+            if (propModels(prop.block.id) != null) return@forEachIndexed
+            val height = SPRITE_HEIGHT * prop.block.glyphScale * (1f + PROP_SIZE_SPREAD)
+            // A shadow falls up to its caster's height times the reach away, so a tree off screen can still darken it.
+            if (!volume.mayShow(prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), height, height * MAX_SHADOW_REACH + 1f)) return@forEachIndexed
+            prop(index, prop, camera, eyeLevel, occlusionFade(prop, actors, forward))
+        }
         terrain.lights.forEach { light ->
+            if (!volume.mayShow(light.x, light.y, light.z, BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength))) return@forEach
             // A light you can see the source of. Point lights colour the ground;
             // the bloom is what tells the eye where the fire actually is.
             glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength), light.color, BLOOM_OPACITY)
@@ -206,6 +277,7 @@ class SceneBuilder(
         if (settings.atmosphereMotes) motes(camera, time, biome)
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
+        marks.forEach { mark(it, camera, flashes, time.elapsedSeconds) }
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
             ?.takeIf { lighting.heroLight > 0f }
@@ -229,26 +301,113 @@ class SceneBuilder(
             lighting = lighting,
             lights = nearest,
             shadowViewProjection = shadowMatrix(camera.target, lighting),
-            terrain = terrain.meshes,
-            actors = actorMesh.takeUnless { it.isEmpty }?.build(),
-            cutout = cutout.build(),
-            decals = decals.build(),
-            glows = glows.build(),
+            terrain = visibleTerrain(terrain, volume),
+            residentTerrain = terrain.meshes,
+            actors = actorMesh.takeUnless { it.isEmpty }?.build(recycler),
+            cutout = cutout.build(recycler),
+            decals = decals.build(recycler),
+            glows = glows.build(recycler),
+            models = listOfNotNull(terrain.models),
         )
     }
 
-    private fun terrainAround(world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int): Terrain {
-        val results = chunks.around(world, centreX, centreY, radius, worldRevision)
+    private fun terrainAround(
+        world: World, centreX: Int, centreY: Int, radius: Int, worldRevision: Int, volume: ViewVolume, eyeZ: Float,
+    ): Terrain {
+        val results = chunks.around(
+            world, centreX, centreY, radius, worldRevision,
+            urgent = { pos ->
+                volume.intersects(
+                    pos.originX - TERRAIN_SHADOW_MARGIN, pos.originY - TERRAIN_SHADOW_MARGIN, eyeZ - URGENT_DEPTH,
+                    pos.originX + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, pos.originY + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, eyeZ + URGENT_HEIGHT,
+                )
+            },
+            offscreenBudget = OFFSCREEN_MESH_BUDGET,
+        )
         if (chunks.generation != terrainGeneration) {
+            val props = results.flatMap { it.props }
+            val meshes = results.map { it.mesh }.filterNot { it.isEmpty }
             terrain = Terrain(
-                meshes = results.map { it.mesh }.filter { it.indices.isNotEmpty() },
-                props = results.flatMap { it.props },
+                meshes = meshes,
+                props = props,
                 lights = results.flatMap { it.lights },
                 details = results.flatMap { it.details },
+                models = modelProps(props),
+                bounds = boundsOf(meshes),
             )
+            // Styles of props still in the square are kept; the rest are let go.
+            val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)
+            props.forEach { if (propStyles.containsKey(it)) kept[it] = propStyles[it] }
+            propStyles = kept
             terrainGeneration = chunks.generation
         }
         return terrain
+    }
+
+    /**
+     * The chunks the camera can see, or that could throw a shadow into view.
+     *
+     * The shadow pass draws the same list, so the box is widened by how far a
+     * cliff's shadow can fall; a chunk is sixteen blocks wide, so the margin
+     * costs little.
+     */
+    private fun visibleTerrain(terrain: Terrain, volume: ViewVolume): List<MeshBatch> {
+        val b = terrain.bounds
+        return terrain.meshes.filterIndexed { i, _ ->
+            val o = i * 6
+            volume.intersects(
+                b[o] - TERRAIN_SHADOW_MARGIN, b[o + 1] - TERRAIN_SHADOW_MARGIN, b[o + 2],
+                b[o + 3] + TERRAIN_SHADOW_MARGIN, b[o + 4] + TERRAIN_SHADOW_MARGIN, b[o + 5],
+            )
+        }
+    }
+
+    /** Each mesh's box, measured once when the terrain changes rather than every frame. */
+    private fun boundsOf(meshes: List<MeshBatch>): FloatArray {
+        val out = FloatArray(meshes.size * 6)
+        val kept = java.util.IdentityHashMap<MeshBatch, FloatArray>(meshes.size)
+        meshes.forEachIndexed { i, mesh ->
+            val known = meshBounds[mesh]
+            if (known != null) {
+                known.copyInto(out, i * 6)
+                kept[mesh] = known
+                return@forEachIndexed
+            }
+            var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+            val v = mesh.vertices
+            var at = 0
+            while (at < mesh.vertexFloats) {
+                val x = v[at + Vertex.PX]; val y = v[at + Vertex.PX + 1]; val z = v[at + Vertex.PX + 2]
+                if (x < minX) minX = x; if (x > maxX) maxX = x
+                if (y < minY) minY = y; if (y > maxY) maxY = y
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+                at += Vertex.STRIDE
+            }
+            val o = i * 6
+            out[o] = minX; out[o + 1] = minY; out[o + 2] = minZ; out[o + 3] = maxX; out[o + 4] = maxY; out[o + 5] = maxZ
+            kept[mesh] = out.copyOfRange(o, o + 6)
+        }
+        // Only meshes still in the square are remembered, so this never outgrows it.
+        meshBounds = kept
+        return out
+    }
+
+    /**
+     * Every prop that has a 3D model, as one opaque batch.
+     *
+     * Built only when the terrain changes, not per frame: a model prop does
+     * not face the camera, so nothing about it depends on where the camera is.
+     * Each is turned by a quarter picked from its cell, as sprite props pick
+     * a painting, so a grove of one statue is not a row of clones.
+     */
+    private fun modelProps(props: List<PropInstance>): MeshBatch? {
+        val out = MeshBuilder(MaterialKind.OPAQUE)
+        props.forEach { prop ->
+            val model = propModels(prop.block.id) ?: return@forEach
+            model.emit(out, prop.x + 0.5f, prop.y + 0.5f, prop.z.toFloat(), quarterTurns = hash(prop.x, prop.y) ushr 5, scale = prop.block.glyphScale)
+        }
+        return out.takeUnless { it.isEmpty }?.build()
     }
 
     /**
@@ -284,11 +443,17 @@ class SceneBuilder(
         return fade
     }
 
-    private fun prop(prop: PropInstance, camera: SceneCamera, eyeLevel: Int, opacity: Float = 1f) {
+    private fun prop(index: Int, prop: PropInstance, camera: SceneCamera, eyeLevel: Int, opacity: Float = 1f) {
         val variant = hash(prop.x, prop.y)
-        val style = director.propStyleFor(
-            PropCue(prop.block, prop.biomeId, variant, depthBelowEye = (eyeLevel - prop.z).coerceAtLeast(0)),
-        ) ?: return
+        // Asked of the director once per prop per eye level rather than every
+        // frame: it was the most expensive single call in a frame, for an
+        // answer that had not changed.
+        val style = (
+            if (propStyles.containsKey(prop)) propStyles[prop]
+            else director.propStyleFor(
+                PropCue(prop.block, prop.biomeId, variant, depthBelowEye = (eyeLevel - prop.z).coerceAtLeast(0)),
+            ).also { propStyles[prop] = it }
+            ) ?: return
         val baseX = prop.x + 0.5f
         val baseY = prop.y + 0.5f
         val baseZ = prop.z.toFloat()
@@ -297,7 +462,7 @@ class SceneBuilder(
 
         // One of the forged individuals, picked by place: neighbours differ,
         // and the same tree is the same tree every time you walk past it.
-        val paintings = textures.variantsOf("prop:${prop.block.id}")
+        val paintings = paintingsByBlock.getOrPut(prop.block.id) { textures.variantsOf("prop:${prop.block.id}") }
         if (paintings.isNotEmpty()) {
             val sprite = paintings[(variant ushr 3) % paintings.size]
             val texture = textures.textureAt(sprite)!!
@@ -335,7 +500,7 @@ class SceneBuilder(
         val u1 = 1f - u0
         val right = camera.right
         val up = camera.up
-        val n = billboardNormal(camera)
+        val n = frameNormal
         val hw = width / 2f
         val tx = up.x * height; val ty = up.y * height; val tz = up.z * height
         // For cut-outs the occlusion slot carries opacity: below one, the
@@ -355,7 +520,7 @@ class SceneBuilder(
     private fun silhouette(camera: SceneCamera, x: Float, y: Float, z: Float, style: PropStyle, opacity: Float = 1f) {
         val right = camera.right
         val up = camera.up
-        val n = billboardNormal(camera)
+        val n = frameNormal
         val unit = style.scale * SILHOUETTE_UNIT
         PropSilhouettes.parts(style.silhouette, style.variant).forEach { part ->
             val color = when (part.role) {
@@ -662,6 +827,73 @@ class SceneBuilder(
     }
 
     /** A soft shape lying on the ground: shadow, ring or halo. */
+    /**
+     * A projectile, a zone or a telegraph, in the same glows and ground decals
+     * the combat theatre uses: a projectile is a hot point with a fading
+     * trail and a little light; a zone is a lit disc with a rim; a wind-up is
+     * its outline on the ground filling towards the moment it lands, which is
+     * what the player reads to roll out of it.
+     */
+    private fun mark(mark: CombatMark, camera: SceneCamera, lights: MutableList<PointLight>, seconds: Float) {
+        val color = (if (mark.hostile) director.direction.palette.hostile else mark.color) or Tint.OPAQUE
+        when (mark.kind) {
+            CombatMarkKind.PROJECTILE -> {
+                val body = mark.radius.coerceAtLeast(MIN_PROJECTILE_GLOW)
+                glow(camera, mark.x, mark.y, mark.z, body * 2.2f, color, PROJECTILE_OPACITY)
+                glow(camera, mark.x, mark.y, mark.z, body, HOT_CORE, PROJECTILE_OPACITY)
+                for (k in 1..PROJECTILE_TRAIL) {
+                    val back = k * TRAIL_STEP
+                    glow(camera, mark.x - mark.dirX * back, mark.y - mark.dirY * back, mark.z, body * (2f - k * 0.3f), color, PROJECTILE_OPACITY * (1f - k / (PROJECTILE_TRAIL + 1f)))
+                }
+                lights += PointLight(mark.x, mark.y, mark.z, color, PROJECTILE_LIGHT, 3f)
+            }
+            CombatMarkKind.ZONE -> {
+                val pulse = 0.94f + 0.06f * sin(seconds * 6f + mark.x + mark.y)
+                decal(mark.x, mark.y, mark.z, mark.radius * pulse, color, ZONE_FILL, Vertex.DISC)
+                decal(mark.x, mark.y, mark.z, mark.radius, color, ZONE_RIM, Vertex.RING)
+            }
+            CombatMarkKind.TELEGRAPH -> telegraph(mark, color)
+        }
+    }
+
+    /** A wind-up's outline and its fill. Cones and lanes are laid out in discs, since a decal is a round mark. */
+    private fun telegraph(mark: CombatMark, color: Long) {
+        val fill = mark.progress.coerceIn(0f, 1f)
+        when (mark.shape) {
+            MarkShape.CIRCLE -> {
+                decal(mark.x, mark.y, mark.z, mark.radius, color, TELEGRAPH_RIM, Vertex.RING)
+                decal(mark.x, mark.y, mark.z, mark.radius, color, TELEGRAPH_AREA, Vertex.DISC)
+                decal(mark.x, mark.y, mark.z, mark.radius * fill, color, TELEGRAPH_FILL, Vertex.DISC)
+            }
+            MarkShape.LANE -> {
+                val step = (mark.halfWidth * 1.5f).coerceAtLeast(MIN_MARK_STEP)
+                val count = (mark.radius / step).toInt().coerceIn(1, MAX_MARK_DISCS)
+                for (i in 0..count) {
+                    val along = mark.radius * i / count
+                    val x = mark.x + mark.dirX * along
+                    val y = mark.y + mark.dirY * along
+                    decal(x, y, mark.z, mark.halfWidth.coerceAtLeast(MIN_MARK_STEP), color, if (along <= mark.radius * fill) TELEGRAPH_FILL else TELEGRAPH_AREA, Vertex.DISC)
+                }
+            }
+            MarkShape.CONE -> {
+                val heading = kotlin.math.atan2(mark.dirY, mark.dirX)
+                val half = Math.toRadians(mark.angleDegrees / 2.0).toFloat()
+                val rings = (mark.radius / CONE_RING).toInt().coerceIn(1, MAX_MARK_DISCS / 2)
+                for (r in 1..rings) {
+                    val distance = mark.radius * r / rings
+                    val spokes = (2 * half * distance / CONE_RING).toInt().coerceIn(1, MAX_MARK_DISCS / 2)
+                    for (k in 0..spokes) {
+                        val angle = heading - half + 2 * half * k / spokes
+                        decal(
+                            mark.x + cos(angle) * distance, mark.y + sin(angle) * distance, mark.z, CONE_RING * 0.6f, color,
+                            if (distance <= mark.radius * fill) TELEGRAPH_FILL else TELEGRAPH_AREA, Vertex.DISC,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun decal(x: Float, y: Float, z: Float, radius: Float, color: Long, opacity: Float, pattern: Float) {
         if (opacity <= 0f) return
         val lift = z + DECAL_LIFT
@@ -731,6 +963,9 @@ class SceneBuilder(
     }
 
     /** Sprites face the camera but are lit mostly as if they faced up. */
+    /** The billboard normal for the frame being built; the camera cannot turn mid-frame. */
+    private var frameNormal: Vec3 = Vec3.UP
+
     private fun billboardNormal(camera: SceneCamera): Vec3 {
         val toCamera = (camera.eye - camera.target).let { Vec3(it.x, it.y, 0f).normalized() }
         return (toCamera * 0.55f + Vec3.UP * 0.85f).normalized()
@@ -753,6 +988,13 @@ class SceneBuilder(
     companion object {
         /** Blocks meshed around the camera target in each direction. */
         const val REGION_STEP = 6
+        /** How far past a chunk's edge its shadow may reach into view, in blocks. */
+        const val TERRAIN_SHADOW_MARGIN = 8f
+        /** Off-screen chunks meshed per frame; see [ChunkMeshCache]. */
+        const val OFFSCREEN_MESH_BUDGET = 1
+        /** The slab of a chunk tested for being on screen, below and above the eye. */
+        const val URGENT_DEPTH = 24f
+        const val URGENT_HEIGHT = 16f
         const val FOG_FLOOR_DEPTH = 4f
         /** Share of the meshed radius past the focus where fog becomes total. */
         const val EDGE_FOG_SHARE = 0.8f
@@ -779,6 +1021,19 @@ class SceneBuilder(
         const val SPRITE_FLASH = 0.9f
 
         const val MAX_EFFECT_LIGHTS = 3
+        const val MIN_PROJECTILE_GLOW = 0.18f
+        const val PROJECTILE_OPACITY = 1.6f
+        const val PROJECTILE_TRAIL = 4
+        const val TRAIL_STEP = 0.18f
+        const val PROJECTILE_LIGHT = 0.6f
+        const val ZONE_FILL = 0.3f
+        const val ZONE_RIM = 0.85f
+        const val TELEGRAPH_RIM = 0.9f
+        const val TELEGRAPH_AREA = 0.14f
+        const val TELEGRAPH_FILL = 0.4f
+        const val MIN_MARK_STEP = 0.35f
+        const val MAX_MARK_DISCS = 40
+        const val CONE_RING = 0.8f
         const val BODY_CENTRE = 0.9f
         const val RING_EFFECT_OPACITY = 1f
         const val RING_BEADS = 20

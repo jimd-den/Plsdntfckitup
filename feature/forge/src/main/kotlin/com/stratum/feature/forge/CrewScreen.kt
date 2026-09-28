@@ -30,7 +30,8 @@ import com.stratum.agents.AgentAttempt
 import com.stratum.agents.StepStatus
 import com.stratum.agents.StudioStep
 import com.stratum.core.designsystem.component.ActionEmphasis
-import com.stratum.core.designsystem.component.GameProgress
+import com.stratum.core.designsystem.component.JobProgress
+import com.stratum.core.designsystem.component.rememberNow
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -40,12 +41,15 @@ import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.designsystem.theme.safeContent
 import com.stratum.core.domain.ai.AgentRoleDefinition
+import com.stratum.core.domain.creation.InstantWorld
+import com.stratum.core.domain.creation.PackDelivery
 
 /** Everything the studio screen can ask for. */
 data class CrewActions(
     val onPrompt: (String) -> Unit = {},
     val onName: (String) -> Unit = {},
     val onToggleRole: (String) -> Unit = {},
+    val onPreset: (String) -> Unit = {},
     val onStart: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onOpenStep: (String) -> Unit = {},
@@ -54,6 +58,7 @@ data class CrewActions(
     val onRevise: () -> Unit = {},
     val onSkip: () -> Unit = {},
     val onInstall: () -> Unit = {},
+    val onPlayNow: () -> Unit = {},
     val onBack: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
 )
@@ -63,10 +68,10 @@ fun CrewScreen(viewModel: CrewViewModel, onBack: () -> Unit, onOpenSettings: () 
     val state by viewModel.state.collectAsStateWithLifecycle()
     val actions = remember(viewModel) {
         CrewActions(
-            onPrompt = viewModel::updatePrompt, onName = viewModel::updateName, onToggleRole = viewModel::toggleRole,
+            onPrompt = viewModel::updatePrompt, onName = viewModel::updateName, onToggleRole = viewModel::toggleRole, onPreset = viewModel::selectPreset,
             onStart = viewModel::start, onCancel = viewModel::cancel, onOpenStep = viewModel::openStep,
             onNote = viewModel::updateNote, onApprove = viewModel::approve, onRevise = { viewModel.revise() }, onSkip = viewModel::skip,
-            onInstall = viewModel::install, onBack = onBack, onOpenSettings = onOpenSettings,
+            onInstall = viewModel::install, onPlayNow = viewModel::playNow, onBack = onBack, onOpenSettings = onOpenSettings,
         )
     }
     CrewScreenContent(state, actions, modifier)
@@ -78,14 +83,15 @@ fun CrewScreen(viewModel: CrewViewModel, onBack: () -> Unit, onOpenSettings: () 
  * wrote and why anything was sent back.
  */
 @Composable
-fun CrewScreenContent(state: CrewUiState, actions: CrewActions, modifier: Modifier = Modifier) {
+fun CrewScreenContent(
+    state: CrewUiState,
+    actions: CrewActions,
+    modifier: Modifier = Modifier,
+    now: Long = rememberNow(state.job?.isActive == true),
+) {
     val colors = StratumTheme.colors
     Column(modifier.fillMaxSize().safeContent().verticalScroll(rememberScrollState()).padding(Space.large)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Agent studio", style = MaterialTheme.typography.headlineSmall, color = colors.ink)
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = "Back", onClick = actions.onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Agent crew", onBack = actions.onBack)
         Text(
             "Describe a world. A crew of agents writes it the way a small team would -- lore, land, monsters, towns, " +
                 "food, outposts, rules -- each checked like a plugin before the next begins. Everything they are asked and " +
@@ -95,6 +101,14 @@ fun CrewScreenContent(state: CrewUiState, actions: CrewActions, modifier: Modifi
         )
         Spacer(Modifier.height(Space.large))
         Brief(state, actions)
+        if (state.offersInstantWorld || state.instantWorld != null) {
+            Spacer(Modifier.height(Space.large))
+            InstantWorldCard(state, actions)
+        }
+        state.job?.let { job ->
+            Spacer(Modifier.height(Space.large))
+            JobProgress(job, onCancel = actions.onCancel, now = now)
+        }
         state.review?.let {
             Spacer(Modifier.height(Space.large))
             ReviewCard(state, actions)
@@ -109,9 +123,8 @@ fun CrewScreenContent(state: CrewUiState, actions: CrewActions, modifier: Modifi
         }
         state.journal?.let { journal ->
             Spacer(Modifier.height(Space.large))
-            SectionLabel("The run")
-            Spacer(Modifier.height(Space.small))
-            GameProgress(journal.fraction, label = "${journal.steps.count { it.status == StepStatus.DONE }} of ${journal.steps.size} roles done")
+            SectionLabel("The record")
+            Text("Tap a role to read what it was asked and what it wrote.", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
             journal.problems.forEach { Text("✗ $it", style = MaterialTheme.typography.labelSmall, color = colors.danger) }
             Spacer(Modifier.height(Space.small))
             journal.steps.forEach { step -> StepCard(step, open = state.openStep == step.role.id, onOpen = { actions.onOpenStep(step.role.id) }) }
@@ -134,6 +147,20 @@ private fun Brief(state: CrewUiState, actions: CrewActions) {
             value = state.packName, onValueChange = actions.onName, modifier = Modifier.fillMaxWidth(),
             label = { Text("Pack name (optional)") }, enabled = !state.running, singleLine = true,
         )
+        if (state.presets.size > 1) {
+            Spacer(Modifier.height(Space.medium))
+            Text("Start from", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+            Spacer(Modifier.height(Space.tight))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.small), verticalArrangement = Arrangement.spacedBy(Space.small)) {
+                state.presets.forEach { preset ->
+                    StratumChip(label = preset.name, selected = preset.id == state.presetId, onClick = { if (!state.running) actions.onPreset(preset.id) })
+                }
+            }
+        }
+        state.presets.firstOrNull { it.id == state.presetId }?.let { preset ->
+            Spacer(Modifier.height(Space.tight))
+            Text(preset.description, style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+        }
         Spacer(Modifier.height(Space.medium))
         Text("The crew -- tap to bench a role", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
         Spacer(Modifier.height(Space.tight))
@@ -153,6 +180,36 @@ private fun Brief(state: CrewUiState, actions: CrewActions) {
             else -> StratumAction(label = "Start the crew", onClick = actions.onStart, emphasis = ActionEmphasis.PRIMARY, modifier = Modifier.fillMaxWidth())
         }
         Text("✋ marks a role that waits for your approval.", style = MaterialTheme.typography.labelSmall, color = colors.inkMuted)
+    }
+}
+
+/**
+ * The world as it can be played this minute: the loaded packs, the look the
+ * lexicon reads from the brief, and a promise about when the crew's pack joins.
+ */
+@Composable
+private fun InstantWorldCard(state: CrewUiState, actions: CrewActions) {
+    val colors = StratumTheme.colors
+    val world = state.instantWorld ?: InstantWorld.from(state.prompt, state.packName)
+    StratumPanel(modifier = Modifier.fillMaxWidth()) {
+        SectionLabel(if (state.instantWorld == null) "Play it now" else "Playing ${world.name}")
+        Spacer(Modifier.height(Space.tight))
+        Text("Looks: ${world.styleSummary}", style = MaterialTheme.typography.bodySmall, color = colors.ink)
+        Text(
+            when (state.delivery) {
+                PackDelivery.INSTALLED -> "The crew's pack is installed: your world is built with it."
+                PackDelivery.HELD -> "The crew's pack is ready. It joins your world the next time you enter it."
+                null -> "Playable now with what is loaded. The crew's regions, monsters and towns join it when they are ready -- never in the middle of a fight."
+            },
+            style = MaterialTheme.typography.labelSmall, color = colors.inkMuted,
+        )
+        Spacer(Modifier.height(Space.small))
+        StratumAction(
+            label = if (state.instantWorld == null) "Play now" else "Play again",
+            onClick = actions.onPlayNow,
+            emphasis = ActionEmphasis.PRIMARY,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -253,7 +310,7 @@ private fun Attempt(attempt: AgentAttempt) {
 }
 
 @Composable
-private fun Code(text: String, limit: Int) {
+internal fun Code(text: String, limit: Int) {
     StratumWell(modifier = Modifier.fillMaxWidth()) {
         Text(
             if (text.length > limit) text.take(limit) + "\n… ${text.length - limit} more characters" else text,

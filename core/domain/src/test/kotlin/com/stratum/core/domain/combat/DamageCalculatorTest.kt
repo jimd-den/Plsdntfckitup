@@ -58,24 +58,35 @@ class DamageCalculatorTest {
     }
 
     @Test
-    fun `armour is flat and applied after resistance`() {
+    fun `armour is a curve applied after resistance`() {
         val armoured = plain.copy(armour = 30, resistances = mapOf("fire" to 0.5f))
-        // 100 -> 50 after resistance -> 20 after armour.
-        assertEquals(20, DamageCalculator.resolve(attacker, armoured, "fire", 0.99f).amount)
+        // 100 -> 50 after resistance; 30 / (30 + 5 x 50) takes about 10.7% of that.
+        assertEquals(45, DamageCalculator.resolve(attacker, armoured, "fire", 0.99f).amount)
     }
 
     @Test
-    fun `armour never heals the defender`() {
+    fun `armour shrugs off small hits better than big ones`() {
+        val armoured = plain.copy(armour = 50)
+        val small = DamageCalculator.resolve(CombatStats(attackPower = 10, critChance = 0f), armoured, "x", 0.99f).amount / 10f
+        val big = DamageCalculator.resolve(CombatStats(attackPower = 200, critChance = 0f), armoured, "x", 0.99f).amount / 200f
+        assertTrue(small < big, "armour should take a bigger share of a small hit ($small) than of a big one ($big)")
+    }
+
+    @Test
+    fun `armour never heals the defender and never makes it immune`() {
         val wall = plain.copy(armour = 10_000)
         val result = DamageCalculator.resolve(attacker, wall, "fire", 0.99f)
-        assertEquals(0, result.amount)
-        assertFalse(result.landed)
+        // Capped at 90% by the default rules: a tenth of the hit always lands.
+        assertEquals(10, result.amount)
+        assertTrue(result.landed)
     }
 
     @Test
-    fun `a hit fully absorbed by armour reads as blocked rather than missed`() {
-        val wall = plain.copy(armour = 10_000)
-        assertTrue(DamageCalculator.resolve(attacker, wall, "fire", 0.99f).wasBlocked)
+    fun `a hit swallowed entirely reads as blocked rather than missed`() {
+        val weak = CombatStats(attackPower = 1, critChance = 0f)
+        val result = DamageCalculator.resolve(weak, plain.copy(armour = 10_000), "fire", 0.99f)
+        assertEquals(0, result.amount)
+        assertTrue(result.wasBlocked)
     }
 
     @Test
@@ -92,9 +103,9 @@ class DamageCalculatorTest {
     fun `life steal returns a fraction of damage actually dealt`() {
         val vampiric = attacker.copy(lifeSteal = 0.1f)
         assertEquals(10, DamageCalculator.resolve(vampiric, plain, "fire", 0.99f).healedAttacker)
-        // Blocked damage heals nothing, so armour is not a healing engine.
+        // Leech is a share of damage dealt, not damage attempted: the tenth armour lets through.
         val wall = plain.copy(armour = 10_000)
-        assertEquals(0, DamageCalculator.resolve(vampiric, wall, "fire", 0.99f).healedAttacker)
+        assertEquals(1, DamageCalculator.resolve(vampiric, wall, "fire", 0.99f).healedAttacker)
     }
 
     @Test

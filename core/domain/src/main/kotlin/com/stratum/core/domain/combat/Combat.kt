@@ -1,11 +1,16 @@
 package com.stratum.core.domain.combat
 
+import com.stratum.core.domain.status.StatusApplication
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 /**
  * A kind of damage. Packs define these, so a pack can ship "Thunder" and
  * "Rot" without the engine knowing either name.
+ *
+ * A type also says how it behaves when it lands, because that is what makes
+ * elements feel different: whether armour stops it, and which status it
+ * leaves behind. The status is pack data too -- the engine only knows the
+ * behaviours a status can have, never that "fire burns".
  */
 data class DamageTypeDefinition(
     val id: String,
@@ -13,7 +18,17 @@ data class DamageTypeDefinition(
     val color: Long = 0xFFE0E0E0,
     /** Shown on floating combat text and resistance readouts. */
     val symbol: String = "",
-)
+    /** Whether armour reduces it. A pack's physical type says yes; its elements usually say no. */
+    val mitigatedByArmour: Boolean = true,
+    /** The status a hit of this type may inflict, such as a burn or a chill; null for none. */
+    val ailmentStatusId: String? = null,
+    /** Base chance, 0..1, that a hit carrying this type inflicts [ailmentStatusId]. */
+    val ailmentChance: Float = 0f,
+) {
+    init {
+        require(ailmentChance in 0f..1f) { "damage type '$id' ailment chance $ailmentChance is not a share" }
+    }
+}
 
 /**
  * The numbers that decide a fight. Shared by the player and by monsters,
@@ -23,7 +38,10 @@ data class DamageTypeDefinition(
 data class CombatStats(
     val maxHealth: Int = 100,
     val attackPower: Int = 10,
-    /** Flat reduction applied after resistances, floored so armour never heals. */
+    /**
+     * Mitigates hits of armour-affected types, more against small hits than
+     * big ones. See [HitResolver.armourReduction] for why it is a curve.
+     */
     val armour: Int = 0,
     /** 0..1 */
     val critChance: Float = 0.05f,
@@ -34,13 +52,22 @@ data class CombatStats(
     val attackRange: Int = 1,
     /** Per damage type id, 0..1 fraction of that damage ignored. */
     val resistances: Map<String, Float> = emptyMap(),
-    /** Fraction of damage dealt returned as health. */
+    /** Fraction of damage dealt returned as health, through leech. */
     val lifeSteal: Float = 0f,
+    /** Weighed against an attacker's [accuracy] for the chance an attack misses outright. */
+    val evasion: Int = 0,
+    /** Chance, 0..1, to block a hit entirely. */
+    val blockChance: Float = 0f,
+    val accuracy: Int = DEFAULT_ACCURACY,
 ) {
     val secondsBetweenAttacks: Float get() = if (attackSpeed <= 0f) Float.MAX_VALUE else 1f / attackSpeed
 
+    /** Resistance within the default caps. The full resolver applies the world's caps instead. */
     fun resistanceTo(damageTypeId: String): Float =
         (resistances[damageTypeId] ?: 0f).coerceIn(MIN_RESISTANCE, MAX_RESISTANCE)
+
+    /** Resistance as the stats say it, before any cap: what a sandbox with lifted caps reads. */
+    fun rawResistanceTo(damageTypeId: String): Float = resistances[damageTypeId] ?: 0f
 
     operator fun plus(other: CombatStats): CombatStats = CombatStats(
         maxHealth = maxHealth + other.maxHealth,
@@ -54,32 +81,48 @@ data class CombatStats(
             (resistances[it] ?: 0f) + (other.resistances[it] ?: 0f)
         },
         lifeSteal = lifeSteal + other.lifeSteal,
+        evasion = evasion + other.evasion,
+        blockChance = blockChance + other.blockChance,
+        // Accuracy is a rating with a baseline, like reach: the better of the two, not two baselines summed.
+        accuracy = max(accuracy, other.accuracy),
     )
 
     companion object {
         /** Negative resistance is a vulnerability, capped so it cannot spiral. */
         const val MIN_RESISTANCE = -1f
+
         /** Full immunity would make a fight unwinnable, so resistance stops short. */
         const val MAX_RESISTANCE = 0.85f
+        const val DEFAULT_ACCURACY = 100
     }
 }
 
 /** One resolved hit. Everything the UI needs to draw it, and nothing more. */
 data class DamageResult(
     val amount: Int,
+    /** The type that did most of the damage: what colours the number. */
     val damageTypeId: String,
     val wasCritical: Boolean,
     val wasBlocked: Boolean,
+    /** Life the attacker leeches from this hit. Recovered over time unless leech is instant. */
     val healedAttacker: Int = 0,
+    /** Damage by type, after every mitigation. Sums to [amount]. */
+    val packets: Map<String, Int> = emptyMap(),
+    /** The attack missed: evaded, and nothing else happened. */
+    val wasEvaded: Boolean = false,
+    /** Statuses this hit inflicts on the defender, already rolled. */
+    val inflicted: List<StatusApplication> = emptyList(),
 ) {
     val landed: Boolean get() = amount > 0
 }
 
 /**
- * Resolves one attack.
+ * Resolves one single-typed hit.
  *
  * Deliberately a pure function of its inputs plus an explicit roll, so a fight
  * can be replayed exactly and a test can pin the crit instead of hoping for one.
+ * The quick path for code that has one damage type and no build to consult;
+ * it runs the same [HitResolver] every other hit does.
  */
 object DamageCalculator {
 
@@ -91,30 +134,10 @@ object DamageCalculator {
         critRoll: Float,
         /** Multiplies base attack power, e.g. a skill that hits for 250%. */
         powerMultiplier: Float = 1f,
-    ): DamageResult {
-        val isCritical = critRoll < attacker.critChance
-        val base = attacker.attackPower * powerMultiplier
-        val afterCrit = if (isCritical) base * attacker.critMultiplier else base
-
-        val resistance = defender.resistanceTo(damageTypeId)
-        val afterResistance = afterCrit * (1f - resistance)
-
-        // Armour is flat and applied last, so stacking it is strong against many
-        // small hits and weak against one large one. That is the trade-off that
-        // makes attack speed and armour meaningfully different choices.
-        val afterArmour = afterResistance - defender.armour
-        val finalAmount = max(0f, afterArmour).roundToInt()
-
-        // A hit that armour swallows entirely still reads as a hit, so the
-        // player can tell "my damage is being absorbed" from "I missed".
-        val blocked = afterResistance > 0f && finalAmount == 0
-
-        return DamageResult(
-            amount = finalAmount,
-            damageTypeId = damageTypeId,
-            wasCritical = isCritical,
-            wasBlocked = blocked,
-            healedAttacker = (finalAmount * attacker.lifeSteal).roundToInt(),
-        )
-    }
+    ): DamageResult = HitResolver.resolve(
+        attacker = HitAttacker(attacker),
+        defender = HitDefender(defender),
+        damage = mapOf(damageTypeId to attacker.attackPower * powerMultiplier),
+        rolls = HitRolls(crit = critRoll),
+    )
 }

@@ -35,16 +35,17 @@ internal data class HeroClassSchema(
     val spriteSet: String? = null,
     val stats: StatsSchema = StatsSchema.of(HERO.baseStats),
     val startingWeapon: String? = null,
+    val traits: List<String> = emptyList(),
 ) {
     fun toDomain() = HeroClassDefinition(
         id, name, title, description, baseHealth, baseResource, resourceName, strength, agility, insight,
-        startingBlocks, abilities, spriteSet, stats.toDomain(), startingWeapon,
+        startingBlocks, abilities, spriteSet, stats.toDomain(), startingWeapon, traits,
     )
 
     companion object {
         fun of(h: HeroClassDefinition) = HeroClassSchema(
             h.id, h.name, h.title, h.description, h.baseHealth, h.baseResource, h.resourceName, h.strength, h.agility, h.insight,
-            h.startingBlockIds, h.abilityIds, h.spriteSetId, StatsSchema.of(h.baseStats), h.startingWeaponId,
+            h.startingBlockIds, h.abilityIds, h.spriteSetId, StatsSchema.of(h.baseStats), h.startingWeaponId, h.traitIds,
         )
     }
 }

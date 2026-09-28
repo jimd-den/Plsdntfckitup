@@ -3,245 +3,287 @@ package com.stratum.engine.world
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.EnemyRank
-import com.stratum.core.domain.actor.Progression
-import com.stratum.core.domain.actor.SkillCooldowns
+import com.stratum.core.domain.actor.SkillCost
 import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.combat.CombatStats
+import com.stratum.core.domain.combat.Keystone
+import com.stratum.core.domain.actor.SkillCooldowns
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.BiomeDefinition
-import com.stratum.core.domain.crafting.CurrencyDefinition
-import com.stratum.core.domain.crafting.SupportDefinition
 import com.stratum.core.domain.difficulty.Difficulty
-import com.stratum.core.domain.difficulty.Waystone
-import com.stratum.core.domain.item.InsertDefinition
-import com.stratum.core.domain.item.ItemInstance
-import com.stratum.core.domain.item.ItemRarity
-import com.stratum.core.domain.passive.PassiveBuild
-import com.stratum.core.domain.passive.PassiveTree
+import com.stratum.core.domain.sandbox.StatBreakdown
+import com.stratum.core.domain.sandbox.StatQuery
 import com.stratum.core.domain.session.HeroSave
-import com.stratum.core.domain.faction.Factions
-import com.stratum.core.domain.faction.Reputation
-import com.stratum.core.domain.strategy.FollowerOrder
-import com.stratum.core.domain.strategy.Outpost
-import com.stratum.core.domain.stats.ModifierKind
-import com.stratum.core.domain.stats.StatModifier
-import com.stratum.core.domain.survival.ConsumableDefinition
-import com.stratum.core.domain.survival.Environment
-import com.stratum.core.domain.world.WorldRules
-import com.stratum.core.domain.faction.Stance
-import com.stratum.core.domain.settlement.SettlementRecipe
-import com.stratum.core.domain.settlement.SettlementAtlas
-import com.stratum.core.domain.settlement.SettlementPlan
-import com.stratum.engine.settlement.SettlementTerrain
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.session.SavedChunk
+import com.stratum.core.domain.session.WorldIdentity
+import com.stratum.core.domain.session.WorldPlayer
+import com.stratum.core.domain.session.WorldSave
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.stats.Stat
-import com.stratum.core.domain.stats.lootFind
-import com.stratum.core.domain.stats.StatSheet
 import com.stratum.core.domain.tabletop.ActiveBoon
-import com.stratum.core.domain.tabletop.Tabletop
-import com.stratum.core.domain.world.BiomeSource
-import com.stratum.core.domain.world.BlockPos
-import com.stratum.core.domain.world.BlockType
-import com.stratum.core.domain.world.Chunk
 import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.TerrainGenerator
 import com.stratum.core.domain.world.World
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.core.domain.world.WorldPoint
-import kotlin.math.abs
-import kotlin.math.floor
+import com.stratum.core.domain.world.WorldRules
 import kotlin.math.roundToInt
-import kotlin.random.Random
 
 /**
  * One run: a streaming world, a player, and the rules that connect them.
  *
  * The session owns all mutable game state and exposes it only as immutable
- * snapshots, so the UI layer can never reach in and change the world behind the
- * simulation's back.
+ * snapshots, so the UI layer can never reach in and change the world behind
+ * the simulation's back.
  *
- * It is the orchestrator, not the rulebook. Each concern keeps its own state
- * and rules in its own part -- [PlayerMotion], [MiningProgress], [BuildSession],
- * [GroundItems], [LootDrops], [PlayerGear], [ActorAnimator], [SessionCues] --
- * and the session decides only the order they run in and passes the player
- * between them, since the player is the one thing they all touch.
+ * It is the orchestrator, not the rulebook. The rules live in systems --
+ * [BuildingSystem], [GearSystem], [SurvivalFacade], [ProgressionSystem],
+ * [PoliticsSystem], [FightSystem] and [EncounterSystem], over [CombatSystem]
+ * -- which share the player and the bodies through one [SessionState], and
+ * are built and joined by [SessionParts]. The session decides the order they
+ * run in each tick, starts and restarts the run, takes snapshots, and answers
+ * for each system's verbs by delegation, so callers see one object.
+ *
+ * A session can be kept and resumed: [worldSave] takes the world as it
+ * stands, and [restore] builds a session from one. A restored session is
+ * built exactly as a new one is -- same seed, same parts -- and then has
+ * the saved state laid over it, so there is one road into a world rather
+ * than two that drift apart.
  */
-class WorldSession(
-    val content: AssembledContent,
-    val config: WorldConfig,
-    heroClassId: String? = null,
-    /**
-     * The algorithm that builds the terrain. Null resolves the one the loaded
-     * packs asked for, which is what makes world generation swappable without
-     * touching the session: pass your own here, or register a factory and name
-     * it in a pack's recipe.
-     */
-    terrainGenerator: TerrainGenerator? = null,
-    /** How hard this world is: a tier, and a waystone's mods when one opened it. */
-    val difficulty: Difficulty = Difficulty.BASE,
-    /** A character carried in from an earlier world; null starts fresh at level one. */
-    hero: HeroSave? = null,
-) {
-    private val generator: TerrainGenerator = terrainGenerator ?: withTowns(StratumTerrain.create(content.terrainContext(config)))
+class WorldSession private constructor(
+    private val parts: SessionParts,
+    /** The save this session resumes, or null for a new world. Read once, while the session is built. */
+    restoring: WorldSave? = null,
+) :
+    SessionBuilding by parts.building,
+    SessionGear by parts.gear,
+    SessionSurvival by parts.survival,
+    SessionProgression by parts.progression,
+    SessionPolitics by parts.politics,
+    SessionFight by parts.fight {
 
-    /** The towns in this world, when the generator builds any. */
-    private val atlas: SettlementAtlas? = generator as? SettlementAtlas
+    constructor(
+        content: AssembledContent,
+        config: WorldConfig,
+        heroClassId: String? = null,
+        /**
+         * The algorithm that builds the terrain. Null resolves the one the loaded
+         * packs asked for, which is what makes world generation swappable without
+         * touching the session: pass your own here, or register a factory and name
+         * it in a pack's recipe.
+         */
+        terrainGenerator: TerrainGenerator? = null,
+        /** How hard this world is: a tier, and a waystone's mods when one opened it. */
+        difficulty: Difficulty = Difficulty.BASE,
+        /** A character carried in from an earlier world; null starts fresh at level one. */
+        hero: HeroSave? = null,
+    ) : this(SessionParts(content, config, heroClassId, terrainGenerator, difficulty, hero))
 
-    /**
-     * Only generators that claim to know about biomes are asked. One that does
-     * not -- a dungeon builder, a flat sandbox -- leaves the region unnamed rather
-     * than being forced to invent one.
-     */
-    private val biomeSource: BiomeSource? = generator as? BiomeSource
-    private val streamingWorld = StreamingWorld(content.registry, generator, config)
-    private val interaction = BlockInteractionSystem(streamingWorld)
+    val content: AssembledContent get() = parts.content
+    val config: WorldConfig get() = parts.config
+    val difficulty: Difficulty get() = parts.difficulty
 
-    /** One RNG for the whole run, seeded from the world seed, so a session replays identically given the same inputs. */
-    private val random = Random(config.seed)
-
-    private val combat = CombatResolver()
-    private val cues = SessionCues()
-    private val hitFlashes = HitFlashes()
-    private val animator = ActorAnimator()
-
-    /** Knockback, so a hit moves the thing it lands on. */
-    private val impacts = ImpactField(streamingWorld)
-    private val lootRoller = LootRoller(content.weapons, content.affixes, content.inserts)
-    private val drops = LootDrops(content, lootRoller, config.seaLevel, difficulty)
-    private val workbench = Workbench(content, ItemCrafter(lootRoller))
-    private val ground = GroundItems()
-    private val gear = PlayerGear(::insertOrNull)
     /** How this world plays; see [WorldRules]. */
     val rules: WorldRules get() = config.rules
 
-    private val director = EnemyDirector(
-        streamingWorld, content.enemies,
-        config = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1)),
-        difficulty = difficulty, packs = content.enemyPacks,
-    )
-
     /** Dawn to dawn; night is colder and busier. */
-    val clock = WorldClock(config.rules.dayLengthMinutes * 60f)
-    private val crowd = CrowdControl(streamingWorld, director)
-    private val garrisons = Garrisons(director)
-    private val realm = RealmSystem(content, config.rules.raids)
+    val clock: WorldClock get() = parts.clock
 
-    /** Neutral people the player has struck: they fight back until they are dead or the player leaves. */
-    private val provoked = HashSet<String>()
-
-    /** Things that happened outside a tick, such as a town freed by a skill, reported with the next one. */
-    private val pending = mutableListOf<CombatEvent>()
-    private val mining = MiningProgress()
-    private val building = BuildSession(streamingWorld, interaction, content.registry)
-    private val roomScanner = RoomScanner(streamingWorld)
-    private val survival = SurvivalSystem(content, config.rules.survival, streamingWorld, roomScanner)
-    private val table = TableState()
-    private val passiveProgress = PassiveProgress(content.passiveTree)
-    private val damageTypeIds = content.damageTypes.map { it.id }
-
-    /** Stick intent, the dodge roll, collision and gravity. See [PlayerMotion]. */
-    private val motion = PlayerMotion(streamingWorld)
-
-    private val heroClass = (hero?.heroClassId ?: heroClassId)
-        ?.let { id -> content.heroClasses.firstOrNull { it.id == id } }
-        ?: content.heroClasses.firstOrNull()
+    private val state = parts.state
+    private val streamingWorld = parts.world
+    private val motion = parts.motion
+    private val combat = parts.combat
+    private val encounters = parts.encounters
+    private val animator = parts.animator
+    private val cues = parts.cues
 
     val world: World get() = streamingWorld
 
     /** The world with write access, for persistence and tests in this module; features see [world]. */
     internal val editableWorld: StreamingWorld get() = streamingWorld
 
-    /**
-     * Writable inside the engine only. Feature modules see an immutable value,
-     * so the UI cannot reach in and change the world behind the simulation.
-     * Persistence and tests live in this module and legitimately need the seam.
-     */
-    var player: PlayerState internal set
+    /** Writable inside the engine only, so the UI cannot change the world behind the simulation. */
+    var player: PlayerState
+        get() = state.player
+        internal set(value) {
+            state.player = value
+        }
 
-    var enemies: List<EnemyInstance> = emptyList()
-        internal set
+    var enemies: List<EnemyInstance>
+        get() = state.enemies
+        internal set(value) {
+            state.enemies = value
+        }
 
     /** Loot lying on the ground, waiting to be walked over. */
     var groundLoot: List<GroundLoot>
-        get() = ground.loot
+        get() = parts.ground.loot
         internal set(value) {
-            ground.loot = value
+            parts.ground.loot = value
         }
 
     /** Inserts lying on the ground. Separate from [groundLoot] because they stack into a pouch. */
     var groundInserts: List<GroundInsert>
-        get() = ground.inserts
+        get() = parts.ground.inserts
         internal set(value) {
-            ground.inserts = value
+            parts.ground.inserts = value
         }
 
     /** Events produced by the last tick, for the UI to draw and then forget. */
     var events: List<CombatEvent> = emptyList()
         private set
 
+    /**
+     * Seconds this world has been played, summed from the steps it was
+     * advanced by rather than read from a clock, so a replay counts the same.
+     */
+    var playSeconds: Double = 0.0
+        private set
+
     init {
-        streamingWorld.focusOn(SPAWN_CHUNK)
-        val spawn = findSpawn()
-        player = heroClass?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
-        player = armed(player).let { fresh -> hero?.restoreOnto(fresh) ?: fresh }
-        player = passiveProgress.settle(player).let { it.copy(health = it.maxHealthWithGear, resource = it.resourceCeiling) }
-        placeMarkedEncounters()
+        // A save's chunks go in before anything streams, so the ground under a
+        // resumed player is the ground they left rather than a fresh copy of it.
+        restoring?.let { save ->
+            val remap = SavedChunk.remapTable(save.blockIds, content.registry)
+            streamingWorld.restoreEdited(save.chunks.map { it.toChunk(remap) })
+            encounters.restoreMarkers(save.consumedMarkers)
+        }
+        streamingWorld.focusOn(restoring?.player?.position?.toBlockPos()?.chunkPos ?: SPAWN_CHUNK)
+        val spawn = restoring?.player?.position ?: parts.spawnPoint()
+        val fresh = parts.heroClass?.let { PlayerState.from(it, spawn) } ?: PlayerState(heroClassId = "none", position = spawn)
+        player = parts.gear.armed(fresh, parts.heroClass).let { armed -> parts.hero?.restoreOnto(armed) ?: armed }
+        player = parts.profile.restored(parts.progression.settle(player))
+        restoring?.let { save ->
+            player = save.player.applyTo(player)
+            clock.restore(save.clockSeconds)
+            playSeconds = save.playSeconds.toDouble()
+            parts.politics.restore(save.realm)
+        }
+        encounters.placeLevelEncounters(currentBiome.id)
     }
 
-    // ---- what the renderer asks -------------------------------------------
+    /**
+     * Advances the world by one frame, in a fixed order: clocks and the
+     * body's needs, movement (so a roll can carry the player out of reach
+     * before the monsters swing), the markers the player walked up to, the
+     * realm, the fight, pickups, and the animation that shows it all.
+     *
+     * Returns the events it produced rather than mutating a log, so a caller
+     * that drops a frame loses the floating numbers and nothing else.
+     */
+    fun tick(deltaSeconds: Float): List<CombatEvent> {
+        playSeconds += deltaSeconds
+        if (!player.isAlive) {
+            events = emptyList()
+            return events
+        }
+        cues.advance(deltaSeconds)
+        parts.table.advance(deltaSeconds)
+        parts.flashes.advance(deltaSeconds)
+        animator.advanceHolds(deltaSeconds)
+        advanceImpacts(deltaSeconds)
+        clock.advance(deltaSeconds)
+        parts.survival.advance(deltaSeconds, clock, currentBiome)
+        // A stun roots the player; a chill slows them. Movement still runs, so a roll already under way finishes.
+        val hindered = if (combat.playerStunned(player)) 0f else 1f - combat.playerSlow(player)
+        val pace = (player.sheet(content::insert) + parts.survival.modifiers()).multiplier(Stat.MOVE_SPEED) * hindered
+        player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
+        // The ground around the player now; the rest of the window a couple of chunks a tick.
+        streamingWorld.focusOn(player.blockPos, URGENT_STREAM_RADIUS)
+        streamingWorld.pump(STREAM_BUDGET)
+        encounters.populateMarkers()
+
+        val news = parts.politics.advance(deltaSeconds)
+        val earlier = state.pending.toList().also { state.pending.clear() }
+        val fought = parts.fight.monstersAct(deltaSeconds, currentBiome.id)
+        val produced = earlier + news + fought + parts.gear.collect() + parts.politics.endRaids()
+        animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { parts.flashes.intensity(it) > 0f }
+        player = player.copy(cooldowns = player.cooldowns.advanced(deltaSeconds), attackCooldown = (player.attackCooldown - deltaSeconds).coerceAtLeast(0f))
+        events = produced
+        return produced
+    }
+
+    /**
+     * Gets the player back on their feet after dying, in the same world.
+     * Death costs progress toward the current level, never the level and
+     * never the gear: losing a weapon to a mistimed roll is how people stop
+     * playing. What it does cost is the walk back.
+     */
+    fun revive(): ReviveResult {
+        if (player.isAlive) return ReviveResult.StillStanding
+        val lost = (player.experience * config.rules.deathPenalty).roundToInt()
+        player = player.copy(position = parts.spawnPoint(), experience = (player.experience - lost).coerceAtLeast(0), attackCooldown = 0f, cooldowns = SkillCooldowns())
+        combat.clear()
+        player = parts.profile.restored(player)
+        // The run starts clean: no leftover roll, no stale numbers over a corpse that is no longer there.
+        motion.reset()
+        parts.building.reset()
+        cues.clear()
+        parts.flashes.clear()
+        parts.impacts.clear()
+        animator.clear()
+        parts.table.clear()
+        parts.survival.clear()
+        encounters.clearAround(player.position, REVIVE_CLEAR_RADIUS)
+        events = emptyList()
+        return ReviveResult.Revived(experienceLost = lost)
+    }
+
+    /** Boons and banes running now, from tabletop checks. */
+    val activeBoons: List<ActiveBoon> get() = parts.table.boons
+
+    /** Seconds before a check can be tried again; 0 when it is ready. */
+    fun checkCooldown(checkId: String): Float = parts.table.cooldownOf(checkId)
+
+    /** Rolls a tabletop check from the session's own dice; see [TableState.attempt]. */
+    fun attemptCheck(checkId: String): CheckAttempt =
+        parts.table.attempt(content.check(checkId), parts.heroClass, player.level, player.isAlive, parts.random)
+            .also { if (it is CheckAttempt.Rolled) cues.checkRolled(it.result, player.position) }
+
+    /** The character as it should be kept, to carry into the next world. */
+    fun heroSave(id: String = player.heroClassId, savedAt: Long = 0L): HeroSave = parts.progression.heroSave(id, savedAt)
+
+    /**
+     * The world as it stands, to be kept: every chunk the player changed,
+     * where they are, the realm, the markers already cleared, the clock, and
+     * this world's copy of the hero.
+     *
+     * Everything is copied, block cells included, so the save can be written
+     * out on another thread while this one keeps digging: take it on the
+     * thread that ticks the session and nothing in it can tear.
+     */
+    fun worldSave(identity: WorldIdentity, savedAt: Long = 0L, heroId: String = player.heroClassId): WorldSave = WorldSave(
+        identity = identity,
+        lastPlayedAt = savedAt,
+        playSeconds = playSeconds.toLong(),
+        config = config,
+        difficulty = difficulty,
+        hero = heroSave(heroId, savedAt),
+        player = WorldPlayer.of(player),
+        clockSeconds = clock.elapsedSeconds,
+        blockIds = content.registry.all.map { it.id },
+        chunks = streamingWorld.dirtyChunks().map(SavedChunk::of).sortedWith(compareBy({ it.x }, { it.y })),
+        realm = parts.politics.realmSave(),
+        consumedMarkers = encounters.consumedMarkers,
+    )
 
     /** Short-lived visuals: damage numbers, misses, level-ups. */
     val feedback: List<FeedbackMark> get() = cues.active
 
     /** How hard an actor is currently being shoved, 0..1. */
-    fun impactFor(actorId: String): Float = impacts.intensity(actorId)
+    fun impactFor(actorId: String): Float = parts.impacts.intensity(actorId)
 
     fun animationFor(actorId: String): AnimationPlayback = animator.playbackFor(actorId)
 
     /** How lit an actor is from a recent hit, 0..1. */
-    fun flashFor(actorId: String): Float = hitFlashes.intensity(actorId)
+    fun flashFor(actorId: String): Float = parts.flashes.intensity(actorId)
 
-    /**
-     * Which region a column belongs to, or null when the generator has none.
-     * Exposed for the renderer: art direction is per region.
-     */
-    fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = biomeSource?.biomeAt(worldX, worldY)
-
-    /** The town the player is standing in, or null out in the wilds. */
-    val currentSettlement: SettlementPlan?
-        get() = atlas?.settlementAt(player.blockPos.x, player.blockPos.y)
-
-    /** Towns within [radius] blocks of the player, for a map or a compass. */
-    fun settlementsNear(radius: Int): List<SettlementPlan> = atlas?.settlementsNear(player.blockPos.x, player.blockPos.y, radius).orEmpty()
-
-    /**
-     * Hand-authored maps are left as their author drew them; every other
-     * world gets the towns its packs describe, laid over its terrain.
-     */
-    private fun withTowns(base: TerrainGenerator): TerrainGenerator =
-        if (content.terrain.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP) base
-        else SettlementTerrain.over(
-            base, content.registry, config.seed, content.settlements,
-            startingTown = config.rules.startInTown, density = config.rules.townDensity, welcoming = ::welcoming,
-        )
-
-    /** A town the player can begin in: one whose people are not hostile to a newcomer. */
-    private fun welcoming(recipe: SettlementRecipe): Boolean =
-        if (recipe.factionId != null) content.factionBook.stanceToPlayer(recipe.factionId, Reputation()) != Stance.HOSTILE
-        else recipe.garrison.isEmpty()
+    /** Which region a column belongs to, or null when the generator has none. Art direction is per region. */
+    fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = parts.biomeSource?.biomeAt(worldX, worldY)
 
     /** The biome under the player's feet, from the same function of position that made the terrain. */
-    val currentBiome: BiomeDefinition
-        get() = biomeSource?.biomeAt(player.blockPos.x, player.blockPos.y) ?: content.biomes.firstOrNull() ?: UNCHARTED
-
-    /** Skills the class has, resolved against the loaded packs and tuned by the build. */
-    val skills: List<SkillDefinition> get() = player.skillIds.mapNotNull(::skillOrNull)
-
-    /** A skill as this character casts it, with the build's damage, cost, cooldown and area applied. */
-    fun skillOrNull(skillId: String): SkillDefinition? = content.skill(skillId)?.let { workbench.tuned(player, it) }
-
-    // ---- movement --------------------------------------------------------
+    val currentBiome: BiomeDefinition get() = parts.biomeAt(player.blockPos.x, player.blockPos.y)
 
     val isRolling: Boolean get() = motion.isRolling
 
@@ -260,369 +302,12 @@ class WorldSession(
     fun move(dx: Float, dy: Float): MoveOutcome {
         val outcome = motion.step(player, dx, dy)
         player = outcome.player
-        if (outcome.moved) streamingWorld.focusOn(player.blockPos)
+        if (outcome.moved) streamingWorld.focusOn(player.blockPos, URGENT_STREAM_RADIUS)
         return outcome
     }
 
-    // ---- digging and placing ---------------------------------------------
-
-    /** Applies mining effort to a block, continuing a dig already under way on it. */
-    fun mine(target: BlockPos, deltaSeconds: Float): MineResult {
-        val request = MineRequest(player.blockPos, target, player.toolTier, deltaSeconds, mining.effortOn(target))
-        val result = interaction.mine(request)
-        when (result) {
-            is MineResult.InProgress -> mining.record(result.progress)
-            is MineResult.Broken -> {
-                mining.reset()
-                player = motion.advance(pocketed(player, result.drop), 0f)
-                survival.forage(result.block.id, result.block.material, random).forEach { player = player.withItem(it) }
-            }
-            is MineResult.Rejected -> mining.reset()
-        }
-        return result
-    }
-
-    fun cancelMining() = mining.reset()
-
-    val miningFraction: Float get() = mining.fraction(world)
-
-    /**
-     * Places the selected hotbar block against the block the player touched,
-     * spending one from the inventory. [picked] is a solid block -- the only
-     * thing a tap can resolve to -- so the cell to fill is the face next to it.
-     */
-    fun place(picked: BlockPos): PlaceResult {
-        val blockId = player.selectedBlockId ?: return PlaceResult.Rejected(PlaceRejection.UNKNOWN_BLOCK)
-        // Building and digging share a surface. Placing without stopping the dig
-        // means the block being mined keeps breaking while you build.
-        cancelMining()
-        val target = interaction.placementCellFor(picked, player.blockPos, actorCells())
-            ?: return PlaceResult.Rejected(PlaceRejection.OCCUPIED)
-        val spent = player.consuming(blockId) ?: return PlaceResult.Rejected(PlaceRejection.UNKNOWN_BLOCK)
-        val result = interaction.place(
-            PlaceRequest(player.blockPos, target, blockId, occupiedByActors = setOf(player.feet, player.feet.above())),
-        )
-        if (result is PlaceResult.Placed) player = spent
-        return result
-    }
-
-    /** Where a tap on [picked] would actually put a block, for the ghost preview. */
-    fun placementPreviewFor(picked: BlockPos): BlockPos? =
-        interaction.placementCellFor(picked, player.blockPos, actorCells())
-
     fun selectSlot(slot: Int) {
         player = player.selectingSlot(slot)
-    }
-
-    // ---- building ---------------------------------------------------------
-
-    /** Blocks a pending build would place, for the ghost preview. Empty when not building. */
-    val buildPreview: List<BlockPos> get() = building.preview
-
-    val buildTool: BuildTool get() = building.tool
-
-    fun selectBuildTool(tool: BuildTool) = building.selectTool(tool)
-
-    /** Previews what a drag from [from] to [to] would build. Nothing is placed. */
-    fun previewBuild(from: BlockPos, to: BlockPos): BuildPreview = building.plan(from, to, player)
-
-    fun cancelBuild() = building.cancel()
-
-    fun commitBuild(): BuildResult {
-        val committed = building.commit(player)
-        player = committed.player
-        when (val result = committed.result) {
-            is BuildResult.Built -> cues.built(result.placed, player.position)
-            is BuildResult.Erased -> {
-                player = motion.advance(player, 0f)
-                cues.cleared(result.removed, player.position)
-            }
-            else -> Unit
-        }
-        return committed.result
-    }
-
-    /** The room the player is standing in, if any. Recomputed on demand, because walls change while building. */
-    fun shelter(): RoomScan = roomScanner.scan(player.blockPos)
-
-    // ---- the fight --------------------------------------------------------
-
-    /**
-     * Advances the world by one frame: spawns, moves and resolves monsters,
-     * collects loot the player is standing on, and ticks cooldowns.
-     *
-     * Returns the events it produced rather than mutating a log, so a caller
-     * that drops a frame loses the floating numbers and nothing else.
-     */
-    fun tick(deltaSeconds: Float): List<CombatEvent> {
-        if (!player.isAlive) {
-            events = emptyList()
-            return events
-        }
-        cues.advance(deltaSeconds)
-        table.advance(deltaSeconds)
-        hitFlashes.advance(deltaSeconds)
-        animator.advanceHolds(deltaSeconds)
-        advanceImpacts(deltaSeconds)
-        // Movement first: a roll should be able to carry the player out of
-        // reach before the monsters around them take their swing.
-        clock.advance(deltaSeconds)
-        player = survival.advance(player, deltaSeconds, clock, currentBiome)
-        val pace = (player.build + survival.modifiers(player)).multiplier(Stat.MOVE_SPEED)
-        player = motion.advance(player, deltaSeconds, PlayerMotion.WALK_SPEED * pace)
-        streamingWorld.focusOn(player.blockPos)
-
-        val news = realm.advance(deltaSeconds, player.position, random).onEach(::onRealm).map(CombatEvent::Realm)
-        val produced = pending.toList().also { pending.clear() } + news + monstersAct(deltaSeconds) + collectLoot() + collectInserts() + endRaids()
-        animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { hitFlashes.intensity(it) > 0f }
-        player = player.copy(
-            cooldowns = player.cooldowns.advanced(deltaSeconds),
-            attackCooldown = (player.attackCooldown - deltaSeconds).coerceAtLeast(0f),
-        )
-        events = produced
-        return produced
-    }
-
-    /** A basic swing. Refused while the weapon is still recovering. */
-    fun attack(): AttackReport {
-        if (player.attackCooldown > 0f) return AttackReport.NotReady
-        val stats = playerStats
-        val damageType = player.equippedWeapon?.damageTypeWithSockets(::insertOrNull) ?: DEFAULT_DAMAGE_TYPE
-        val outcome = combat.playerAttack(stats, player.position, player.facing, enemies.filterNot(::isAllied), damageType, random)
-        player = player.copy(attackCooldown = stats.secondsBetweenAttacks)
-        animator.holdAttack(PLAYER_ACTOR_ID)
-        return applyOutcome(outcome)
-    }
-
-    /** Casts one of the class's skills, spending resource and starting its cooldown. */
-    fun castSkill(skillId: String): AttackReport {
-        val skill = skillOrNull(skillId) ?: return AttackReport.UnknownSkill
-        if (!player.cooldowns.isReady(skillId)) return AttackReport.OnCooldown
-        if (player.resource < skill.resourceCost) return AttackReport.NotEnoughResource
-
-        val outcome = combat.castSkill(playerStats, player.position, player.facing, enemies.filterNot(::isAllied), skill, random)
-        // Cost and cooldown are paid whether or not anything was standing there,
-        // so a skill cannot be spammed to scout for targets for free.
-        player = player.copy(
-            resource = (player.resource - skill.resourceCost).coerceAtLeast(0),
-            cooldowns = player.cooldowns.started(skill),
-        )
-        animator.holdCast(PLAYER_ACTOR_ID)
-        return applyOutcome(outcome, skill)
-    }
-
-    /**
-     * Places a monster deliberately, for a scripted encounter or a shrine that
-     * wakes something up. The director fills the world on its own; this is for
-     * when the world should contain something specific.
-     */
-    fun spawn(definition: EnemyDefinition, position: WorldPoint): EnemyInstance =
-        director.instantiate(definition, position, player.level, random).also { enemies = enemies + it }
-
-    /** Puts an item on the ground, for a chest or a quest reward. */
-    fun dropLoot(item: ItemInstance, position: WorldPoint) = ground.drop(GroundLoot(item, position))
-
-    /** Puts an insert on the ground. */
-    fun dropInsert(insertId: String, position: WorldPoint) = ground.drop(GroundInsert(insertId, position))
-
-    /** Environmental damage: a fall, a trap, a hazard block. */
-    fun hurtPlayer(amount: Int): Boolean {
-        if (amount > 0) player = player.damaged(amount)
-        return player.isAlive
-    }
-
-    /**
-     * Gets the player back on their feet after dying, in the same world.
-     *
-     * Death costs progress toward the current level, not the level itself, and
-     * never the gear: losing a weapon you spent an hour socketing to a mistimed
-     * roll is how people stop playing. What it does cost is the walk back.
-     */
-    fun revive(): ReviveResult {
-        if (player.isAlive) return ReviveResult.StillStanding
-        val lost = (player.experience * config.rules.deathPenalty).roundToInt()
-        player = player.copy(
-            position = findSpawn(),
-            experience = (player.experience - lost).coerceAtLeast(0),
-            attackCooldown = 0f,
-            cooldowns = SkillCooldowns(),
-        )
-        player = player.copy(health = player.maxHealthWith(::insertOrNull), resource = player.resourceCeiling)
-        forgetTheLastRun()
-        // Monsters that had cornered the player do not get to greet them at the
-        // spawn point; the director refills the world soon enough.
-        enemies = enemies.filter { it.position.horizontalDistanceTo(player.position) > REVIVE_CLEAR_RADIUS }
-        events = emptyList()
-        return ReviveResult.Revived(experienceLost = lost)
-    }
-
-    // ---- the satchel and the anvil ------------------------------------------
-
-    /** Equips something from the bag; what was held goes back into it. */
-    fun equip(instanceId: String): EquipResult {
-        val (updated, result) = gear.equip(player, instanceId)
-        player = updated
-        return result
-    }
-
-    /**
-     * Drops an item out of the bag onto the ground at the player's feet. It
-     * lands rather than vanishing, so the player can change their mind.
-     */
-    fun discard(instanceId: String): EquipResult {
-        val item = player.bag.firstOrNull { it.instanceId == instanceId } ?: return EquipResult.NotInBag
-        player = player.copy(bag = player.bag - item)
-        // Dropped a step away, or the player picks it straight back up.
-        ground.drop(GroundLoot(item, player.position.translated(DISCARD_STEP, 0f, 0f)))
-        return EquipResult.Discarded(item)
-    }
-
-    /** Resolves an insert id against the loaded packs. */
-    fun insertOrNull(insertId: String): InsertDefinition? = content.insert(insertId)
-
-    /**
-     * The player's stats with their weapon's inserts and any running boons
-     * counted in. Every combat path reads this, so a rune or a blessing is
-     * never in the tooltip but missing from the swing.
-     */
-    val playerStats: CombatStats
-        get() = table.applyTo(StatSheet(survival.modifiers(player)).applyTo(player.combatStatsWith(::insertOrNull, damageTypeIds), damageTypeIds))
-
-    // ---- survival ------------------------------------------------------------
-
-    /** Whether this world's rules and packs make the body's needs matter. */
-    val survivalActive: Boolean get() = survival.active
-
-    /** The surroundings as the body last felt them: night, a roof, a fire. */
-    val surroundings: Environment get() = survival.surroundings
-
-    /** Food and drink the player is carrying, with counts. */
-    val heldFood: List<Held<ConsumableDefinition>>
-        get() = content.consumables.mapNotNull { food -> player.countOf(food.id).takeIf { it > 0 }?.let { Held(food, it) } }
-
-    /** Every recipe, and whether it can be made here and now. */
-    val recipeOptions: List<RecipeOption> get() = survival.options(player)
-
-    val canDrink: Boolean get() = survival.active && survival.waterNear(player.blockPos)
-
-    fun consume(itemId: String): SurvivalResult = survival.consume(player, itemId).also { player = it.first }.second
-
-    fun drink(): SurvivalResult = survival.drink(player).also { player = it.first }.second
-
-    fun make(recipeId: String): SurvivalResult = survival.make(player, recipeId).also { player = it.first }.second
-
-    // ---- the passive tree --------------------------------------------------
-
-    /** The tree characters grow on in this world, or null when it has no combat. */
-    val passiveTree: PassiveTree? get() = content.passiveTree
-
-    /** The player's allocation on [passiveTree]. */
-    val passiveBuild: PassiveBuild? get() = passiveProgress.buildFor(player)
-
-    /** Takes a node, and the path to it when it is not adjacent, if the points are there. */
-    fun allocatePassive(nodeId: String): PassiveResult {
-        val (updated, result) = passiveProgress.allocate(player, nodeId)
-        player = updated
-        if (result is PassiveResult.Allocated) cues.passiveTaken(result.nodes.last().name, player.position)
-        return result
-    }
-
-    // ---- crafting and supports ---------------------------------------------
-
-    /** Currency the player holds, in the order the packs list it. */
-    val heldCurrency: List<Held<CurrencyDefinition>> get() = workbench.heldCurrency(player)
-
-    /** Supports the player holds but has not linked. */
-    val heldSupports: List<Held<SupportDefinition>> get() = workbench.heldSupports(player)
-
-    /** Supports linked to one skill, in link order. */
-    fun supportsOn(skillId: String): List<SupportDefinition> = workbench.linkedTo(player, skillId)
-
-    /** Spends one currency on an item the player holds. */
-    fun craft(instanceId: String, currencyId: String): CraftResult {
-        val (updated, result) = workbench.craft(player, instanceId, currencyId, random)
-        player = updated
-        if (result is CraftResult.Crafted) cues.itemTaken(result.after.name, player.position, content.rarityColor(result.after.rarity), equipped = true)
-        return result
-    }
-
-    fun linkSupport(skillId: String, supportId: String): SupportResult {
-        val (updated, result) = workbench.link(player, skillId, supportId)
-        player = updated
-        return result
-    }
-
-    fun unlinkSupport(skillId: String, supportId: String): SupportResult {
-        val (updated, result) = workbench.unlink(player, skillId, supportId)
-        player = updated
-        return result
-    }
-
-    // ---- the character between worlds ---------------------------------------
-
-    /** Takes a carried waystone out of the pouch to open its world, or null when it is not held. */
-    fun takeWaystone(waystoneId: String): Waystone? {
-        val waystone = player.waystones.firstOrNull { it.id == waystoneId } ?: return null
-        player = player.copy(waystones = player.waystones - waystone)
-        return waystone
-    }
-
-    /** The character as it should be kept, to carry into the next world. */
-    fun heroSave(id: String = player.heroClassId, savedAt: Long = 0L): HeroSave = HeroSave.of(player, id, savedAt)
-
-    /** Gives a node back for free, when nothing else taken depends on it. */
-    fun refundPassive(nodeId: String): PassiveResult {
-        val (updated, result) = passiveProgress.refund(player, nodeId)
-        player = updated
-        return result
-    }
-
-    // ---- the table ---------------------------------------------------------
-
-    /** Boons and banes running now, from tabletop checks. */
-    val activeBoons: List<ActiveBoon> get() = table.boons
-
-    /** Seconds before a check can be tried again; 0 when it is ready. */
-    fun checkCooldown(checkId: String): Float = table.cooldownOf(checkId)
-
-    /**
-     * Rolls a tabletop check with the hero's attributes and level, from the
-     * session's own dice, so a seeded run rolls the same. Success grants the
-     * check's boon; a natural one inflicts its bane.
-     */
-    fun attemptCheck(checkId: String): CheckAttempt {
-        val check = content.check(checkId) ?: return CheckAttempt.UnknownCheck
-        if (table.cooldownOf(checkId) > 0f) return CheckAttempt.OnCooldown(table.cooldownOf(checkId))
-        if (!player.isAlive) return CheckAttempt.Refused
-        val result = Tabletop.attempt(check, heroClass, player.level, random)
-        table.startCooldown(checkId, check.cooldownSeconds)
-        result.effect?.let(table::grant)
-        cues.checkRolled(result, player.position)
-        return CheckAttempt.Rolled(result)
-    }
-
-    /** Inserts the player is carrying loose, resolved and sorted for display. */
-    val heldInserts: List<HeldInsert>
-        get() = player.insertBag.entries
-            .mapNotNull { (id, count) -> content.insert(id)?.let { HeldInsert(it, count) } }
-            .sortedWith(compareByDescending<HeldInsert> { it.definition.tier }.thenBy { it.definition.name })
-
-    /** Slots one of the player's inserts into an item they are holding. */
-    fun slotInsert(instanceId: String, insertId: String): SocketResult {
-        val (updated, result) = gear.slot(player, instanceId, insertId)
-        player = updated
-        if (result is SocketResult.Slotted) {
-            val insert = content.insert(insertId)
-            cues.insertSlotted(insert?.name ?: insertId, player.position, insert?.color)
-        }
-        return result
-    }
-
-    /** Pulls an insert back out, returning it to the pouch intact. */
-    fun unslotInsert(instanceId: String, socketIndex: Int): SocketResult {
-        val (updated, result) = gear.unslot(player, instanceId, socketIndex)
-        player = updated
-        return result
     }
 
     /** Immutable view for the UI layer. */
@@ -630,17 +315,19 @@ class WorldSession(
         player = player,
         focus = streamingWorld.focus,
         biome = currentBiome,
-        miningTarget = mining.target,
+        miningTarget = parts.building.miningTarget,
         miningFraction = miningFraction,
         isRolling = isRolling,
         isInvulnerable = isInvulnerable,
         rollCooldownFraction = rollCooldownFraction,
         feedback = feedback,
-        playerFlash = hitFlashes.intensity(PLAYER_ACTOR_ID),
+        playerFlash = parts.flashes.intensity(PLAYER_ACTOR_ID),
         playerAnimation = animationFor(PLAYER_ACTOR_ID),
         buildPreview = buildPreview,
         buildTool = buildTool,
-        worldRevision = streamingWorld.loadedChunks.sumOf { it.revision },
+        // Edits and streaming both: a chunk that streams in starts at revision
+        // zero, so the edit sum alone never changed when new ground arrived.
+        worldRevision = 31 * streamingWorld.loadedChunks.sumOf { it.revision } + streamingWorld.residency,
         enemies = enemies,
         groundLoot = groundLoot,
         groundInserts = groundInserts,
@@ -649,430 +336,68 @@ class WorldSession(
         activeBoons = activeBoons,
         settlement = currentSettlement,
         settlementHostile = currentSettlement?.let(::isHostileTown) ?: false,
+        projectiles = combat.projectiles.active,
+        zones = combat.zones.active,
+        telegraphs = combat.telegraphs(enemies, player),
+        statuses = combat.statuses.all().mapValues { it.value.instances },
+        flasks = combat.flaskViews,
+        maxHealth = maxHealth,
+        maxResource = maxResource,
     )
-
-    // ---- the steps a tick is made of ----------------------------------------
-
-    /** Monsters spawn, close in and swing. Returns what the player should be told. */
-    private fun monstersAct(deltaSeconds: Float): List<CombatEvent> {
-        if (content.enemies.isEmpty()) return emptyList()
-        val towns = townsInSight()
-        enemies = director.maintainPopulation(enemies, player.position, currentBiome.id, player.level, random) { spot ->
-            // Friendly streets are safe: nothing wild spawns inside their walls.
-            towns.none { it.contains(kotlin.math.floor(spot.x).toInt(), kotlin.math.floor(spot.y).toInt()) && !isHostileTown(it) }
-        }
-        enemies = enemies + garrisons.muster(towns, enemies, player.level, random)
-        enemies = crowd.advance(enemies, player.position, ::isHostile, deltaSeconds, allyOrders())
-
-        val incoming = combat.enemyAttacks(
-            enemies = enemies.filter(::isHostile),
-            defender = playerStats,
-            defenderPosition = player.position,
-            cooldownFor = { it.stats.secondsBetweenAttacks },
-            random = random,
-        )
-        // Whoever swung is mid-attack for a beat, so the animation reads.
-        incoming.enemies.filter { it.attackCooldown > 0f && it.isAlive }.forEach { animator.holdAttack(it.instanceId) }
-        val swung = incoming.enemies.associateBy { it.instanceId }
-        enemies = enemies.map { swung[it.instanceId] ?: it }
-        skirmish()
-        homeComing()
-        rally(deltaSeconds)
-        return if (incoming.totalDamage > 0) takeHit(incoming) else emptyList()
-    }
-
-    /**
-     * A blow that lands, or does not. A swing during a roll still happened and
-     * went on cooldown; reporting that it missed is what makes a well-timed
-     * roll legible.
-     */
-    private fun takeHit(incoming: EnemyAttackOutcome): List<CombatEvent> {
-        if (isInvulnerable) {
-            cues.dodged(player.position)
-            return listOf(CombatEvent.PlayerDodged(incoming.totalDamage))
-        }
-        player = player.damaged(incoming.totalDamage)
-        cues.hurt(incoming.totalDamage, player.position)
-        hitFlashes.strike(PLAYER_ACTOR_ID)
-        val hurt = CombatEvent.PlayerHurt(incoming.totalDamage, incoming.results)
-        if (player.isAlive) return listOf(hurt)
-        cues.fallen(player.position)
-        return listOf(hurt, CombatEvent.PlayerDied)
-    }
-
-    private fun applyOutcome(outcome: AttackOutcome, skill: SkillDefinition? = null): AttackReport {
-        if (outcome !is AttackOutcome.Hits) return AttackReport.Missed
-        val byId = outcome.hits.associateBy { it.enemyId }
-        enemies = enemies.map { byId[it.instanceId]?.enemy ?: it }
-        provoked += outcome.hits.map { it.enemyId }
-        outcome.hits.forEach(::showHit)
-
-        val healed = outcome.hits.sumOf { it.result.healedAttacker }
-        if (healed > 0) {
-            player = player.healed(healed)
-            cues.healed(healed, player.position)
-        }
-        val slain = enemies.filterNot { it.isAlive }
-        if (slain.isNotEmpty()) buryTheDead(slain)
-        return AttackReport.Landed(hits = outcome.hits, slain = slain, skill = skill)
-    }
-
-    /** The number, the flash and the shove of one hit. */
-    private fun showHit(hit: EnemyHit) {
-        val color = content.damageType(hit.result.damageTypeId).color
-        when {
-            hit.result.wasBlocked -> cues.blocked(hit.enemy.position)
-            hit.result.wasCritical -> cues.critical(hit.result.amount, hit.enemy.position, color)
-            else -> cues.dealt(hit.result.amount, hit.enemy.position, color)
-        }
-        hitFlashes.strike(hit.enemyId)
-        // Force scales with the blow, but only a heavy hit really throws: an
-        // ordinary swing barely rocks the body, because knocking a monster back
-        // every time pushes it out of reach and turns melee into chase-and-poke.
-        val heavy = hit.result.wasCritical || hit.result.amount >= hit.enemy.stats.maxHealth * HEAVY_HIT_FRACTION
-        impacts.strike(
-            actorId = hit.enemyId,
-            from = player.position,
-            to = hit.enemy.position,
-            force = hit.result.amount.toFloat() * if (heavy) 1f else LIGHT_HIT_DAMPING,
-        )
-    }
-
-    private fun buryTheDead(slain: List<EnemyInstance>) {
-        enemies = enemies.filter { it.isAlive }
-        slain.forEach { enemy ->
-            hitFlashes.forget(enemy.instanceId)
-            impacts.forget(enemy.instanceId)
-            drops.gearFor(enemy, player.level, random, earnings.lootFind)?.let(ground::drop)
-            drops.insertFor(enemy, player.level, random)?.let(ground::drop)
-            drops.valuablesFor(enemy, player.level, random, earnings.lootFind).forEach { pocket(it, enemy.position) }
-            survival.carcass(random)?.let { player = player.withItem(it) }
-            if (enemy.rank >= EnemyRank.CHAMPION) conquer(enemy.position)
-            enemy.factionId?.let { player = player.copy(reputation = player.reputation.afterKilling(it, content.factionBook)) }
-            provoked -= enemy.instanceId
-        }
-        garrisons.onSlain(slain, townsInSight()).forEach(::liberate)
-        awardExperience(slain.sumOf { it.experience })
-    }
-
-    /** The build and the world's rewards together: what a kill here pays this character. */
-    private val earnings: StatSheet get() = player.build + difficulty.rewards.modifiers + ruleRewards
-
-    /** The world rules' loot and experience dials, as the modifiers they are. */
-    private val ruleRewards = listOfNotNull(
-        StatModifier(Stat.ITEM_QUANTITY, ModifierKind.MORE, config.rules.lootMultiplier - 1f).takeIf { config.rules.lootMultiplier != 1f },
-        StatModifier(Stat.EXPERIENCE_GAIN, ModifierKind.MORE, config.rules.experienceMultiplier - 1f).takeIf { config.rules.experienceMultiplier != 1f },
-    )
-
-    // ---- factions and towns --------------------------------------------------
-
-    /** Whether [enemy] fights the player: its faction is hostile, or the player struck it. */
-    fun isHostile(enemy: EnemyInstance): Boolean =
-        enemy.instanceId in provoked || content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE
-
-    /** Whether [enemy] is on the player's side, and so is never a target. */
-    fun isAllied(enemy: EnemyInstance): Boolean =
-        enemy.instanceId !in provoked && content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.ALLIED
-
-    /** Whether [town] is held against the player: a hostile faction's, or an unaligned camp with a garrison, and not yet freed. */
-    fun isHostileTown(town: SettlementPlan): Boolean {
-        if (garrisons.isLiberated(town.id)) return false
-        return if (town.factionId != null) content.factionBook.stanceToPlayer(town.factionId, player.reputation) == Stance.HOSTILE
-        else town.recipe.garrison.isNotEmpty()
-    }
-
-    /** Towns whose people the player should be able to see or meet. */
-    private fun townsInSight(): List<SettlementPlan> = settlementsNear(TOWN_SIGHT)
-
-    // ---- the realm -------------------------------------------------------------
-
-    /** Whether the loaded packs give outposts something to build. */
-    val realmActive: Boolean get() = realm.active
-
-    val outposts: List<Outpost> get() = realm.outposts
-
-    /** The outpost the player stands in. */
-    val currentOutpost: Outpost? get() = realm.outpostAt(player.blockPos.x, player.blockPos.y)
-
-    /** The player's followers in the field. */
-    val followers: List<EnemyInstance> get() = enemies.filter { it.factionId == Factions.PLAYER && it.home == null && it.isAlive }
-
-    val followerOrder: FollowerOrder get() = realm.order
-
-    fun foundOutpost(name: String): RealmResult = realm.found(player, townsInSight(), name).also { player = it.first }.second
-
-    fun build(outpostId: String, structureId: String): RealmResult = realm.build(outpostId, structureId)
-
-    fun recruit(outpostId: String, unitId: String): RealmResult = realm.recruit(outpostId, unitId)
-
-    fun deposit(): RealmResult = realm.deposit(player).also { player = it.first }.second
-
-    /** Takes soldiers from this outpost's garrison to follow the player, up to the follower limit. */
-    fun muster(count: Int = RealmSystem.MAX_FOLLOWERS): RealmResult {
-        val room = (RealmSystem.MAX_FOLLOWERS - followers.size).coerceAtLeast(0)
-        val (unitIds, result) = realm.muster(player, minOf(count, room))
-        enemies = enemies + unitIds.mapNotNull { spawnSoldier(it, near = player.position, home = null) }
-        return result
-    }
-
-    fun command(order: FollowerOrder): RealmResult = realm.command(order, player.position)
-
-    private fun allyOrders() = AllyOrders(realm.order, player.position, realm.holdAt, realm.returnPoint(player.position))
-
-    private fun spawnSoldier(unitId: String, near: WorldPoint, home: WorldPoint?): EnemyInstance? {
-        val unit = content.strategyBook.unit(unitId) ?: return null
-        val body = director.definition(unit.actorId) ?: return null
-        val spot = director.grounded(near.translated(random.nextFloat() * 2f - 1f, random.nextFloat() * 2f - 1f, 0f)) ?: near
-        return director.instantiate(body, spot, player.level, random).copy(squadId = UNIT_SQUAD + unitId, home = home)
-    }
-
-    /** Followers and hostiles in reach trade blows; a hostile that already swung at the player waits its turn. */
-    private fun skirmish() {
-        val friends = enemies.filter { it.factionId == Factions.PLAYER && it.isAlive }
-        if (friends.isEmpty()) return
-        val foes = enemies.filter { isHostile(it) && it.isAlive }
-        val (foesAfter, friendsHit, _) = Skirmish.exchange(foes, friends, random)
-        val (friendsAfter, foesHit, _) = Skirmish.exchange(friendsHit, foesAfter, random)
-        val updated = (friendsAfter + foesHit).associateBy { it.instanceId }
-        enemies = enemies.map { updated[it.instanceId] ?: it }
-        val fallen = enemies.filter { !it.isAlive }
-        enemies = enemies.filter { it.isAlive || it.factionId != Factions.PLAYER }
-        val slain = fallen.filter { it.factionId != Factions.PLAYER }
-        if (slain.isNotEmpty()) buryTheDead(slain)
-    }
-
-    /** Seconds each follower has spent failing to close on the player. */
-    private val lagging = HashMap<String, Float>()
-
-    /**
-     * A follower stuck under a ledge the player climbed, or left far behind,
-     * catches up: it reappears beside the player. Every ARPG with followers
-     * does this, because a follower stuck on a rock is not a follower.
-     */
-    private fun rally(deltaSeconds: Float) {
-        if (realm.order != FollowerOrder.FOLLOW && realm.order != FollowerOrder.FIGHT) return lagging.clear()
-        val present = followers
-        lagging.keys.retainAll(present.map { it.instanceId }.toSet())
-        enemies = enemies.map { enemy ->
-            if (enemy !in present) return@map enemy
-            val distance = enemy.position.horizontalDistanceTo(player.position)
-            val stuck = distance > RALLY_NEAR && enemy.state != com.stratum.core.domain.actor.EnemyState.ATTACKING
-            lagging[enemy.instanceId] = if (stuck) (lagging[enemy.instanceId] ?: 0f) + deltaSeconds else 0f
-            if (distance > RALLY_FAR || (lagging[enemy.instanceId] ?: 0f) > RALLY_AFTER) {
-                lagging[enemy.instanceId] = 0f
-                director.grounded(player.position.translated(-1f, -1f, 0f))?.let { enemy.copy(position = it) } ?: enemy
-            } else {
-                enemy
-            }
-        }
-    }
-
-    /** Followers sent home go back into the garrison when they arrive. */
-    private fun homeComing() {
-        if (realm.order != FollowerOrder.RETURN) return
-        val home = realm.returnPoint(player.position) ?: return
-        val arrived = followers.filter { it.position.horizontalDistanceTo(home) <= ARRIVED_HOME }
-        if (arrived.isEmpty()) return
-        realm.garrison(arrived.mapNotNull { it.squadId?.removePrefix(UNIT_SQUAD) }, home)
-        enemies = enemies - arrived.toSet()
-    }
-
-    private fun onRealm(event: RealmEvent) {
-        if (event is RealmEvent.RaidArrived) raid(event.outpost, event.attackers)
-    }
-
-    /**
-     * A raid the player is there to fight: raiders from a hostile faction --
-     * or the wilds, when no faction wants the land -- close in from outside
-     * the walls, and the garrison turns out to meet them at the square.
-     */
-    private fun raid(outpost: Outpost, attackers: Int) {
-        val raiders = raiderDefinitions()
-        if (raiders.isEmpty()) return
-        val squad = RAID_SQUAD + outpost.id
-        val wave = List(attackers) { i ->
-            val angle = i * 2 * Math.PI / attackers + random.nextFloat()
-            val at = WorldPoint(outpost.centerX + (kotlin.math.cos(angle) * (outpost.radius + RAID_DISTANCE)).toFloat(), outpost.centerY + (kotlin.math.sin(angle) * (outpost.radius + RAID_DISTANCE)).toFloat(), player.position.z)
-            director.grounded(at)?.let { spot -> director.instantiate(raiders[i % raiders.size], spot, player.level, random).copy(squadId = squad, isLeader = i == 0) }
-        }.filterNotNull()
-        val square = WorldPoint(outpost.centerX + 0.5f, outpost.centerY + 0.5f, player.position.z)
-        val (turnedOut, _) = realm.muster(player.copy(position = square), RealmSystem.MAX_RAIDERS)
-        val defenders = turnedOut.mapNotNull { spawnSoldier(it, near = square, home = square) }
-        enemies = enemies + wave + defenders
-        // Raiders are hostile to the player whatever their faction thinks: they came to burn it.
-        provoked += wave.map { it.instanceId }
-    }
-
-    private fun raiderDefinitions() = content.enemies.filter { enemy ->
-        enemy.factionId != null && enemy.factionId != Factions.PLAYER && content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE
-    }.ifEmpty { content.enemies.filter { it.factionId == null && it.spawnWeight > 0 } }
-
-    /** Fought raids whose raiders are all gone are over; the garrison that turned out goes home. */
-    private fun endRaids(): List<CombatEvent> = realm.raidsOver { id -> enemies.count { it.squadId == RAID_SQUAD + id && it.isAlive } }.map { event ->
-        if (event is RealmEvent.RaidRepelled) {
-            val defenders = enemies.filter { it.factionId == Factions.PLAYER && it.home != null }
-            realm.garrison(defenders.mapNotNull { it.squadId?.removePrefix(UNIT_SQUAD) }, WorldPoint(event.outpost.centerX.toFloat(), event.outpost.centerY.toFloat(), 0f))
-            enemies = enemies - defenders.toSet()
-        }
-        CombatEvent.Realm(event)
-    }
-
-    private fun liberate(town: SettlementPlan) {
-        realm.adopt(town)
-        cues.townFreed(town.name, player.position)
-        town.factionId?.let { owner ->
-            // Freeing a town from a faction is a blow against it and a gift to its enemies.
-            player = player.copy(reputation = player.reputation.adjusted(owner, -LIBERATION_STANDING, content.factionBook))
-        }
-        pending += CombatEvent.TownLiberated(town)
-    }
-
-    /** Currency, supports and waystones go straight into the pouch. */
-    private fun pocket(valuable: Valuable, at: WorldPoint) {
-        player = when (valuable) {
-            is Valuable.Currency -> player.withCurrency(valuable.definition.id)
-            is Valuable.Support -> player.withSupport(valuable.definition.id)
-            is Valuable.Key -> player.copy(waystones = player.waystones + valuable.waystone)
-        }
-        cues.valuableTaken(valuable.name, at)
-    }
-
-    /**
-     * A champion or boss falling at the hardest tier this character has
-     * reached opens the next one. The endgame is a ladder with no top rung.
-     */
-    private fun conquer(at: WorldPoint) {
-        if (difficulty.tier < player.highestTier) return
-        player = player.copy(highestTier = difficulty.tier + 1)
-        cues.tierOpened(player.highestTier, at)
-    }
-
-    private fun awardExperience(amount: Int) {
-        if (amount <= 0) return
-        val result = Progression.apply(player.level, player.experience, (amount * earnings.multiplier(Stat.EXPERIENCE_GAIN)).roundToInt())
-        player = player.copy(level = result.level, experience = result.experience)
-        if (!result.leveledUp) return
-        // A level restores the character, which is what makes pushing one more
-        // fight at low health a real decision rather than a mistake.
-        player = player.copy(health = player.maxHealthWithGear, resource = player.resourceCeiling)
-        cues.levelUp(result.level, player.position)
-    }
-
-    /** Picks up anything the player is standing on. Upgrades equip themselves. */
-    private fun collectLoot(): List<CombatEvent> = ground.takeLootNear(player.position).map { loot ->
-        // Making the player open a bag to feel a drop is the fastest way to
-        // make loot stop feeling like a reward.
-        val autoEquipped = player.isUpgrade(loot.item)
-        player = if (autoEquipped) player.equipping(loot.item) else player.collecting(loot.item)
-        cues.itemTaken(loot.item.name, player.position, content.rarityColor(loot.item.rarity), autoEquipped)
-        CombatEvent.LootTaken(loot.item, autoEquipped)
-    }
-
-    /** Picks up inserts the player is standing on, into the pouch. */
-    private fun collectInserts(): List<CombatEvent> = ground.takeInsertsNear(player.position).mapNotNull { found ->
-        val definition = content.insert(found.insertId) ?: return@mapNotNull null
-        player = player.withInsert(definition.id)
-        cues.insertTaken(definition.name, player.position, definition.color)
-        CombatEvent.InsertTaken(definition)
-    }
 
     /** Moves whatever is still being knocked back. */
     private fun advanceImpacts(deltaSeconds: Float) {
-        val moved = impacts.advance(deltaSeconds, enemies.associate { it.instanceId to it.position })
-        if (moved.isEmpty()) return
-        enemies = enemies.map { enemy -> moved[enemy.instanceId]?.let { enemy.copy(position = it) } ?: enemy }
+        val moved = parts.impacts.advance(deltaSeconds, enemies.associate { it.instanceId to it.position })
+        if (moved.isNotEmpty()) enemies = enemies.map { enemy -> moved[enemy.instanceId]?.let { enemy.copy(position = it) } ?: enemy }
     }
 
-    private fun playerMotionState() = ActorAnimator.PlayerMotionState(
-        isAlive = player.isAlive,
-        isRolling = isRolling,
-        isMoving = motion.input != WorldPoint.ZERO,
-    )
+    private fun playerMotionState() = ActorAnimator.PlayerMotionState(isAlive = player.isAlive, isRolling = isRolling, isMoving = motion.input != WorldPoint.ZERO)
 
-    // ---- setting up, and starting over ---------------------------------------
+    internal val inspector: BuildInspector get() = parts.inspector
 
-    /**
-     * Arms the class with its starting weapon so the first fight is winnable.
-     * Common, so the first upgrade is an upgrade.
-     */
-    private fun armed(player: PlayerState): PlayerState {
-        val base = heroClass?.startingWeaponId?.let(content::weapon)
-            ?: content.weapons.minByOrNull { it.minItemLevel }
-            ?: return player
-        return player.equipping(lootRoller.craft(base, itemLevel = 1, rarity = ItemRarity.COMMON, random = random))
-    }
+    /** One of the player's numbers, every source of it, and the formula that made it; see [BuildInspector]. */
+    fun explain(query: StatQuery): StatBreakdown = inspector.explain(player, query)
 
-    /**
-     * A hand-authored level's enemies wait where its author put them, standing
-     * on the ground there. Only markers in the loaded world around the spawn
-     * are placed; the director lets anything farther away go anyway.
-     */
-    private fun placeMarkedEncounters() {
-        val level = generator as? MarkedLevel ?: return
-        MapEncounters.plan(level.markers, content.enemies, content.enemiesFor(currentBiome.id), random).forEach { encounter ->
-            val ground = streamingWorld.surfaceAt(floor(encounter.at.x).toInt(), floor(encounter.at.y).toInt())
-            if (ground >= 0) spawn(encounter.definition, WorldPoint(encounter.at.x, encounter.at.y, ground + 1f))
-        }
-    }
+    /** The rules the character breaks now: from the class, the tree and what is worn. */
+    val keystones: Set<Keystone> get() = parts.profile.traits(player).keystones
 
-    /** A mined block goes in the bag, and onto the hotbar if it is something that can be placed. */
-    private fun pocketed(player: PlayerState, drop: String): PlayerState {
-        val holding = player.withItem(drop)
-        val placeable = drop !in holding.hotbar && content.registry.contains(drop)
-        return if (placeable) holding.copy(hotbar = holding.hotbar + drop) else holding
-    }
+    /** What one use of [skill] costs this character now, paid in life under a keystone that says so. */
+    fun costOf(skill: SkillDefinition): SkillCost = SkillCost.of(skill, Keystone.LIFE_PAYS_COSTS in keystones)
 
-    /** The run starts clean: no leftover roll, no stale numbers floating over a corpse that is no longer there. */
-    private fun forgetTheLastRun() {
-        motion.reset()
-        mining.reset()
-        cues.clear()
-        hitFlashes.clear()
-        impacts.clear()
-        animator.clear()
-        table.clear()
-        survival.clear()
-    }
+    /** The fought-with stats of [state] as this world resolves them: for comparing a piece of gear against the whole character. */
+    fun statsFor(state: PlayerState): CombatStats = parts.profile.statsWith(state, parts.profile.traits(state).modifiers)
 
-    /**
-     * Cells a body is standing in. Tapping the ground at your feet should build
-     * beside you rather than refuse, so these are skipped while resolving the
-     * cell rather than rejected after one has been chosen.
-     */
-    private fun actorCells(): Set<BlockPos> = buildSet {
-        add(player.feet)
-        add(player.feet.above())
-        enemies.forEach {
-            add(it.blockPos)
-            add(it.blockPos.above())
-        }
-    }
+    /** [state] refilled to its own ceilings, counted as they are for the player: for tools that remake the character. */
+    internal fun refilled(state: PlayerState): PlayerState = parts.profile.restored(state)
 
-    /**
-     * Drops the player onto the surface at the world origin. Searches outward if
-     * the origin column happens to be unsuitable, so a spawn is never inside rock.
-     */
-    private fun findSpawn(): WorldPoint {
-        for (radius in 0..SPAWN_SEARCH_RADIUS) {
-            for (y in -radius..radius) {
-                for (x in -radius..radius) {
-                    if (maxOf(abs(x), abs(y)) != radius) continue
-                    val surface = streamingWorld.surfaceAt(x, y)
-                    if (surface in 1 until Chunk.HEIGHT - 2) return WorldPoint(x + 0.5f, y + 0.5f, (surface + 1).toFloat())
-                }
-            }
-        }
-        return WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
-    }
+    /** Places a monster at [rank] through the same path a dungeon's boss takes: for tools that call a specific fight. */
+    internal fun spawnAt(definition: EnemyDefinition, position: WorldPoint, rank: EnemyRank): EnemyInstance = encounters.spawn(definition, position, rank)
+
+    /** The build sandbox's tools, in a world whose rules allow them; null everywhere else. */
+    val sandbox: SandboxTools? = if (config.rules.sandbox) SandboxTools(this, combat) else null
 
     companion object {
-        const val SPAWN_SEARCH_RADIUS = 12
+        /**
+         * A session resuming [save]: its world regenerated from the seed with
+         * the saved chunks laid in, and the player, the realm, the markers and
+         * the clock where the save left them. [terrainGenerator] is for the
+         * same callers who pass one to a new session; null resolves the
+         * packs' own, as the save's world was made with.
+         */
+        fun restore(content: AssembledContent, save: WorldSave, terrainGenerator: TerrainGenerator? = null): WorldSession =
+            WorldSession(SessionParts(content, save.config, save.heroClassId, terrainGenerator, save.difficulty, save.hero), save)
+
+        /**
+         * Chunks each way from the player's that are generated the tick they
+         * are needed. Beyond it the window is filled [STREAM_BUDGET] a tick:
+         * the player is always at least this far from ungenerated ground, and
+         * crossing a chunk border no longer generates a whole row at once.
+         */
+        const val URGENT_STREAM_RADIUS = 2
+        const val STREAM_BUDGET = 2
         const val PICKUP_RADIUS = GroundItems.PICKUP_RADIUS
         const val BASE_DROP_CHANCE = LootDrops.BASE_DROP_CHANCE
         const val INSERT_DROP_CHANCE = LootDrops.INSERT_DROP_CHANCE
-
-        /** Far enough that a discard is not undone by the next tick. */
-        const val DISCARD_STEP = 2f
 
         /** Death costs progress toward this level, never a level and never gear. */
         const val EXPERIENCE_LOST_ON_DEATH = 0.25f
@@ -1089,28 +414,8 @@ class WorldSession(
 
         const val PLAYER_ACTOR_ID = "player"
 
-        /** How far away a town's people muster, in blocks. */
-        const val TOWN_SIGHT = 40
-        const val LIBERATION_STANDING = 25
-        const val UNIT_SQUAD = "unit:"
-        const val RAID_SQUAD = "raid:"
-        const val RAID_DISTANCE = 8
-        const val ARRIVED_HOME = 3f
-        const val RALLY_NEAR = 4.5f
-        const val RALLY_FAR = 16f
-        const val RALLY_AFTER = 2f
-
         /** How long an actor is considered mid-swing, for animation only. */
         const val ATTACK_ANIMATION_HOLD = ActorAnimator.HOLD_SECONDS
         private val SPAWN_CHUNK = ChunkPos(0, 0)
-
-        /** Shown when a generator names no regions and the packs define none. */
-        private val UNCHARTED = BiomeDefinition(
-            id = "stratum:uncharted",
-            name = "Uncharted",
-            surfaceBlockId = BlockType.BEDROCK.id,
-            subsurfaceBlockId = BlockType.BEDROCK.id,
-            bedrockFillerBlockId = BlockType.BEDROCK.id,
-        )
     }
 }
