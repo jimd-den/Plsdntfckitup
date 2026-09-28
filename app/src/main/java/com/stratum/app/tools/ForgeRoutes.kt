@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -38,7 +37,8 @@ import com.stratum.feature.play.TextureForgeActions
 import com.stratum.feature.play.TextureForgeScreen
 import com.stratum.feature.play.TextureForgeViewModel
 import com.stratum.feature.play.gl.AndroidImageCodec
-import kotlinx.coroutines.launch
+import com.stratum.app.CreationJobs
+import com.stratum.core.domain.creation.InstantWorld
 
 /*
  * The studio's tools, each wired to the stores it reads and writes. Every
@@ -61,6 +61,8 @@ internal fun ClassForgeRoute(app: AppViewModel, onBack: () -> Unit, modifier: Mo
             deleteClass = app.game::deleteClass,
             loadClasses = app.graph.classes::all,
             loadSheets = app.graph.ai.sprites::all,
+            // "Make a look" draws in the background; the tray shows it working.
+            queueLook = { subject, onDrawn -> CreationJobs.queueHeroLook(app.graph.ai, subject, onDrawn) },
         ),
     )
     ClassForgeScreen(viewModel = classViewModel, modifier = modifier, onBack = onBack)
@@ -77,6 +79,7 @@ internal fun TextureForgeRoute(app: AppViewModel, onBack: () -> Unit, onPlay: ()
             model = ai.imageModel.takeIf { ai.isConfigured() },
             root = app.graph.forgeDirectory,
             initialPrompt = app.game.stylePrompt.value,
+            jobs = app.jobs,
         ),
     )
     TextureForgeScreen(
@@ -94,19 +97,29 @@ internal fun TextureForgeRoute(app: AppViewModel, onBack: () -> Unit, onPlay: ()
 }
 
 @Composable
-internal fun CrewRoute(app: AppViewModel, preset: String?, onBack: () -> Unit, onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
+internal fun CrewRoute(
+    app: AppViewModel,
+    preset: String?,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onPlayNow: (InstantWorld) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val content by app.game.content.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
     val ai = app.graph.ai
-    val plugins = app.graph.plugins
     val crewViewModel: CrewViewModel = viewModel(
         factory = CrewViewModel.factory(
             model = ai.languageModel,
             base = { app.game.content.value.packs },
             presets = CrewPresets.available(content.agentRoles),
             isProviderConfigured = ai::isConfigured,
-            onInstall = { pack -> scope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } },
+            onInstall = app::installGenerated,
             initialPreset = preset,
+            jobs = app.jobs,
+            modelName = { ai.settings.load().model },
+            onPlayNow = onPlayNow,
+            // Held while a world is being played, installed otherwise.
+            deliver = app::deliver,
         ),
     )
     // The view model outlives this screen, so a preset chosen on the way back in is applied here.
@@ -125,6 +138,8 @@ internal fun ContentForgeRoute(app: AppViewModel, onBack: () -> Unit, onOpenSett
             isProviderConfigured = ai::isConfigured,
             creations = plugins::creations,
             saveCreations = { pack -> plugins.installCreations(pack) },
+            jobs = app.jobs,
+            modelName = { ai.settings.load().model },
         ),
     )
     LaunchedEffect(armoury) { armoury.refreshProvider() }
@@ -167,6 +182,7 @@ internal fun SpriteForgeRoute(
                     },
                 )
             },
+            jobs = app.jobs,
         ),
     )
     SpriteForgeScreen(
@@ -283,6 +299,7 @@ internal fun ModelForgeRoute(app: AppViewModel, onBack: () -> Unit, onOpenSettin
             isProviderConfigured = { ai.settings.isModelProviderConfigured },
             encodePng = AndroidImageCodec::encodePng,
             onContentChanged = app.game::modelsChanged,
+            jobs = app.jobs,
         ),
     )
     val referencePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->

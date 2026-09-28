@@ -732,6 +732,57 @@ the player's classes, moved to a namespace of its own so a friend's copy
 sits beside theirs. `ForgeCards` renders results with the item model's
 own tooltip wording, so the forge shows what the satchel will.
 
+## Creation jobs
+
+Creating a hero, a world or a line of lore has to feel instant and never
+be a spinner. Two rules hold that up: every creator produces something
+usable locally first and lets the AI enrich it afterwards, and everything
+the AI does is a **job** a player can watch, leave and come back to.
+
+The model is in `core/domain/.../creation/`. A `CreationJob` is a titled
+list of `JobStep`s -- "Writing the request", "Waiting for <model>" with the
+seconds counting, "Checking the reply", "Repairing 2 fields" -- each with a
+status and one live detail line, plus elapsed time and, once it settles, a
+one-line summary of what came back or why it did not. `JobCenter` is what a
+screen watches (a `StateFlow` of jobs and `cancel`); `JobLauncher` adds
+`launch`, and `InMemoryJobCenter` is the implementation: each job a
+coroutine, cancelled by coroutine cancellation, finished jobs kept for half
+an hour and capped at twenty. Work reports through a `JobReporter` whose
+`begin` finishes the previous step, so a job reads as straight-line code.
+It takes its clock and scope, and is tested on virtual time.
+
+No port changed shape. The provider adapters already report stages to a
+`GenerationObserver`; `JobGenerationObserver` is one more observer that
+turns them into steps, and a retry into steps of its own. The pipeline
+knows what the provider does not, so `:agents` adds `ForgeJobReport` (the
+repair and the check after each reply) and `CrewJobReport` (one step per
+role, its attempt, its wait for approval, what it wrote). `StudioPipeline`
+and `ContentForge` take the observer and hand it to every call.
+
+Instant first, AI second:
+
+- **Lore and gear**: a request appears at once as a card named from its
+  prompt (`ForgePlaceholder`) with the job's steps under it, and the reply
+  replaces it. Several run side by side; the button is never swapped for Stop.
+- **Worlds**: "Play now" in the agent studio plays an `InstantWorld` at once:
+  the loaded packs, the chosen rules, and the look `StyleLexicon` reads from
+  the same sentence. The crew keeps writing as a job. When it finishes,
+  `PackInbox` installs the pack straight away if nothing is being played, so
+  the world is built with it, or holds it and installs it when play ends.
+  A pack is never swapped in under a running session.
+- **Heroes**: the class builder stays local and instant; "Make a look" queues
+  the sprite sheet as a job and picks it for the hero when it lands.
+- **Art**: the texture, sprite and 3D model forges run on the job centre and
+  show the timeline; a pose run keeps its own lifetime (`PoseRun`) and is
+  mirrored as a job with its frames counted.
+
+`:app` holds one process-wide centre (`CreationJobs`), so jobs survive the
+activity being recreated, and hands it to every creator. The design system
+draws them: `JobProgress` (the timeline, elapsed, stop, the outcome in plain
+words) and `JobsTray` (a pill saying how many are running that opens into a
+sheet of every job). The shell places the tray through its `jobsTray` slot,
+as `StratumJobsTray()`.
+
 ## Why the renderer draws into a sink
 
 `WorldFrameRenderer` walks a read-only `World` and emits primitives to a

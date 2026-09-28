@@ -2,6 +2,7 @@ package com.stratum.agents
 
 import com.stratum.core.domain.ai.AgentRoleDefinition
 import com.stratum.core.domain.ai.CrewPlan
+import com.stratum.core.domain.ai.GenerationObserver
 import com.stratum.core.domain.ai.LanguageModelPort
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.PackOrigin
@@ -34,6 +35,11 @@ class StudioPipeline(
         brief: StudioBrief,
         crew: List<AgentRoleDefinition>,
         gate: ApprovalGate = ApprovalGate.ApproveAll,
+        /**
+         * Handed to every model call, so what the provider is doing -- sending,
+         * waiting, reading -- reaches a job's steps as well as the journal.
+         */
+        observer: GenerationObserver = GenerationObserver.None,
         onProgress: (StudioJournal) -> Unit = {},
     ): StudioOutcome {
         val plan = CrewPlan.of(crew)
@@ -53,7 +59,7 @@ class StudioPipeline(
                 report(journal.with(journal.step(role.id)!!.copy(status = StepStatus.SKIPPED, reason = "needs ${journal.step(blockedBy)?.role?.name ?: blockedBy}, which did not finish")))
                 continue
             }
-            val (step, fragment) = work(role, brief, draft, journal, gate) { report(it) }
+            val (step, fragment) = work(role, brief, draft, journal, gate, observer) { report(it) }
             if (step.status == StepStatus.DONE && fragment != null) {
                 draft = PackSections.merge(draft, fragment, role.sections)
                 report(journal.with(step).copy(draftJson = PackSections.render(draft)))
@@ -78,6 +84,7 @@ class StudioPipeline(
         draft: JsonObject,
         start: StudioJournal,
         gate: ApprovalGate,
+        observer: GenerationObserver,
         report: (StudioJournal) -> Unit,
     ): Pair<StudioStep, JsonObject?> {
         var journal = start
@@ -92,7 +99,7 @@ class StudioPipeline(
             val request = PromptComposer.compose(role, brief, draft, check.baseJson, feedback)
             val started = clock()
             val attempt = AgentAttempt(step.attempts.size + 1, request.systemPrompt, request.userPrompt)
-            val reply = model.complete(request).getOrElse { failure ->
+            val reply = model.complete(request, observer).getOrElse { failure ->
                 update(step.copy(attempts = step.attempts + attempt.copy(problems = listOf("the model could not be reached: ${failure.message}"), durationMillis = clock() - started)))
                 return step.copy(status = StepStatus.FAILED, reason = "the model could not be reached") to null
             }

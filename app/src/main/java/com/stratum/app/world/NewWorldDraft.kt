@@ -1,5 +1,6 @@
 package com.stratum.app.world
 
+import com.stratum.core.domain.creation.InstantWorld
 import com.stratum.core.domain.session.WorldIdentity
 import com.stratum.core.domain.world.RulesPreset
 import com.stratum.core.domain.world.RulesPresets
@@ -23,7 +24,15 @@ data class NewWorldDraft(
     val name: String = "",
     /** Typed by the player; blank means "surprise me". */
     val seedText: String = "",
+    /**
+     * "Describe a world", optional. When filled the world plays at once in
+     * the look the words suggest, and the crew writes the rest while it does.
+     */
+    val prompt: String = "",
 ) {
+    /** The described world, read at once and without a model; null when nothing was described. */
+    val described: InstantWorld? get() = prompt.trim().takeIf { it.isNotEmpty() }?.let { InstantWorld.from(it, name) }
+
     val preset: RulesPreset? get() = RulesPresets.all.firstOrNull { it.id == presetId }
 
     fun next(): NewWorldDraft = copy(step = NewWorldStep.entries.getOrElse(step.ordinal + 1) { step })
@@ -47,7 +56,7 @@ data class NewWorldDraft(
      * What the world is called: the player's name for it, or a numbered
      * default so two unnamed worlds never read the same in the list.
      */
-    fun resolvedName(existingWorlds: Int): String = name.trim().ifEmpty { "World ${existingWorlds + 1}" }
+    fun resolvedName(existingWorlds: Int): String = name.trim().ifEmpty { described?.name ?: "World ${existingWorlds + 1}" }
 
     /** The preset's name for the world's card, or empty when the dials were turned by hand. */
     fun presetLabel(): String = preset?.takeIf { it.rules == rules }?.name.orEmpty()

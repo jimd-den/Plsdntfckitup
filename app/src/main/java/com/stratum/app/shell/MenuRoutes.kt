@@ -134,23 +134,21 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
         draft = draft.copy(heroClassId = draft.heroClassId ?: app.game.loadout.value.heroClassId),
         heroes = heroes,
         existingWorlds = existingWorlds,
+        modelReady = app.graph.ai.isConfigured(),
         actions = NewWorldActions(
             onBack = { stack.pop() },
             onChange = { app.newWorld.value = it },
             onQuickMake = { stack.push(Route.Create.Classes) },
             onGo = {
-                val heroId = draft.heroClassId ?: app.game.loadout.value.heroClassId ?: app.game.selectedHeroClassId()
-                val identity = app.graph.worlds.create(
+                startNewWorld(
+                    app,
                     name = draft.resolvedName(existingWorlds),
-                    presetName = draft.presetLabel(),
-                    heroName = heroes.firstOrNull { it.id == heroId }?.name.orEmpty(),
-                    packIds = content.packs.map { it.id },
+                    heroClassId = draft.heroClassId ?: app.game.loadout.value.heroClassId,
+                    rules = draft.rules,
+                    seed = draft.seed(System.currentTimeMillis()),
+                    described = draft.described,
                 )
-                val launch = draft.launch(identity, defaultHeroClassId = heroId, fallbackSeed = System.currentTimeMillis())
-                app.game.chooseHeroClass(launch.heroClassId)
                 app.newWorld.value = NewWorldDraft()
-                // Replaced rather than pushed: leaving the world goes back to the hub, not to step three.
-                stack.replace(Route.Play.World(launch))
             },
         ),
         modifier = modifier,

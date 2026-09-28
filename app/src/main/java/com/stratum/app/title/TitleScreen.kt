@@ -56,7 +56,7 @@ fun TitleScreen(
     modifier: Modifier = Modifier,
     /** What is loaded, in one quiet line at the foot of the screen. */
     packLine: String = "",
-    jobsTray: @Composable () -> Unit = {},
+    jobsTray: @Composable () -> Unit = com.stratum.core.designsystem.component.LocalJobsTray.current,
 ) {
     val colors = StratumTheme.colors
     BoxWithConstraints(

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +32,8 @@ import com.stratum.core.designsystem.component.ChoiceCard
 import com.stratum.core.designsystem.component.LinkPill
 import com.stratum.core.designsystem.component.LocalJobsTray
 import com.stratum.core.designsystem.component.SectionHeader
+import com.stratum.core.designsystem.component.StatusChip
+import com.stratum.core.designsystem.component.StatusTone
 import com.stratum.core.designsystem.component.StepIndicator
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumDivider
@@ -71,6 +75,8 @@ fun NewWorldScreen(
     modifier: Modifier = Modifier,
     /** How many worlds exist, for the default name "World N". */
     existingWorlds: Int = 0,
+    /** Whether a model is connected, so a described world also gets the crew writing it. */
+    modelReady: Boolean = false,
     jobsTray: @Composable () -> Unit = LocalJobsTray.current,
 ) {
     val heroId = draft.heroClassId ?: heroes.firstOrNull()?.id
@@ -105,8 +111,8 @@ fun NewWorldScreen(
         )
         when (draft.step) {
             NewWorldStep.HERO -> HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
-            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, actions.onChange)
-            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, existingWorlds)
+            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange)
+            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, existingWorlds, modelReady)
         }
     }
 }
@@ -130,7 +136,7 @@ private fun HeroStep(heroes: List<HeroChoice>, selected: String?, onPick: (Strin
 }
 
 @Composable
-private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, onChange: (NewWorldDraft) -> Unit) {
+private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boolean, onChange: (NewWorldDraft) -> Unit) {
     var fineTune by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("What kind of world?")
@@ -160,6 +166,23 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, onChange: (NewW
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Describe it (optional)")
+        OutlinedTextField(
+            value = draft.prompt,
+            onValueChange = { onChange(draft.copy(prompt = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            maxLines = 4,
+            label = { Text("Describe a world") },
+            placeholder = { Text("A drowned bronze city under a red moon") },
+            supportingText = {
+                Text(
+                    if (modelReady) "Plays at once in the look your words suggest. The AI crew writes the rest while you play." else "Plays at once in the look your words suggest.",
+                )
+            },
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("Name it")
         OutlinedTextField(
             value = draft.name,
@@ -182,7 +205,7 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, onChange: (NewW
 }
 
 @Composable
-private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, existingWorlds: Int) {
+private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, existingWorlds: Int, modelReady: Boolean) {
     val colors = StratumTheme.colors
     StratumPanel(Modifier.fillMaxWidth()) {
         Text(draft.resolvedName(existingWorlds), style = MaterialTheme.typography.displaySmall, color = colors.ink)
@@ -192,8 +215,15 @@ private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, existingWorlds: Int)
         SummaryRow("World", draft.presetLabel().ifEmpty { NewWorldDraft.CUSTOM })
         StratumDivider()
         SummaryRow("Seed", draft.seedText.trim().ifEmpty { "A surprise" })
+        draft.described?.let { world ->
+            StratumDivider()
+            SummaryRow("Look", world.styleSummary.ifBlank { "Read from your words" })
+        }
         Spacer(Modifier.height(Space.medium))
         Text(summaryOf(draft.rules), style = MaterialTheme.typography.labelSmall, color = colors.accent)
+    }
+    if (draft.described != null && modelReady) {
+        StatusChip("AI crew writes the rest as you play", tone = StatusTone.BUSY)
     }
     Text(
         "Your hero keeps their level, gear and points in every world they enter.",
@@ -204,9 +234,9 @@ private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, existingWorlds: Int)
 
 @Composable
 private fun SummaryRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = Space.tight), verticalAlignment = Alignment.CenterVertically) {
         Text(label.uppercase(), style = MaterialTheme.typography.labelMedium, color = StratumTheme.colors.inkMuted, modifier = Modifier.width(80.dp))
-        Text(value, style = MaterialTheme.typography.titleMedium, color = StratumTheme.colors.ink)
+        Text(value, style = MaterialTheme.typography.titleMedium, color = StratumTheme.colors.ink, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 

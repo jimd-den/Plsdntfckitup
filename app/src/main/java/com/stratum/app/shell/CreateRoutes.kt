@@ -22,7 +22,7 @@ import com.stratum.app.tools.SpriteMapperRoute
 import com.stratum.app.tools.TextureForgeRoute
 import com.stratum.app.tools.WeaponForgeRoute
 import com.stratum.app.tools.shareCreations
-import com.stratum.feature.forge.PoseRun
+import com.stratum.core.domain.creation.settled
 
 /** The studio and every tool behind it. */
 @Composable
@@ -57,7 +57,25 @@ internal fun CreateRoutes(app: AppViewModel, route: Route.Create, stack: BackSta
         Route.Create.Weapons -> WeaponForgeRoute(app, onBack = back, onOpenSettings = settings, modifier = modifier)
         Route.Create.Mapper -> SpriteMapperRoute(app, onBack = back, modifier = modifier)
         Route.Create.Models -> ModelForgeRoute(app, onBack = back, onOpenSettings = settings, modifier = modifier)
-        is Route.Create.Crew -> CrewRoute(app, route.preset, onBack = back, onOpenSettings = settings, modifier = modifier)
+        is Route.Create.Crew -> CrewRoute(
+            app,
+            route.preset,
+            onBack = back,
+            onOpenSettings = settings,
+            // Play now: the described world, at once, as a new saved world. The
+            // crew keeps writing, and its pack is delivered through the inbox.
+            onPlayNow = { world ->
+                app.game.saveStyle(world.stylePrompt)
+                startNewWorld(
+                    app,
+                    name = world.name,
+                    heroClassId = null,
+                    rules = app.game.content.value.suggestedRules,
+                    seed = System.currentTimeMillis(),
+                )
+            },
+            modifier = modifier,
+        )
     }
 }
 
@@ -70,7 +88,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
     val characters by ai.characterRepository.characters.collectAsStateWithLifecycle()
     val plugins by app.graph.plugins.repository.library.collectAsStateWithLifecycle()
     val style by app.game.stylePrompt.collectAsStateWithLifecycle()
-    val posing by PoseRun.running.collectAsStateWithLifecycle()
+    val jobs by app.jobs.jobs.collectAsStateWithLifecycle()
     val blueprints by app.game.blueprints.collectAsStateWithLifecycle()
     val status = StudioStatus(
         classCount = content.heroClasses.size,
@@ -84,7 +102,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
         modelReady = ai.isConfigured(),
         meshReady = ai.settings.isModelProviderConfigured,
         paintedStyle = style.ifBlank { null },
-        running = if (posing) 1 else 0,
+        running = jobs.count { !it.status.settled },
     )
     CreateHubScreen(
         status = status,

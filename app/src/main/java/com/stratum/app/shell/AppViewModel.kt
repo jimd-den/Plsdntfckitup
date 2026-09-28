@@ -3,7 +3,11 @@ package com.stratum.app.shell
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.stratum.app.CreationJobs
 import com.stratum.app.PoseGenerationService
+import com.stratum.app.nav.Route
+import com.stratum.core.domain.content.ContentPack
+import com.stratum.core.domain.creation.PackDelivery
 import com.stratum.app.nav.BackStack
 import com.stratum.app.world.NewWorldDraft
 import com.stratum.feature.forge.PoseRun
@@ -31,6 +35,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The world being set up, kept across the detour to the class forge. */
     val newWorld = MutableStateFlow(NewWorldDraft())
+
+    /** The app's one job centre; jobs outlive every screen, including this view model's activity. */
+    val jobs = CreationJobs.center
+
+    /** Whether the player is in a world right now, which is when a finished pack must wait. */
+    val inWorld: Boolean get() = backStack.current is Route.Play.World
+
+    /** Installs a pack the crew wrote as an ordinary plugin, and reloads content with it. */
+    fun installGenerated(pack: ContentPack) {
+        viewModelScope.launch {
+            graph.plugins.installGenerated(pack)
+            graph.plugins.repository.refresh()
+        }
+    }
+
+    /**
+     * Hands a finished world pack over: installed now outside a world, held
+     * in the inbox while one is being played so it is never swapped in under
+     * the player.
+     */
+    fun deliver(pack: ContentPack): PackDelivery = CreationJobs.inbox.arrive(pack, sessionRunning = inWorld, install = ::installGenerated)
+
+    /** Installs every pack that arrived while a world was being played; called whenever play is not on screen. */
+    fun releaseHeldPacks() {
+        if (!inWorld) CreationJobs.inbox.release(::installGenerated)
+    }
 
     init {
         // Loaded after the first frame, since it re-reads every archive; the

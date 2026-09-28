@@ -30,6 +30,12 @@ class ClassForgeViewModel(
      * held, so art generated after this screen opened still appears.
      */
     private val loadSheets: () -> List<SpriteSheet> = { emptyList() },
+    /**
+     * Queues a sprite sheet for a subject as a background job and calls back
+     * with it when it lands. False when no model is connected. The hero never
+     * waits on it: the class saves and plays with the shape renderer meanwhile.
+     */
+    private val queueLook: ((subject: String, onDrawn: (SpriteSheet) -> Unit) -> Boolean)? = null,
 ) : ViewModel() {
 
     private val options = ClassOptions.from(content)
@@ -44,6 +50,7 @@ class ClassForgeViewModel(
             blocks = content.registry.all.filter { !it.isAir && it.isBreakable },
             sheets = heroSheets(),
             saved = loadClasses(),
+            canMakeLook = queueLook != null,
         ),
     )
     val state: StateFlow<ClassForgeUiState> = _state.asStateFlow()
@@ -109,6 +116,34 @@ class ClassForgeViewModel(
             .distinctBy { it.id }
             .filter { SpriteNamespace.servesHero(it.id) }
 
+    /**
+     * Asks for this hero's look in the background: a sheet drawn from its name
+     * and description. Returns at once; the look is picked for the draft when
+     * it lands, if the draft is still the same hero.
+     */
+    fun makeLook() {
+        val draft = _state.value.draft
+        val queue = queueLook ?: return
+        if (draft.name.isBlank()) {
+            _state.value = _state.value.copy(message = "Name the hero first, so the look has someone to draw.")
+            return
+        }
+        val subject = listOf(draft.name, draft.title, draft.description).filter { it.isNotBlank() }.joinToString(", ")
+        val queued = queue(subject) { sheet ->
+            val current = _state.value
+            _state.value = current.copy(
+                sheets = heroSheets(),
+                lookPending = false,
+                draft = if (current.draft.name == draft.name) current.draft.copy(spriteSetId = sheet.id) else current.draft,
+                message = "${draft.name}'s look is ready.",
+            )
+        }
+        _state.value = _state.value.copy(
+            lookPending = queued,
+            message = if (queued) "Drawing ${draft.name}'s look in the background. Save and play meanwhile." else "Connect a model provider to draw a look.",
+        )
+    }
+
     fun save() {
         val draft = _state.value.draft
         val problems = draft.problems(options)
@@ -136,10 +171,11 @@ class ClassForgeViewModel(
             deleteClass: (String) -> Unit,
             loadClasses: () -> List<HeroClassDefinition>,
             loadSheets: () -> List<SpriteSheet> = { emptyList() },
+            queueLook: ((String, (SpriteSheet) -> Unit) -> Boolean)? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                ClassForgeViewModel(content, saveClass, deleteClass, loadClasses, loadSheets) as T
+                ClassForgeViewModel(content, saveClass, deleteClass, loadClasses, loadSheets, queueLook) as T
         }
 
     }
@@ -155,6 +191,10 @@ data class ClassForgeUiState(
     val sheets: List<SpriteSheet> = emptyList(),
     val saved: List<HeroClassDefinition> = emptyList(),
     val message: String? = null,
+    /** A look is being drawn in the background. */
+    val lookPending: Boolean = false,
+    /** Whether a look can be asked for at all; false hides the step. */
+    val canMakeLook: Boolean = false,
 ) {
     val problems: List<String> get() = draft.problems(options)
 

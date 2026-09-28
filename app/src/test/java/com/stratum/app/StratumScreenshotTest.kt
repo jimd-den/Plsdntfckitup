@@ -776,8 +776,16 @@ class StratumScreenshotTest {
                         kind = ForgeKind.UNIQUE,
                         prompt = "A ring that makes every skill cost blood",
                         budget = PowerTier.STRONG,
-                        result = fragment,
-                        cards = ForgeCards.of(fragment, listOf(IgboContentPack.pack)),
+                        drafts = listOf(
+                            com.stratum.feature.forge.ForgeDraft(
+                                key = "draft-1", kind = ForgeKind.UNIQUE,
+                                order = ForgeKind.UNIQUE.order("A ring that makes every skill cost blood"),
+                                context = com.stratum.agents.forge.ForgeContext(budget = PowerTier.STRONG),
+                                placeholder = com.stratum.agents.forge.ForgePlaceholder.of(ForgeKind.UNIQUE, "A ring that makes every skill cost blood"),
+                                result = fragment,
+                                cards = ForgeCards.of(fragment, listOf(IgboContentPack.pack)),
+                            ),
+                        ),
                         providerConfigured = true,
                         kept = 3,
                     ),

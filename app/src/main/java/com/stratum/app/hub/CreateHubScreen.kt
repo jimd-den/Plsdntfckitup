@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import com.stratum.core.designsystem.component.HubCard
 import com.stratum.core.designsystem.component.HubLink
 import com.stratum.core.designsystem.component.LocalJobsTray
+import com.stratum.core.designsystem.component.StatusChip
 import com.stratum.core.designsystem.component.StatusTone
 import com.stratum.core.designsystem.component.StratumScreen
 import com.stratum.core.designsystem.theme.StratumTheme
@@ -27,7 +28,7 @@ data class StudioStatus(
     val meshReady: Boolean = false,
     /** The style the world is painted in, when one was painted. */
     val paintedStyle: String? = null,
-    /** Pose runs and other long generations in flight. */
+    /** Creation jobs still queued or running, from the job centre. */
     val running: Int = 0,
 )
 
@@ -70,8 +71,10 @@ fun CreateHubScreen(
                 color = StratumTheme.colors.inkMuted,
             )
         }
+        if (status.running > 0) {
+            StatusChip(if (status.running == 1) "1 job running" else "${status.running} jobs running", tone = StatusTone.BUSY)
+        }
         val heroes = when {
-            status.running > 0 -> "${status.running} running" to StatusTone.BUSY
             status.unpackedCharacters > 0 -> "${status.unpackedCharacters} to pack" to StatusTone.BUSY
             status.customClassCount > 0 -> "${status.customClassCount} made · ${status.classCount} classes" to StatusTone.NEUTRAL
             else -> "${status.classCount} classes" to StatusTone.NEUTRAL

@@ -1,6 +1,9 @@
 package com.stratum.feature.forge
 
+import com.stratum.core.domain.creation.JobLauncher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +54,16 @@ object PoseRun {
     private val _progress = MutableStateFlow(RunProgress())
     val progress: StateFlow<RunProgress> = _progress.asStateFlow()
 
+    /**
+     * Where each run also shows as a creation job, so a quarter of an hour of
+     * frames is visible in the tray from anywhere. Set once by the app; the run
+     * itself keeps its own lifetime here, and the job only mirrors it.
+     */
+    @Volatile
+    var jobs: JobLauncher? = null
+
+    private var mirror: String? = null
+
     fun start(block: suspend CoroutineScope.() -> Unit): Job {
         // Replacing rather than refusing: the screen already guards against a
         // second start, and if one slips through, the newer intent is the one
@@ -66,7 +79,32 @@ object PoseRun {
             }
         }
         job = started
+        mirrorAsJob(started)
         return started
+    }
+
+    /** A job that follows [run]: its frames as the step's detail, its ending as the job's. */
+    private fun mirrorAsJob(run: Job) {
+        val launcher = jobs ?: return
+        mirror?.let(launcher::cancel)
+        mirror = launcher.launch(kind = "hero-art", title = "Drawing a character's poses", steps = listOf(DRAWING)) {
+            begin(DRAWING)
+            try {
+                coroutineScope {
+                    val follow = launch {
+                        progress.collect { p -> if (p.hasWork) detail("${p.label} · ${p.done} of ${p.total} frames") }
+                    }
+                    run.join()
+                    follow.cancel()
+                }
+            } catch (stopped: CancellationException) {
+                // Stopping the job from the tray stops the run it stands for.
+                if (job === run) stop()
+                throw stopped
+            }
+            if (run.isCancelled) fail("The run ended early. The frames already drawn are kept, and a new run resumes from them.")
+            "Frames drawn. Pack them into a sheet in the pose forge."
+        }
     }
 
     fun report(label: String, done: Int, total: Int) {
@@ -80,6 +118,8 @@ object PoseRun {
         _progress.value = RunProgress()
     }
 }
+
+private const val DRAWING = "Drawing frames"
 
 /** Where a run has got to, in the words a notification would use. */
 data class RunProgress(

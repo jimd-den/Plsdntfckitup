@@ -104,6 +104,15 @@ class MenuScreenshotTest {
         )
     }
 
+    /** A world described in words: it plays at once in the look they suggest, and the crew writes the rest. */
+    @Test
+    fun new_world_described() = shoot("new_world_3_go_described") {
+        NewWorldScreen(
+            draft = NewWorldDraft(step = NewWorldStep.GO, heroClassId = "dike", prompt = "A drowned bronze city under a red moon"),
+            heroes = HEROES, actions = NewWorldActions(), existingWorlds = 3, modelReady = true, modifier = Modifier.fillMaxSize(),
+        )
+    }
+
     @Test
     fun create_hub() = shoot("create_hub") { CreateHubScreen(status = STUDIO, actions = CreateHubActions(), modifier = Modifier.fillMaxSize()) }
 
