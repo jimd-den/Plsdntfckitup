@@ -75,6 +75,14 @@ private fun Color.darkenBy(fraction: Float): Color = Color(
  * control rather than as prose.
  */
 val StratumTypography = Typography(
+    // The game's name on the title screen, and nothing else.
+    displayLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Black,
+        fontSize = 52.sp,
+        lineHeight = 56.sp,
+        letterSpacing = 4.sp,
+    ),
     displaySmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Black,
@@ -89,11 +97,30 @@ val StratumTypography = Typography(
         lineHeight = 26.sp,
         letterSpacing = (-0.2).sp,
     ),
+    headlineSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 24.sp,
+        letterSpacing = (-0.1).sp,
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 22.sp,
+    ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
         lineHeight = 20.sp,
+    ),
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 18.sp,
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -113,6 +140,13 @@ val StratumTypography = Typography(
         fontSize = 12.sp,
         lineHeight = 14.sp,
         letterSpacing = 1.2.sp,
+    ),
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 1.sp,
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.Monospace,
