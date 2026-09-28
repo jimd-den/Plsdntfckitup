@@ -30,7 +30,77 @@ never shipped):
 ```
 ./gradlew :tools:microvoxelpreview:microPreview                       # 1280x720, 4 spp
 ./gradlew :tools:microvoxelpreview:microPreview --args="build/p 1234 fast"   # quick, other seed
+./gradlew :tools:artpreview:microScenePreview                         # through the GAME's renderer + per-tier benchmark
 ```
+
+---
+
+## In the game: how a microvoxel world runs on a phone
+
+The ARPG plays on **blocks**: collision, pathing, combat, AI, digging and
+saves all run on the 16 × 16 × 48 block world, unchanged. Microvoxels are
+where the world *comes from* and what the camera *sees up close*.
+
+```
+ pack JSON "terrain" ──▶ stratum:microvoxel ──▶ MicroGenerator (stages) ──▶ MicroChunks (cached, LRU)
+ (hand-written or                │                                              │
+  the studio's Surveyor)         ▼                                              ▼
+                        block chunk = 4³ micro per block          MicroDetailMesher (worker thread)
+                        (3/8 fill, topmost material,              near the camera: AO-greedy quads,
+                         pack blocks by kind + colour,            edited blocks patched in as blocks
+                         tree sprite at trunk foot)                     │
+                                 │                                      ▼
+                                 ▼                               SceneBuilder / ChunkMeshCache
+                   WorldSession: collision, combat,              (block mesh until detail is ready,
+                   spawns (markers), towns, saves                 then swap) ──▶ GLES renderer
+```
+
+* **`:engine:microbridge`** — `MicrovoxelTerrainGenerator`, registered as
+  `stratum:microvoxel`. Converts each block from the microvoxels it covers,
+  maps materials onto *any* pack's blocks (so AI-made packs just work),
+  picks biomes by climate, and places monster spawns in the wild, points of
+  interest at town centres and caches in parks for the encounter system.
+  The pack's own towns (settlements) are still laid over the land.
+* **`MicroDetailMesher`** (`:engine:scene`) — draws chunks within
+  `RenderSettings.microDetailRadius` of the camera from microvoxels:
+  LOW 8 blocks, MEDIUM 20, HIGH 32, ULTRA 48, 0 = off. It runs on its own
+  low-priority thread from a copied snapshot of the blocks, so a frame never
+  waits: a chunk shows its block mesh until its detail is ready. Every block
+  that differs from what was generated (dug, built, a town stamped on) is
+  drawn as that block; a chunk changed past 35% falls back to blocks.
+* **Configuring it** — a pack's `terrain` section names the generator and
+  lists stages with string options (see `examples/plugins/microvoxel-realms`).
+  The studio's **Surveyor** role writes exactly that, briefed from
+  `MicroWorldgen.catalogue`; `DraftCheck` builds the generator to validate a
+  draft, so an unknown stage or a bad option goes back to the model to fix.
+
+### Measured (desktop JVM, 4 cores; `microScenePreview`)
+
+| | blocks only | microvoxel detail |
+|---|---|---|
+| Generate a block chunk | 2.7 ms (pack default generator) | 4.3 ms |
+| LOW: first frame / walk worst frame | 15.7 / 42.6 ms | 14.1 / 11.7 ms |
+| LOW: terrain triangles / vertex memory | 11.5 k / 1.6 MB | 19.6 k / 2.7 MB |
+| MEDIUM: walk worst frame | 8.4 ms | 7.9 ms |
+| MEDIUM: triangles / vertex memory | 15.6 k / 2.2 MB | 51.6 k / 7.2 MB |
+| HIGH: triangles / vertex memory | 17.0 k / 2.4 MB | 85.4 k / 12.0 MB |
+| Detail catch-up after stopping | — | 2–50 ms |
+
+Frame times are single-frame CPU scene building (meshing included), not GPU
+time. A low-end phone core is roughly 3–6× slower than this desktop, so
+expect ~15–20 ms to generate a chunk there. Crossing a chunk border
+generates up to five chunks at once (`URGENT_STREAM_RADIUS`), which is the
+one hitch left and the next thing to move off the game thread. Triangle
+counts are well inside what GLES 3.0 phones draw at 30 fps; the LOW tier's
+8-block detail ring adds ~8 k triangles.
+
+### Known gaps
+
+* Canopies and upper floors are part of the terrain mesh, so unlike prop
+  sprites they do not yet fade when they hide the hero.
+* Buildings are shells at block resolution (floors are thinner than a block);
+  interiors are not yet walkable upstairs.
+* Measurements above are from a desktop; profile on a real low-end device.
 
 ---
 
@@ -207,13 +277,11 @@ hardware before tuning.
 The tests assert: average downtown chunk < 160 KB, greedy merging > 3× fewer
 quads than faces, block LOD > 4× fewer quads than full detail.
 
-## Status and what is not done
+## Status
 
-* The generators, storage, mesher, LOD, streaming and edits are implemented
-  and unit-tested (28 tests). The offline renderer produces the screenshots.
-* **Not yet wired into the Android app.** The app's renderer
-  (`:engine:scene` / `feature:play`) draws the block world; drawing
-  `QuadMesh` needs a GLES 3.0 instanced-quad renderer on the app side.
+* Generators, storage, mesher, LOD, streaming and edits: implemented and
+  unit-tested. Wired into the game as `stratum:microvoxel` (see "In the
+  game" above), drawn by the existing GLES renderer near the camera.
 * Streets are an axis-aligned region grid. Organic street networks (tensor
   fields, L-systems) and WFC-style old towns are the next planners/styles
   behind the existing interfaces.

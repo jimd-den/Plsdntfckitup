@@ -272,6 +272,7 @@ fun PlayScreenContent(
                     quality = state.quality,
                     time = state.worldTime,
                     biomeAt = state.biomeAt,
+                    microTerrain = state.microTerrain,
                     revision = state.worldRevision,
                     frame = state.frame,
                     spriteFor = state.spriteFor,

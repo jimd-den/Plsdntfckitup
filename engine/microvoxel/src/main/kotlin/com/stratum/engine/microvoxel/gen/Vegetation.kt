@@ -126,6 +126,9 @@ object GroundcoverStage : MicroStageFactory {
         val leaves = p.id(M.LEAVES)
         val seed = setup.seed
         val meadow = Noise(seed xor 0x6A55)
+        // Where grass is lush and where flowers gather: fields that change over metres, sampled once a block.
+        val lushness = LatticeHeight(step = 4, source = HeightFunction { x, y -> 0.5f + meadow.fbm(x * 0.02f, y * 0.02f, 2) })
+        val blooms = LatticeHeight(step = 4, source = HeightFunction { x, y -> 0.5f + meadow.fbm(x * 0.01f + 90f, y * 0.01f, 2) })
         return MicroStage { ctx ->
             val cols = ctx.fields.require(Fields.COLUMNS).columns(ctx.pos.x, ctx.pos.y)
             val occupied = ctx.fields.get(Fields.FOOTPRINT)?.occupancyMask(ctx.pos.x, ctx.pos.y)
@@ -140,8 +143,8 @@ object GroundcoverStage : MicroStageFactory {
                 val r = Hash.unit(seed, wx, wy, 0, 21)
                 when (top) {
                     grass, dry -> {
-                        val lush = 0.5f + meadow.fbm(wx * 0.02f, wy * 0.02f, 2)
-                        val flowers = 0.5f + meadow.fbm(wx * 0.01f + 90f, wy * 0.01f, 2)
+                        val lush = lushness.heightAt(wx, wy)
+                        val flowers = blooms.heightAt(wx, wy)
                         when {
                             r < 0.012f * density * flowers * 3f -> {
                                 ctx.place(wx, wy, h + 1, top)

@@ -28,10 +28,12 @@ rootProject.name = "Stratum"
 // ---------------------------------------------------------------------------
 // Dependency rule: :app -> :feature:* -> :core:designsystem -> :core:domain
 //                                     -> :core:data      -> :core:domain
-//                                        :engine:scene   -> :core:domain
+//                                        :engine:scene   -> :core:domain, :engine:microvoxel
+//                                        :engine:microbridge -> :core:domain, :engine:microvoxel
+//                                        :engine:microvoxel (depends on nothing)
 //                                        :engine:model   -> :engine:scene
 //                                        :engine:render  -> :engine:world
-//                                        :engine:world   -> :engine:worldgen, :engine:settlement, :engine:crowd
+//                                        :engine:world   -> :engine:worldgen, :engine:settlement, :engine:crowd, :engine:microbridge
 //                                        :engine:worldgen -> :engine:settlement, :core:domain
 //                                        :engine:settlement -> :core:domain
 //                                        :engine:crowd   -> :core:domain

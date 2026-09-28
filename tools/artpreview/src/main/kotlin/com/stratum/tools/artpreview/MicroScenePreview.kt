@@ -1,0 +1,220 @@
+package com.stratum.tools.artpreview
+
+import com.stratum.content.igbo.IgboContentPack
+import com.stratum.core.domain.actor.EnemyRank
+import com.stratum.core.domain.art.ActorPresentation
+import com.stratum.core.domain.art.ActorRole
+import com.stratum.core.domain.art.ArtDirection
+import com.stratum.core.domain.art.BiomeArtKit
+import com.stratum.core.domain.art.StyleLexicon
+import com.stratum.core.domain.art.StyleSheetArtDirector
+import com.stratum.core.domain.art.WorldTime
+import com.stratum.core.domain.content.AssembledContent
+import com.stratum.core.domain.content.ContentPackAssembler
+import com.stratum.core.domain.world.BlockPos
+import com.stratum.core.domain.world.ChunkPos
+import com.stratum.core.domain.world.TerrainRecipe
+import com.stratum.core.domain.world.WorldConfig
+import com.stratum.engine.microbridge.MicrovoxelTerrainGenerator
+import com.stratum.engine.microvoxel.gen.CityPlanStage
+import com.stratum.engine.microvoxel.gen.Fields
+import com.stratum.engine.microvoxel.gen.RoadKind
+import com.stratum.engine.scene.SceneActor
+import com.stratum.engine.scene.SceneBuilder
+import com.stratum.engine.scene.SceneCamera
+import com.stratum.engine.scene.SceneFrame
+import com.stratum.engine.scene.TextureLibrary
+import com.stratum.engine.scene.Vec3
+import com.stratum.engine.scene.quality.QualityTier
+import com.stratum.engine.scene.quality.RenderSettings
+import com.stratum.engine.world.StratumTerrain
+import com.stratum.engine.world.StreamingWorld
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
+
+/**
+ * A microvoxel world through the game's own renderer.
+ *
+ * Builds frames with the same [SceneBuilder] the phone uses and draws them
+ * with [SceneRasterizer], the software copy of the GLES pipeline -- so what
+ * this shows is what the game draws, block chunks and microvoxel chunks
+ * side by side at the ARPG camera. It also measures what matters on a
+ * phone: chunk generation, meshing on the first frame and while walking,
+ * triangles and vertex memory, per quality tier.
+ *
+ *   args: <outDir> [forgeDir] [seed]
+ */
+object MicroScenePreview {
+
+    private const val WIDTH = 960
+    private const val HEIGHT = 540
+
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val out = File(args.getOrElse(0) { "build/micro-scene-preview" }).apply { mkdirs() }
+        val forged = args.getOrNull(1)?.let(::File)?.let { File(it, "house") }?.takeIf { it.isDirectory }
+        val seed = args.getOrNull(2)?.toLongOrNull() ?: 20260928L
+
+        val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack))
+            .let { it.copy(terrain = TerrainRecipe(generatorId = TerrainRecipe.MICROVOXEL)) }
+        val config = WorldConfig(seed = seed, simulationRadius = 3)
+        val generator = StratumTerrain.create(content.terrainContext(config)) as MicrovoxelTerrainGenerator
+
+        val director = StyleSheetArtDirector(
+            StyleLexicon.interpret("stratum house style", ArtDirection.HOUSE, seed).direction,
+            BiomeArtKit.deriveAll(IgboContentPack.pack),
+        )
+        val textures = TextureLibrary().also { lib -> forged?.let { ForgedTextures.loadInto(it, lib) } }
+
+        val vantages = listOf("town" to townVantage(generator), "wilds" to wildVantage(generator))
+        for ((name, v) in vantages) {
+            val world = StreamingWorld(content.registry, generator, config)
+            world.focusOn(BlockPos(v.first, v.second, 0))
+            val ground = world.surfaceAt(v.first, v.second)
+            val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT)
+            val actors = actorsAround(world, v.first, v.second)
+            val blocks = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH))
+            val micro = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = generator)
+            val time = WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)
+            val a = SceneRasterizer(WIDTH, HEIGHT, textures).render(blocks.build(world, camera, actors, time))
+            val b = SceneRasterizer(WIDTH, HEIGHT, textures).render(settled(micro) { micro.build(world, camera, actors, time) })
+            ImageIO.write(b, "png", File(out, "micro-$name.png"))
+            ImageIO.write(sideBySide(a, b), "png", File(out, "micro-$name-vs-blocks.png"))
+            println("wrote micro-$name.png (vantage ${v.first},${v.second} ground $ground)")
+        }
+        val report = benchmark(content, config, generator, director, textures, vantages.first().second)
+        File(out, "micro-benchmark.txt").writeText(report)
+        println(report)
+    }
+
+    /** Builds frames until the background detail meshes are all in, as a player standing still would see. */
+    private fun settled(builder: SceneBuilder, build: () -> SceneFrame): SceneFrame {
+        var frame = build()
+        var waited = 0
+        while (builder.detailPending > 0 && waited < 30_000) { Thread.sleep(5); waited += 5; frame = build() }
+        return frame
+    }
+
+    /** A street corner in the nearest town the microvoxel planner laid out. */
+    private fun townVantage(gen: MicrovoxelTerrainGenerator): Pair<Int, Int> {
+        val city = gen.micro.fields.require(CityPlanStage.KEY)
+        val region = (0..6).asSequence().flatMap { d -> (-d..d).asSequence().flatMap { y -> (-d..d).asSequence().map { x -> x to y } } }
+            .map { (x, y) -> city.region(x, y) }.first { it.urban && it.roads.any { r -> r.kind == RoadKind.STREET } }
+        val street = region.roads.first { it.kind == RoadKind.STREET }
+        return ((street.rect.x0 + street.rect.x1) / 2) / 4 to ((street.rect.y0 + street.rect.y1) / 2) / 4
+    }
+
+    /** Wooded open land away from town. */
+    private fun wildVantage(gen: MicrovoxelTerrainGenerator): Pair<Int, Int> {
+        val climate = gen.micro.fields.require(Fields.CLIMATE)
+        val footprint = gen.micro.fields.get(Fields.FOOTPRINT)
+        val surface = gen.micro.fields.require(Fields.SURFACE)
+        val sea = gen.micro.fields.require(Fields.SEA_LEVEL)
+        for (d in 1..40) for (k in 0 until 8) {
+            val x = (d * 37 * kotlin.math.cos(k * 0.785)).toInt(); val y = (d * 37 * kotlin.math.sin(k * 0.785)).toInt()
+            val mx = x * 4; val my = y * 4
+            if ((footprint?.urban(mx, my) ?: 0f) > 0f) continue
+            if (surface.heightAt(mx, my) < sea + 8) continue
+            if (climate.moisture(mx, my) > 0.55f) return x to y
+        }
+        return 200 to 200
+    }
+
+    private fun actorsAround(world: StreamingWorld, x: Int, y: Int): List<SceneActor> {
+        fun z(ax: Int, ay: Int) = world.surfaceAt(ax, ay) + 1f
+        return listOf(
+            SceneActor(x + 0.5f, y + 0.5f, z(x, y), ActorPresentation("p", ActorRole.PLAYER), 1f, -0.3f, spriteKey = "actor:igbo:dike_ozo"),
+            SceneActor(x + 4.5f, y - 2.5f, z(x + 4, y - 3), ActorPresentation("m1", ActorRole.ENEMY, EnemyRank.MINION), -1f, 0.5f, spriteKey = "actor:igbo:ogu_brute"),
+            SceneActor(x + 5.5f, y + 1.5f, z(x + 5, y + 1), ActorPresentation("e", ActorRole.ENEMY, EnemyRank.ELITE), -1f, -0.4f, spriteKey = "actor:igbo:shadow_leopard"),
+        )
+    }
+
+    /**
+     * What the phone pays, per tier, block mesher against microvoxel detail:
+     * the first frame (everything meshed, as on entering a world) and a walk
+     * of 96 blocks across chunk borders, one block per frame, where the view
+     * keeps meshing new ground -- the frames a player feels.
+     */
+    private fun benchmark(
+        content: AssembledContent, config: WorldConfig, generator: MicrovoxelTerrainGenerator,
+        director: StyleSheetArtDirector, textures: TextureLibrary, start: Pair<Int, Int>,
+    ): String {
+        val sb = StringBuilder()
+        val cores = Runtime.getRuntime().availableProcessors()
+        sb.appendLine("Microvoxel ARPG benchmark (seed ${config.seed}, this JVM, $cores cores, single-threaded meshing)")
+        sb.appendLine()
+
+        // Generation: fresh chunks, as streaming meets them.
+        val fresh = MicrovoxelTerrainGenerator(content.terrainContext(config))
+        val n = 64
+        for (i in 0 until n) fresh.generate(ChunkPos(-300 + i % 8, -300 + i / 8), content.registry) // warm the JIT
+        val t0 = System.nanoTime()
+        for (i in 0 until n) fresh.generate(ChunkPos(40 + i % 8, 40 + i / 8), content.registry)
+        val genMs = (System.nanoTime() - t0) / 1e6 / n
+        val layered = StratumTerrain.create(content.copy(terrain = TerrainRecipe()).terrainContext(config))
+        for (i in 0 until n) layered.generate(ChunkPos(-300 + i % 8, -300 + i / 8), content.registry)
+        val t1 = System.nanoTime()
+        for (i in 0 until n) layered.generate(ChunkPos(40 + i % 8, 40 + i / 8), content.registry)
+        val layeredMs = (System.nanoTime() - t1) / 1e6 / n
+        sb.appendLine("Generation per 16x16x48 block chunk: microvoxel %.1f ms (microvoxels + block conversion) vs the pack's default generator %.1f ms".format(genMs, layeredMs))
+        sb.appendLine()
+        sb.appendLine("tier    renderer  detail  first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB")
+        // Every configuration runs twice and reports the second, so JIT warm-up does not land on whichever ran first.
+        for (pass in 0..1) for (tier in listOf(QualityTier.LOW, QualityTier.MEDIUM, QualityTier.HIGH)) {
+            val settings = RenderSettings.of(tier)
+            for (detail in listOf(false, true)) {
+                val world = StreamingWorld(content.registry, generator, config)
+                world.focusOn(BlockPos(start.first, start.second, 0))
+                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = settings, microTerrain = if (detail) generator else null)
+                fun frame(x: Int, y: Int): Pair<Double, SceneFrame> {
+                    world.focusOn(BlockPos(x, y, 0))
+                    val cam = SceneCamera(target = Vec3(x + 0.5f, y + 0.5f, world.surfaceAt(x, y) + 1f), aspect = 16f / 9f)
+                    val s = System.nanoTime()
+                    val f = builder.build(world, cam, emptyList(), WorldTime(dayFraction = 0.4f))
+                    return (System.nanoTime() - s) / 1e6 to f
+                }
+                val (first, f0) = frame(start.first, start.second)
+                var total = 0.0; var worst = 0.0
+                for (step in 1..96) {
+                    val (ms, _) = frame(start.first + step, start.second + step / 3)
+                    total += ms; if (ms > worst) worst = ms
+                }
+                // How long detail takes to catch up once the hero stops: the time ground stays blocky.
+                val stop = System.nanoTime()
+                val end = start.first + 96 to start.second + 32
+                val settledFrame = settled(builder) { frame(end.first, end.second).second }
+                val catchUp = (System.nanoTime() - stop) / 1e6
+                val tris = settledFrame.terrain.sumOf { it.triangleCount.toLong() }
+                val bytes = settledFrame.terrain.sumOf { it.vertexFloats.toLong() * 4 + it.indexCount.toLong() * 4 }
+                if (pass == 1) sb.appendLine(
+                    "%-7s %-9s %-7s %8.1f ms   %8.2f / %6.1f ms        %8.0f ms      %,11d   %8.1f".format(
+                        tier.name, if (detail) "micro" else "blocks", if (detail) "${settings.microDetailRadius} blk" else "-",
+                        first, total / 96, worst, catchUp, tris, bytes / 1e6,
+                    ),
+                )
+            }
+        }
+        sb.appendLine()
+        sb.appendLine("first frame = every chunk in view meshed at once (entering a world, behind a loading moment).")
+        sb.appendLine("walk = one block per frame diagonally for 96 blocks; the mesh cache paces off-screen chunks.")
+        sb.appendLine("detail is meshed on a background thread; catch-up = time after stopping until every chunk in the ring shows it.")
+        sb.appendLine("Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.")
+        return sb.toString()
+    }
+
+    private fun sideBySide(a: BufferedImage, b: BufferedImage): BufferedImage {
+        val img = BufferedImage(a.width + b.width + 6, a.height, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = java.awt.Color(20, 20, 24); g.fillRect(0, 0, img.width, img.height)
+        g.drawImage(a, 0, 0, null); g.drawImage(b, a.width + 6, 0, null)
+        runCatching {
+            g.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 18)
+            g.color = java.awt.Color.WHITE
+            g.drawString("Blocks (the game today)", 14, 28)
+            g.drawString("Microvoxel detail near the hero", a.width + 20, 28)
+        }
+        g.dispose()
+        return img
+    }
+}

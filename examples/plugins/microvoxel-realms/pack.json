@@ -1,0 +1,22 @@
+{
+  "id": "microvoxel.realms",
+  "name": "Microvoxel Realms",
+  "author": "Stratum",
+  "version": "1.0.0",
+  "description": "The land, generated in microvoxels.",
+
+  "terrain": {
+    "generator": "stratum:microvoxel",
+    "options": {
+      "spawns": "0.4"
+    },
+    "passes": [
+      { "id": "micro:terrain", "options": { "height": "0.3", "mountains": "0.4", "scale": "0.7" } },
+      { "id": "micro:city_plan", "options": { "density": "0.35", "regionSize": "384", "styles": "terrace,villa", "maxFloors": "2" } },
+      { "id": "micro:roads" },
+      { "id": "micro:buildings" },
+      { "id": "micro:groundcover", "options": { "density": "1.2" } },
+      { "id": "micro:trees", "options": { "density": "0.8" } }
+    ]
+  }
+}

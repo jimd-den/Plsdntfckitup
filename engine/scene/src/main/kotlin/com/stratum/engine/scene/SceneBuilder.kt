@@ -123,8 +123,24 @@ class SceneBuilder(
      * shadowed and fogged exactly like the terrain.
      */
     private val propModels: (String) -> PropModel? = { null },
+    /**
+     * The microvoxels behind the world, when it was generated from them:
+     * chunks within [RenderSettings.microDetailRadius] of the camera are drawn
+     * from these instead of from blocks.
+     */
+    microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
 ) {
-    private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
+    private val chunks = ChunkMeshCache(
+        TerrainMesher(scene, textures, biomeAt),
+        microTerrain?.let(::MicroDetailMesher),
+        settings.microDetailRadius,
+    )
+
+    /** Chunks drawn from microvoxels in the last frame, for profiling. */
+    val detailedChunksLastFrame: Int get() = chunks.detailedLastCall
+
+    /** Microvoxel chunk meshes still being made in the background. */
+    val detailPending: Int get() = chunks.detailPending
 
     /** The chunks' meshes, props, lights and litter gathered into lists, redone only when a chunk changes. */
     private class Terrain(

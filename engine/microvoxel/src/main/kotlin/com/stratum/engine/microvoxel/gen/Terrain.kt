@@ -13,6 +13,48 @@ fun interface HeightFunction {
     fun heightAt(x: Int, y: Int): Float
 }
 
+/**
+ * A height field sampled on a world-aligned lattice every [step] columns and
+ * interpolated between.
+ *
+ * Terrain noise has nothing finer than a few blocks in it, so evaluating the
+ * whole noise stack for every quarter-block column is wasted work: sampling
+ * once a block and interpolating is ~16x cheaper and looks the same -- and
+ * because the lattice is aligned to world coordinates, every chunk and every
+ * caller interpolates between identical samples, so there are no seams.
+ * Samples are memoised per thread in a small direct-mapped table, which a
+ * chunk's sweep over its columns hits almost every time.
+ */
+class LatticeHeight(private val source: HeightFunction, private val step: Int = 4) : HeightFunction {
+    init { require(step >= 1) { "step must be positive" } }
+
+    private class Memo { val keys = LongArray(SIZE) { Long.MIN_VALUE }; val values = FloatArray(SIZE) }
+
+    private val memo = ThreadLocal.withInitial { Memo() }
+
+    private fun node(ix: Int, iy: Int, m: Memo): Float {
+        val key = (ix.toLong() shl 32) or (iy.toLong() and 0xFFFFFFFFL)
+        val slot = ((ix * 73856093) xor (iy * 19349663)) and (SIZE - 1)
+        if (m.keys[slot] == key) return m.values[slot]
+        val v = source.heightAt(ix * step, iy * step)
+        m.keys[slot] = key; m.values[slot] = v
+        return v
+    }
+
+    override fun heightAt(x: Int, y: Int): Float {
+        if (step == 1) return source.heightAt(x, y)
+        val ix = Math.floorDiv(x, step); val iy = Math.floorDiv(y, step)
+        val fx = (x - ix * step).toFloat() / step; val fy = (y - iy * step).toFloat() / step
+        val m = memo.get()
+        val a = node(ix, iy, m); val b = node(ix + 1, iy, m)
+        val c = node(ix, iy + 1, m); val d = node(ix + 1, iy + 1, m)
+        val top = a + (b - a) * fx
+        return top + (c + (d - c) * fx - top) * fy
+    }
+
+    private companion object { const val SIZE = 4096 }
+}
+
 /** Heat and wet in 0..1, for choosing surface materials and vegetation. */
 interface Climate {
     fun temperature(x: Int, y: Int): Float
@@ -76,7 +118,9 @@ fun interface ColumnSource {
  *
  * Options: `seaLevel` (micro), `scale` (horizontal stretch, 1 = default),
  * `height` (vertical stretch), `mountains` (0..2), `snowLine` (micro above sea),
- * `maxHeight` / `minHeight` (micro; peaks ease under the ceiling).
+ * `maxHeight` / `minHeight` (micro; peaks ease under the ceiling),
+ * `sampleStep` (noise sampled every this many columns and interpolated; 1 = every column),
+ * `spawnRadius` / `spawnRise` (dry land lifted around the origin; 0 = off).
  */
 object TerrainStage : MicroStageFactory {
     const val ID = "micro:terrain"
@@ -100,7 +144,8 @@ object TerrainStage : MicroStageFactory {
         val seed = setup.seed
         val noise = Noise(seed)
         val climateNoise = Noise(seed xor 0x5A17)
-        val natural = HeightFunction { ix, iy ->
+        val sampleStep = o.int("sampleStep", 4)
+        val natural = LatticeHeight(step = sampleStep, source = HeightFunction { ix, iy ->
             val x = ix * scale; val y = iy * scale
             val (wx, wy) = noise.warp(x, y, strength = 90f, scale = 0.0021f)
             val continent = noise.fbm(wx * 0.0009f + 31f, wy * 0.0009f - 17f, 4)
@@ -113,12 +158,17 @@ object TerrainStage : MicroStageFactory {
                 if (d < 1f) h += (sea + spawnRise - h) * smooth(0f, 1f, 1f - d)
             }
             softCeiling(h, maxHeight).coerceAtLeast(minHeight)
-        }
+        })
+        // Climate changes over hundreds of blocks: a coarse lattice is exact enough and nearly free.
+        val warmth = LatticeHeight(step = 16, source = HeightFunction { x, y ->
+            (0.5f + climateNoise.fbm(x * 0.0005f, y * 0.0005f, 3) * 0.9f).coerceIn(0f, 1f)
+        })
+        val wetness = LatticeHeight(step = 16, source = HeightFunction { x, y ->
+            (0.5f + climateNoise.fbm(x * 0.0009f - 77f, y * 0.0009f + 13f, 3) * 0.9f).coerceIn(0f, 1f)
+        })
         val climate = object : Climate {
-            override fun temperature(x: Int, y: Int) =
-                (0.5f + climateNoise.fbm(x * 0.0005f, y * 0.0005f, 3) * 0.9f).coerceIn(0f, 1f)
-            override fun moisture(x: Int, y: Int) =
-                (0.5f + climateNoise.fbm(x * 0.0009f - 77f, y * 0.0009f + 13f, 3) * 0.9f).coerceIn(0f, 1f)
+            override fun temperature(x: Int, y: Int) = warmth.heightAt(x, y)
+            override fun moisture(x: Int, y: Int) = wetness.heightAt(x, y)
         }
         val fields = setup.fields
         fields.publish(Fields.NATURAL_HEIGHT, natural)
@@ -179,10 +229,21 @@ object TerrainStage : MicroStageFactory {
         // Bulk rock under the shallowest soil: whole bricks, no per-voxel work.
         val rockTop = lowest - SOIL_MAX - 1
         if (rockTop >= ctx.z0) ctx.fill(ctx.x0, ctx.y0, ctx.z0, ctx.x1, ctx.y1, min(rockTop, ctx.z1), mat.stone)
-        val start = max(ctx.z0, rockTop + 1)
         val end = min(ctx.z1, top)
-        if (start > end) return
+        // Per 8 x 8 group of columns, rock under the group's lowest soil is also
+        // whole bricks: in hills the chunk-wide floor is far below most columns.
+        val groupFloor = IntArray((s / 8) * (s / 8))
+        for (gy in 0 until s / 8) for (gx in 0 until s / 8) {
+            var low = Int.MAX_VALUE
+            for (y in gy * 8 until gy * 8 + 8) for (x in gx * 8 until gx * 8 + 8) low = min(low, cols.height(x, y))
+            val floorZ = (Math.floorDiv(low - SOIL_MAX - 1 - ctx.z0 + 1, 8) * 8) + ctx.z0 - 1 // last z of the last whole brick below the soil
+            groupFloor[gy * (s / 8) + gx] = floorZ
+            if (floorZ > rockTop && floorZ >= ctx.z0)
+                ctx.fill(ctx.x0 + gx * 8, ctx.y0 + gy * 8, max(ctx.z0, rockTop + 1), ctx.x0 + gx * 8 + 7, ctx.y0 + gy * 8 + 7, min(floorZ, ctx.z1), mat.stone)
+        }
         for (ly in 0 until s) for (lx in 0 until s) {
+            val start = max(ctx.z0, max(rockTop, groupFloor[(ly / 8) * (s / 8) + lx / 8]) + 1)
+            if (start > end) continue
             val h = cols.height(lx, ly)
             val surfaceMat = cols.top(lx, ly)
             val wx = ctx.x0 + lx; val wy = ctx.y0 + ly

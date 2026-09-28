@@ -38,6 +38,12 @@ data class RenderSettings(
     val atmosphereMotes: Boolean,
     /** The frame rate the governor defends. */
     val targetFps: Int,
+    /**
+     * Blocks around the camera drawn from quarter-block microvoxels, in
+     * worlds generated from them; beyond it, ordinary blocks. 0 turns the
+     * detail off. See `MicroDetailMesher`.
+     */
+    val microDetailRadius: Int = 0,
 ) {
     init {
         require(renderScale in minRenderScale..1f) { "renderScale $renderScale is outside $minRenderScale..1" }
@@ -74,23 +80,23 @@ data class RenderSettings(
             QualityTier.LOW -> RenderSettings(
                 tier, renderScale = 0.6f, minRenderScale = 0.45f, shadowMapSize = 0, shadowTaps = 1, highRange = false,
                 maxPointLights = 2, viewRadius = 32, streamingRadius = 2, textureBudgetBytes = 24L * MB, maxTextureSize = 128,
-                groundLitter = false, atmosphereMotes = false, targetFps = 30,
+                groundLitter = false, atmosphereMotes = false, targetFps = 30, microDetailRadius = 8,
             )
             QualityTier.MEDIUM -> RenderSettings(
                 tier, renderScale = 0.8f, minRenderScale = 0.55f, shadowMapSize = 1024, shadowTaps = 1, highRange = true,
                 maxPointLights = 4, viewRadius = 44, streamingRadius = 3, textureBudgetBytes = 48L * MB, maxTextureSize = 256,
-                groundLitter = true, atmosphereMotes = false, targetFps = 30,
+                groundLitter = true, atmosphereMotes = false, targetFps = 30, microDetailRadius = 20,
             )
             // What the game drew before tiers existed.
             QualityTier.HIGH -> RenderSettings(
                 tier, renderScale = 1f, minRenderScale = 0.7f, shadowMapSize = 2048, shadowTaps = 9, highRange = true,
                 maxPointLights = MAX_POINT_LIGHTS, viewRadius = 56, streamingRadius = 4, textureBudgetBytes = 96L * MB, maxTextureSize = 512,
-                groundLitter = true, atmosphereMotes = true, targetFps = 60,
+                groundLitter = true, atmosphereMotes = true, targetFps = 60, microDetailRadius = 32,
             )
             QualityTier.ULTRA -> RenderSettings(
                 tier, renderScale = 1f, minRenderScale = 0.85f, shadowMapSize = 4096, shadowTaps = 9, highRange = true,
                 maxPointLights = MAX_POINT_LIGHTS, viewRadius = 72, streamingRadius = 5, textureBudgetBytes = 160L * MB, maxTextureSize = 512,
-                groundLitter = true, atmosphereMotes = true, targetFps = 60,
+                groundLitter = true, atmosphereMotes = true, targetFps = 60, microDetailRadius = 48,
             )
         }
 

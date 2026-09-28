@@ -75,6 +75,8 @@ data class Scene3DInput(
     val kitOverlays: List<java.io.File> = emptyList(),
     val time: WorldTime,
     val biomeAt: (Int, Int) -> BiomeDefinition?,
+    /** Quarter-block detail drawn near the camera, for worlds generated in microvoxels. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
     val revision: Int,
     val frame: Int,
     /** Animated character art, when an actor has any. Null falls back to the stand-in body. */
@@ -132,8 +134,9 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
-    val builder = remember(input.director, library, settings, input.propModels) {
-        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get)
+    // Keyed on the detail source too: a fresh world brings a new one, and the old one's meshes must go with it.
+    val builder = remember(input.director, library, settings, input.propModels, input.microTerrain) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get, microTerrain = input.microTerrain)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)

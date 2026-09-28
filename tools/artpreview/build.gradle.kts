@@ -41,6 +41,23 @@ tasks.register<JavaExec>("scenePreview") {
 }
 
 /**
+ * A microvoxel world through the game's renderer, blocks vs detail, and a
+ * per-tier benchmark, into build/micro-scene-preview.
+ */
+tasks.register<JavaExec>("microScenePreview") {
+  group = "verification"
+  description = "Renders a microvoxel world with the game's scene pipeline and benchmarks it per quality tier."
+  mainClass.set("com.stratum.tools.artpreview.MicroScenePreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  args = listOf(
+    layout.buildDirectory.dir("micro-scene-preview").get().asFile.absolutePath,
+    rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
+  )
+  jvmArgs("-Djava.awt.headless=true")
+  maxHeapSize = "3g"
+}
+
+/**
  * Generates an asset kit with an image model and writes it into the pack's
  * resources. Needs OPENROUTER_API_KEY in the environment; the key is never
  * written anywhere.

@@ -12,4 +12,6 @@ dependencies {
 
 dependencies {
   testImplementation(project(":content:igbo"))
+  // To check a terrain section written as data builds a microvoxel world.
+  testImplementation(project(":engine:microbridge"))
 }

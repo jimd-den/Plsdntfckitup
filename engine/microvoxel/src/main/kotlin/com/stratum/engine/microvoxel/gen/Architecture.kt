@@ -95,6 +95,17 @@ class ArchitectureRegistry {
  * every facade rule is written in.
  */
 internal class WallPoint {
+    companion object {
+        private val LOCAL = ThreadLocal.withInitial { WallPoint() }
+
+        /**
+         * This thread's scratch point. Styles are sampled for every voxel of
+         * every building, and a fresh object per voxel is garbage a phone's
+         * collector has to chase; no caller holds one across another call.
+         */
+        fun local(): WallPoint = LOCAL.get()
+    }
+
     var side = 0          // 0 = -y, 1 = +x, 2 = +y, 3 = -x
     var depth = 0         // 0 = outer wall layer, 1 = inner layer, ... ; negative = outside by -depth
     var along = 0         // position along that wall, left to right seen from outside
@@ -171,7 +182,7 @@ class TerraceStyle(palette: MaterialPalette) : ArchitectureStyle {
 
     override fun sample(b: Building, x: Int, y: Int, z: Int): Short {
         val fp = b.footprint
-        val w = WallPoint()
+        val w = WallPoint.local()
         if (!w.locate(fp, x, y)) return ArchitectureStyle.KEEP
         val dz = z - b.baseZ
         val F = b.floorHeight
@@ -256,7 +267,7 @@ class VillaStyle(palette: MaterialPalette) : ArchitectureStyle {
 
     override fun sample(b: Building, x: Int, y: Int, z: Int): Short {
         val fp = b.footprint
-        val w = WallPoint()
+        val w = WallPoint.local()
         val dz = z - b.baseZ
         val F = b.floorHeight
         val wallTop = b.floors * F
@@ -342,7 +353,7 @@ class TowerStyle(palette: MaterialPalette) : ArchitectureStyle {
             }
             return ArchitectureStyle.KEEP
         }
-        val w = WallPoint(); w.locate(rect, x, y)
+        val w = WallPoint.local(); w.locate(rect, x, y)
         if (w.depth >= 2) return if (fz == 0) m.concrete else AIR
         if (w.along <= 1 || w.along >= w.length - 2) return m.concrete // corner columns
         if (floor == 0) {
@@ -357,7 +368,7 @@ class TowerStyle(palette: MaterialPalette) : ArchitectureStyle {
     }
 
     private fun terrace(lower: Rect, x: Int, y: Int, fz: Int): Short {
-        val w = WallPoint(); w.locate(lower, x, y)
+        val w = WallPoint.local(); w.locate(lower, x, y)
         return when {
             fz == 0 -> m.concrete
             fz <= 2 && w.depth == 0 -> m.concrete
@@ -368,7 +379,7 @@ class TowerStyle(palette: MaterialPalette) : ArchitectureStyle {
     private fun rooftop(b: Building, x: Int, y: Int, h: Int, tier: Int): Short {
         val rect = b.footprint.inset(tier * 6)
         if (!rect.contains(x, y)) return ArchitectureStyle.KEEP
-        val w = WallPoint(); w.locate(rect, x, y)
+        val w = WallPoint.local(); w.locate(rect, x, y)
         if (h == 0) return m.concrete
         if (h <= 3 && w.depth == 0) return m.concrete // parapet
         // Plant boxes and a lift overrun, placed from the building's seed.

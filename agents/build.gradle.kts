@@ -6,6 +6,8 @@ dependencies {
   api(project(":core:domain"))
   // Fragments are plugin JSON: what an agent writes is exactly what a person would.
   implementation(project(":plugins"))
+  // The microvoxel generator: its stage catalogue briefs the Surveyor, and drafts are checked against it.
+  implementation(project(":engine:microbridge"))
   implementation(libs.kotlinx.serialization.json)
 }
 

@@ -54,7 +54,8 @@ object MicroWorldgen {
         CAVERNS to listOf(s(TerrainStage.ID), s(CavesStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID)),
         ARPG to listOf(
             s(TerrainStage.ID, "height" to "0.28", "mountains" to "0.35", "scale" to "0.7", "maxHeight" to "168", "minHeight" to "8"),
-            s(CityPlanStage.ID, "density" to "0.3", "regionSize" to "384", "styles" to "terrace,villa", "maxFloors" to "3"),
+            // Two floors at most: from the isometric camera a taller house hides the street the hero is fighting in.
+            s(CityPlanStage.ID, "density" to "0.3", "regionSize" to "384", "styles" to "terrace,villa", "maxFloors" to "2"),
             s(RoadsStage.ID), s(BuildingsStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID, "density" to "0.9"),
         ),
     )

@@ -340,7 +340,8 @@ object CityPlanStage : MicroStageFactory {
         )
         f.publish(KEY, planner)
         f.publish(Fields.FOOTPRINT, planner)
-        f.publish(Fields.SURFACE, HeightFunction(planner::surfaceAt))
+        // On the same lattice as the natural height, so the blend is worked out once a block, not once a microvoxel.
+        f.publish(Fields.SURFACE, LatticeHeight(HeightFunction(planner::surfaceAt), setup.options.int("sampleStep", 4)))
         return MicroStage { }
     }
 }

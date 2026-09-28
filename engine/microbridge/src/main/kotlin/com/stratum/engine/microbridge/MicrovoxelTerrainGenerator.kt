@@ -138,18 +138,24 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
                         else -> bp.block(uniform).coerceAtLeast(0)
                     }
                 } else {
-                    var solid = 0; var water = 0; var leaves = 0; var top: Short = MaterialPalette.AIR
+                    var solid = 0; var water = 0; var leaves = 0; var bark = 0; var top: Short = MaterialPalette.AIR
                     for (dz in r - 1 downTo 0) for (dy in 0 until r) for (dx in 0 until r) {
                         val m = mc[bx * r + dx, by * r + dy, bz * r + dz]
                         when {
                             m == MaterialPalette.AIR -> Unit
                             m == waterId -> water++
                             m in leafIds -> leaves++
-                            palette.isOpaque(m) && bp.block(m) >= 0 -> { solid++; if (top == MaterialPalette.AIR) top = m }
+                            palette.isOpaque(m) && bp.block(m) >= 0 -> {
+                                solid++
+                                if (m == barkId) bark++
+                                if (top == MaterialPalette.AIR) top = m
+                            }
                         }
                     }
                     when {
                         solid >= need -> bp.block(top)
+                        // A trunk is thinner than a block; keep it anyway, or forests lose their trees at block scale.
+                        bark >= need / 2 -> bp.block(barkId)
                         water >= r * r * r / 2 -> bp.block(waterId).coerceAtLeast(0)
                         leaves >= need && bp.treeCrown != null -> CROWN
                         else -> 0
@@ -164,21 +170,34 @@ class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainG
     }
 
     /**
-     * Canopy cells are placeholders until here: one tree sprite goes on top of
-     * each trunk that has leaves over it, and the rest of the canopy is air --
-     * a crown of glyphs would be a hedge of sprites, not a tree.
+     * Canopy cells are placeholders until here. A pack's tree sprite is a
+     * whole tree, trunk and all, so where a trunk carries a canopy the sprite
+     * replaces the trunk, standing on the ground at its foot; the rest of the
+     * canopy is air -- a crown of glyphs would be a hedge of sprites, not a
+     * tree. Without a tree sprite the trunk stays and the canopy goes.
      */
     private fun placeCrowns(out: ShortArray, bp: BlockPalette) {
         val crown = bp.treeCrown
         val wood = bp.block(barkId)
         for (y in 0 until Chunk.SIZE) for (x in 0 until Chunk.SIZE) {
-            var placed = false
+            var leafy = false
             for (z in 1 until Chunk.HEIGHT) {
                 val i = Chunk.indexOf(x, y, z)
                 if (out[i].toInt() != CROWN) continue
-                val below = out[Chunk.indexOf(x, y, z - 1)].toInt()
-                out[i] = if (!placed && crown != null && below == wood && wood > 0) crown.toShort().also { placed = true } else 0
+                out[i] = 0
+                if (out[Chunk.indexOf(x, y, z - 1)].toInt() == wood) leafy = true
             }
+            if (!leafy || crown == null || wood <= 0) continue
+            // The trunk's foot: the lowest wood block standing on something that is not wood.
+            var foot = -1
+            for (z in 1 until Chunk.HEIGHT) {
+                val here = out[Chunk.indexOf(x, y, z)].toInt()
+                if (here == wood && out[Chunk.indexOf(x, y, z - 1)].toInt() != wood) { foot = z; break }
+            }
+            if (foot < 0) continue
+            out[Chunk.indexOf(x, y, foot)] = crown.toShort()
+            var z = foot + 1
+            while (z < Chunk.HEIGHT && out[Chunk.indexOf(x, y, z)].toInt() == wood) { out[Chunk.indexOf(x, y, z)] = 0; z++ }
         }
     }
 

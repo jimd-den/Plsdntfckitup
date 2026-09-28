@@ -685,6 +685,8 @@ class PlayViewModel(
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
         biomeAt = { x, y -> session.biomeAt(x, y) },
+        // The world's quarter-block detail, when it was generated in microvoxels.
+        microTerrain = session.microTerrain,
     )
 
     /**
@@ -1359,6 +1361,8 @@ data class PlayUiState(
     val artDirector: WorldArtDirector = StyleSheetArtDirector(),
     val worldTime: WorldTime = WorldTime(),
     val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
+    /** Microvoxel detail behind the blocks, for worlds generated that way; null draws blocks only. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
     /** What the player last asked for, so the field can show it back to them. */
     val stylePrompt: String = "",
     /** What the game understood by it, which is how a player learns the vocabulary. */

@@ -1,0 +1,12 @@
+{
+  "id": "microvoxel.realms",
+  "name": "Microvoxel Realms",
+  "version": "1.0.0",
+  "author": "Stratum",
+  "license": "CC-BY-4.0",
+  "description": "Generates the world in quarter-block microvoxels: smooth hills, lakes, forests with real trees, and walled towns with streets, pavements, lamps and houses. Plays on the built-in pack's blocks, creatures and towns.",
+  "api": 1,
+  "dependencies": [
+    { "id": "igbo", "version": "^2.0" }
+  ]
+}
