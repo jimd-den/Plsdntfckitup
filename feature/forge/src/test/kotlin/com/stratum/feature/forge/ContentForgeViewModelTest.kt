@@ -11,6 +11,9 @@ import com.stratum.core.domain.ai.LanguageModelPort
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.item.ItemSlot
 import com.stratum.core.domain.item.PowerTier
+import com.stratum.core.domain.ai.GenerationStage
+import com.stratum.core.domain.creation.JobStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -32,6 +35,22 @@ private class FakeModel(private val reply: String) : LanguageModelPort {
 
     override suspend fun complete(request: CompletionRequest, observer: GenerationObserver): Result<String> {
         calls++
+        return Result.success(reply)
+    }
+}
+
+/** Holds every reply until the test lets it go, so a run can be looked at mid-flight. */
+private class SlowModel(private val reply: String) : LanguageModelPort {
+    val release = CompletableDeferred<Unit>()
+    var calls = 0
+
+    override suspend fun complete(request: CompletionRequest, observer: GenerationObserver): Result<String> {
+        calls++
+        observer.onStage(GenerationStage.PREPARING)
+        observer.onStage(GenerationStage.SENDING)
+        release.await()
+        observer.onStage(GenerationStage.READING)
+        observer.onStage(GenerationStage.DONE)
         return Result.success(reply)
     }
 }
@@ -171,6 +190,53 @@ class ContentForgeViewModelTest {
         assertFalse(vm.state.value.ladder)
         vm.setLevels(30, 10)
         assertEquals(30..30, vm.state.value.levelFrom..vm.state.value.levelTo, "a range cannot run backwards")
+    }
+
+    @Test
+    fun `a request shows at once as a placeholder with its steps, and fills in when the reply lands`() {
+        val model = SlowModel(unique)
+        val vm = viewModel(model)
+        vm.updatePrompt("A ring that makes every skill cost blood")
+        vm.forge()
+
+        val waiting = vm.state.value.open!!
+        assertTrue(waiting.running)
+        assertEquals("Ring", waiting.placeholder.title)
+        assertEquals(JobStatus.RUNNING, waiting.job?.status)
+        assertEquals("Waiting for the model", waiting.job?.currentStep?.label)
+
+        model.release.complete(Unit)
+        val landed = vm.state.value.open!!
+        assertFalse(landed.running)
+        assertEquals("Kiln Heart", landed.cards.first { it.section == "uniques" }.title)
+        val job = assertNotNull(landed.job)
+        assertEquals(JobStatus.DONE, job.status)
+        assertTrue(job.steps.any { it.label.startsWith("Repairing") }, "${job.steps}")
+        assertTrue("Kiln Heart" in job.summary.orEmpty(), job.summary)
+    }
+
+    @Test
+    fun `several requests run side by side, and stopping one leaves the rest`() {
+        val first = SlowModel(unique)
+        val vm = viewModel(first)
+        vm.updatePrompt("a ring")
+        vm.forge()
+        vm.selectKind(ForgeKind.LORE)
+        vm.updatePrompt("the river spirit")
+        vm.forge()
+
+        val drafts = vm.state.value.drafts
+        assertEquals(2, drafts.size)
+        assertEquals(2, vm.state.value.runningCount)
+        assertEquals("River Spirit", vm.state.value.open?.placeholder?.title, "the newest request is the one shown")
+
+        vm.cancel()
+        assertEquals("Stopped.", vm.state.value.open?.error)
+        assertEquals(1, vm.state.value.runningCount)
+        vm.openDraft(drafts.last().key)
+        first.release.complete(Unit)
+        assertFalse(vm.state.value.running)
+        assertTrue(vm.state.value.cards.isNotEmpty())
     }
 
     @Test
