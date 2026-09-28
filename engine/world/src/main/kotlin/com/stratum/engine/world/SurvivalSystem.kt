@@ -33,6 +33,11 @@ class WorldClock(private val dayLengthSeconds: Float, startFraction: Float = MOR
         elapsedSeconds += deltaSeconds
     }
 
+    /** Sets the clock to a saved running total: the same hour of the same day. */
+    fun restore(seconds: Float) {
+        elapsedSeconds = seconds.coerceAtLeast(0f)
+    }
+
     companion object {
         const val MORNING = 0.1f
         const val DUSK = 0.5f

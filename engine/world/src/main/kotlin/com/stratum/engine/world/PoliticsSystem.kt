@@ -8,6 +8,7 @@ import com.stratum.core.domain.faction.Stance
 import com.stratum.core.domain.settlement.SettlementAtlas
 import com.stratum.core.domain.settlement.SettlementPlan
 import com.stratum.core.domain.session.PlayerState
+import com.stratum.core.domain.session.RealmSave
 import com.stratum.core.domain.strategy.FollowerOrder
 import com.stratum.core.domain.strategy.Outpost
 import com.stratum.core.domain.world.WorldPoint
@@ -184,6 +185,33 @@ internal class PoliticsSystem(
             }
             CombatEvent.Realm(event)
         }
+    }
+
+    /**
+     * The realm as a save keeps it. Followers are kept by unit, to be raised
+     * again beside the player; a garrison that turned out for a raid is put
+     * back in its outpost, since the raid itself is not kept.
+     */
+    fun realmSave(): RealmSave {
+        val soldiers = state.enemies.filter { it.factionId == Factions.PLAYER && it.isAlive && it.squadId?.startsWith(UNIT_SQUAD) == true }
+        val (defending, following) = soldiers.partition { it.home != null }
+        val outposts = defending.groupBy { it.home!! }.entries.fold(realm.outposts) { held, (home, units) ->
+            realm.garrisoned(held, units.map { it.squadId!!.removePrefix(UNIT_SQUAD) }, home)
+        }
+        return RealmSave(
+            outposts = outposts,
+            followerOrder = realm.order,
+            holdAt = realm.holdAt,
+            followers = following.map { it.squadId!!.removePrefix(UNIT_SQUAD) },
+            liberatedTowns = garrisons.liberatedIds.toSet(),
+        )
+    }
+
+    /** Puts a saved realm back, raising its followers beside wherever the player now stands. */
+    fun restore(saved: RealmSave) {
+        realm.restore(saved.outposts, saved.followerOrder, saved.holdAt)
+        garrisons.restore(saved.liberatedTowns)
+        state.enemies = state.enemies + saved.followers.mapNotNull { spawnSoldier(it, near = player.position, home = null) }
     }
 
     private fun spawnSoldier(unitId: String, near: WorldPoint, home: WorldPoint?): EnemyInstance? {

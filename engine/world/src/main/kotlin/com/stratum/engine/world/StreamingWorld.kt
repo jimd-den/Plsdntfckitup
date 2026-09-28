@@ -179,6 +179,20 @@ class StreamingWorld(
     fun dirtyChunks(): List<Chunk> =
         (chunks.filterKeys(editedPositions::contains).values + modifiedChunks.values).toList()
 
+    /**
+     * Hands over chunks a save kept, to be used in place of generating them
+     * when the streaming window reaches them. Nothing is made resident, so
+     * this belongs before the first [focusOn]: a chunk already streamed in
+     * keeps what it has, and the saved one waits until it streams out and
+     * back.
+     */
+    fun restoreEdited(saved: Collection<Chunk>) {
+        saved.forEach { chunk ->
+            editedPositions += chunk.pos
+            if (!chunks.containsKey(chunk.pos)) modifiedChunks[chunk.pos] = chunk
+        }
+    }
+
     /** Drops an existing chunk in, bypassing generation. Used when loading a save. */
     fun installChunk(chunk: Chunk, markEdited: Boolean = true) {
         chunks[chunk.pos] = chunk
