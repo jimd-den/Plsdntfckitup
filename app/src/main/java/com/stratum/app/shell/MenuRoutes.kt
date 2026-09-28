@@ -1,6 +1,7 @@
 package com.stratum.app.shell
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -33,7 +34,6 @@ import com.stratum.feature.library.LibraryViewModel
 import com.stratum.feature.library.rememberArchivePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.UUID
 
 /** The menus: the title, the play and share hubs, the new-world flow and settings. */
 @Composable
@@ -42,8 +42,10 @@ internal fun MenuRoutes(app: AppViewModel, route: Route, stack: BackStack, modif
     val worlds by app.graph.worlds.worlds.collectAsStateWithLifecycle()
     val continueWorld = { world: WorldSummary ->
         app.game.chooseHeroClass(world.heroClassId.ifBlank { null })
-        stack.push(Route.Play.World(WorldLaunch.resume(world, content.suggestedRules)))
+        stack.push(Route.Play.World(WorldLaunch.Resume(world.id, world.heroClassId.ifBlank { null })))
     }
+    // Read on arriving at any menu: a world just left may have saved since the list was last read.
+    LaunchedEffect(route) { app.graph.worlds.refresh() }
 
     when (route) {
         Route.Title -> TitleScreen(
@@ -137,12 +139,14 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
             onChange = { app.newWorld.value = it },
             onQuickMake = { stack.push(Route.Create.Classes) },
             onGo = {
-                val launch = draft.launch(
-                    worldId = UUID.randomUUID().toString(),
-                    defaultHeroClassId = app.game.selectedHeroClassId(),
-                    fallbackSeed = System.currentTimeMillis(),
-                    existingWorlds = existingWorlds,
+                val heroId = draft.heroClassId ?: app.game.loadout.value.heroClassId ?: app.game.selectedHeroClassId()
+                val identity = app.graph.worlds.create(
+                    name = draft.resolvedName(existingWorlds),
+                    presetName = draft.presetLabel(),
+                    heroName = heroes.firstOrNull { it.id == heroId }?.name.orEmpty(),
+                    packIds = content.packs.map { it.id },
                 )
+                val launch = draft.launch(identity, defaultHeroClassId = heroId, fallbackSeed = System.currentTimeMillis())
                 app.game.chooseHeroClass(launch.heroClassId)
                 app.newWorld.value = NewWorldDraft()
                 // Replaced rather than pushed: leaving the world goes back to the hub, not to step three.

@@ -167,7 +167,7 @@ internal fun WorldCard(
         }
         Spacer(Modifier.height(Space.small))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.small), verticalAlignment = Alignment.CenterVertically) {
-            StatusChip(world.presetName)
+            StatusChip(world.presetName.ifBlank { "Custom" })
             StatusChip("${WorldFormat.playTime(world.playSeconds)} played")
         }
         Spacer(Modifier.height(Space.tight))

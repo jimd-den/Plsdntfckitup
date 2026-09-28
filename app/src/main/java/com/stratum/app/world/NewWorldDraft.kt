@@ -1,5 +1,6 @@
 package com.stratum.app.world
 
+import com.stratum.core.domain.session.WorldIdentity
 import com.stratum.core.domain.world.RulesPreset
 import com.stratum.core.domain.world.RulesPresets
 import com.stratum.core.domain.world.WorldRules
@@ -48,14 +49,15 @@ data class NewWorldDraft(
      */
     fun resolvedName(existingWorlds: Int): String = name.trim().ifEmpty { "World ${existingWorlds + 1}" }
 
-    fun launch(worldId: String, defaultHeroClassId: String?, fallbackSeed: Long, existingWorlds: Int): WorldLaunch = WorldLaunch(
-        worldId = worldId,
-        name = resolvedName(existingWorlds),
+    /** The preset's name for the world's card, or empty when the dials were turned by hand. */
+    fun presetLabel(): String = preset?.takeIf { it.rules == rules }?.name.orEmpty()
+
+    /** The launch for this draft, into [identity]'s slot from the world library. */
+    fun launch(identity: WorldIdentity, defaultHeroClassId: String?, fallbackSeed: Long): WorldLaunch.New = WorldLaunch.New(
+        identity = identity,
         heroClassId = heroClassId ?: defaultHeroClassId,
-        presetName = preset?.name ?: CUSTOM,
         rules = rules,
         seed = seed(fallbackSeed),
-        resume = false,
     )
 
     companion object {

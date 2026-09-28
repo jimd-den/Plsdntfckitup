@@ -4,12 +4,11 @@ import android.content.Context
 import com.stratum.app.AiWiring
 import com.stratum.app.GraphicsWiring
 import com.stratum.app.PluginWiring
-import com.stratum.app.world.InMemoryWorldSaveRepository
-import com.stratum.app.world.WorldLibrary
+import com.stratum.app.world.SavedWorlds
 import com.stratum.core.data.hero.CustomClassStore
 import com.stratum.core.data.save.FileHeroSaveStore
 import com.stratum.core.data.settings.WorldStyleStore
-import com.stratum.core.domain.session.WorldSaveRepository
+import com.stratum.core.data.save.WorldLibrary
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
 
@@ -21,12 +20,7 @@ import java.io.File
  * activity was. Here they are plain objects owned by [AppViewModel], and the
  * screens are handed what they need.
  */
-class AppGraph(
-    context: Context,
-    scope: CoroutineScope,
-    /** Where worlds are saved. The one line to change to plug in a store that writes to disk. */
-    worldSaves: WorldSaveRepository = InMemoryWorldSaveRepository(),
-) {
+class AppGraph(context: Context, scope: CoroutineScope) {
     val ai = AiWiring(context)
 
     /** Installed plugins: imported games, the crew's packs and the player's own creations. */
@@ -46,7 +40,8 @@ class AppGraph(
     /** Where painted textures live. */
     val forgeDirectory = File(context.filesDir, "forge")
 
-    val worlds = WorldLibrary(worldSaves, scope)
+    /** Saved worlds, one folder each under the app's files. */
+    val worlds = SavedWorlds(WorldLibrary.inFiles(context.filesDir), scope)
 
     /** Which play hints the player has already seen, so each teaches once. */
     val hints = HintStore(context)
