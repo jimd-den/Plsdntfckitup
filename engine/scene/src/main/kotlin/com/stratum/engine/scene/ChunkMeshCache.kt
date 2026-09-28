@@ -34,12 +34,21 @@ class ChunkMeshCache(
     private val detail: MicroDetailMesher? = null,
     /** Blocks from the centre within which a chunk is drawn in microvoxel detail. */
     private val detailRadius: Int = 0,
+    /**
+     * Blocks from the centre out to which chunks past [detailRadius] are
+     * still drawn from microvoxels, at half-block resolution: with it at the
+     * view's edge, the whole view is microvoxels. 0 draws them as blocks.
+     */
+    private val farRadius: Int = 0,
 ) {
 
-    private class Entry(val signature: Signature, val result: TerrainMesher.Result, val detailed: Boolean)
+    /** [lod] 0 is the block mesh; 1 full microvoxel detail; 2 half-block microvoxels. */
+    private class Entry(val signature: Signature, val result: TerrainMesher.Result, val lod: Int) {
+        val detailed get() = lod > 0
+    }
 
-    /** A detail mesh being made on the worker, for the chunk as it was when [signature] was taken. */
-    private class Job(val signature: Signature, val future: Future<TerrainMesher.Result?>)
+    /** A detail mesh being made on a worker, for the chunk as it was when [signature] was taken. */
+    private class Job(val signature: Signature, val lod: Int, val future: Future<TerrainMesher.Result?>)
 
     /**
      * Detail is meshed on its own low-priority thread from a snapshot of the
@@ -47,8 +56,9 @@ class ChunkMeshCache(
      * detail is ready, then swaps. Walking into town costs no hitch, and an
      * edit is on screen the same frame as blocks while the detail catches up.
      */
+    private val workers = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, MAX_WORKERS)
     private val worker: ExecutorService? = detail?.let {
-        Executors.newSingleThreadExecutor { r -> Thread(r, "micro-detail").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 } }
+        Executors.newFixedThreadPool(workers) { r -> Thread(r, "micro-detail").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 } }
     }
     private val jobs = HashMap<ChunkPos, Job>()
 
@@ -109,13 +119,13 @@ class ChunkMeshCache(
         deferredLastCall = 0
         val wanted = chunksCovering(centreX, centreY, radius).filter(world::isLoaded)
         val signatures = wanted.map { Signature.of(world, it, worldRevision) }
-        val detailed = wanted.map { wantsDetail(it, centreX, centreY) }
+        val detailed = wanted.map { lodFor(it, centreX, centreY) }
         collectDetail(wanted, signatures, detailed)
         // Block meshes are made now wherever a chunk has none that is current:
         // new ground, an edited chunk, or one leaving the detail ring.
         val stale = wanted.indices.filter { i ->
             val e = entries[wanted[i]]
-            e == null || e.signature != signatures[i] || (e.detailed && !detailed[i])
+            e == null || e.signature != signatures[i] || (e.detailed && detailed[i] == 0)
         }
 
         val (now, later) = stale.partition { urgent(wanted[it]) }
@@ -151,55 +161,61 @@ class ChunkMeshCache(
         generation++
     }
 
-    /** Whether a chunk sits close enough to the centre to be drawn from microvoxels. */
-    private fun wantsDetail(pos: ChunkPos, centreX: Int, centreY: Int): Boolean {
-        if (detail == null || detailRadius <= 0) return false
+    /** How a chunk is drawn by its distance from the centre: 1 full microvoxels, 2 half-block microvoxels, 0 blocks. */
+    private fun lodFor(pos: ChunkPos, centreX: Int, centreY: Int): Int {
+        if (detail == null || (detailRadius <= 0 && farRadius <= 0)) return 0
         val dx = maxOf(pos.originX - centreX, centreX - (pos.originX + Chunk.SIZE - 1), 0)
         val dy = maxOf(pos.originY - centreY, centreY - (pos.originY + Chunk.SIZE - 1), 0)
-        return maxOf(dx, dy) <= detailRadius
+        val d = maxOf(dx, dy)
+        return when {
+            d <= detailRadius -> 1
+            d <= farRadius -> 2
+            else -> 0
+        }
     }
 
     private fun mesh(world: World, pos: ChunkPos, signature: Signature) {
         val result = mesher.mesh(world, pos.originX, pos.originX + Chunk.SIZE - 1, pos.originY, pos.originY + Chunk.SIZE - 1)
-        entries[pos] = Entry(signature, result, detailed = false)
+        entries[pos] = Entry(signature, result, lod = 0)
         meshedLastCall++
         generation++
     }
 
     /** Swaps in finished detail meshes that still describe their chunk as it is now. */
-    private fun collectDetail(wanted: List<ChunkPos>, signatures: List<Signature>, detailed: List<Boolean>) {
+    private fun collectDetail(wanted: List<ChunkPos>, signatures: List<Signature>, detailed: List<Int>) {
         if (jobs.isEmpty()) return
         for (i in wanted.indices) {
             val pos = wanted[i]
             val job = jobs[pos] ?: continue
             if (!job.future.isDone) continue
             jobs.remove(pos)
-            if (!detailed[i] || job.signature != signatures[i] || job.future.isCancelled) continue
+            if (detailed[i] != job.lod || job.signature != signatures[i] || job.future.isCancelled) continue
             val fine = runCatching { job.future.get() }.getOrNull()
             // A chunk the microvoxels cannot draw (changed too much) keeps its blocks, and is remembered as done.
             val result = fine ?: entries[pos]?.takeIf { it.signature == signatures[i] }?.result ?: continue
-            entries[pos] = Entry(signatures[i], result, detailed = true)
+            entries[pos] = Entry(signatures[i], result, lod = job.lod)
             generation++
         }
     }
 
     /** Queues detail for chunks in the ring that lack it, nearest first, a few at a time. */
-    private fun requestDetail(world: World, wanted: List<ChunkPos>, signatures: List<Signature>, detailed: List<Boolean>, centreX: Int, centreY: Int) {
+    private fun requestDetail(world: World, wanted: List<ChunkPos>, signatures: List<Signature>, detailed: List<Int>, centreX: Int, centreY: Int) {
         val pool = worker ?: return
         val mesherOnWorker = detail ?: return
         val missing = wanted.indices.filter { i ->
-            detailed[i] && entries[wanted[i]]?.let { it.detailed && it.signature == signatures[i] } != true &&
-                jobs[wanted[i]]?.signature != signatures[i]
+            detailed[i] > 0 && entries[wanted[i]]?.let { it.lod == detailed[i] && it.signature == signatures[i] } != true &&
+                jobs[wanted[i]]?.let { it.signature == signatures[i] && it.lod == detailed[i] } != true
         }.sortedBy { i ->
             val dx = wanted[i].originX + Chunk.SIZE / 2 - centreX; val dy = wanted[i].originY + Chunk.SIZE / 2 - centreY
             dx.toLong() * dx + dy.toLong() * dy
         }
         for (i in missing) {
-            if (jobs.size >= MAX_DETAIL_JOBS) break
+            if (jobs.size >= MAX_DETAIL_JOBS * workers) break
             val pos = wanted[i]
             jobs.remove(pos)?.future?.cancel(false)
             val snapshot = BlockSnapshot.of(world, pos) // taken here, on the thread that owns the world
-            jobs[pos] = Job(signatures[i], pool.submit(Callable { mesherOnWorker.mesh(snapshot, pos) }))
+            val lod = detailed[i]
+            jobs[pos] = Job(signatures[i], lod, pool.submit(Callable { mesherOnWorker.mesh(snapshot, pos, lod) }))
         }
     }
 
@@ -238,6 +254,8 @@ class ChunkMeshCache(
     companion object {
         /** Detail meshes queued at once; walking fast re-queues what it still needs rather than building a backlog. */
         const val MAX_DETAIL_JOBS = 4
+        /** Meshing threads at most; a phone keeps at least one core for the game. */
+        const val MAX_WORKERS = 3
 
         fun chunksCovering(centreX: Int, centreY: Int, radius: Int): List<ChunkPos> {
             val min = ChunkPos.containing(centreX - radius, centreY - radius)

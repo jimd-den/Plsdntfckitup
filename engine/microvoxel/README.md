@@ -142,6 +142,35 @@ layer only while something near the hero is actually being cut. Set
 `SceneBuilder.revealRadius` or `WorldFrameRenderer.revealRadius` to 0 to turn
 it off. See `docs/screenshots/microvoxel/reveal-indoors-off-vs-on.png`.
 
+## Microvoxels to the edge of the view
+
+Every chunk in view is drawn from microvoxels. Chunks within
+`RenderSettings.microDetailRadius` get full quarter-block detail. Chunks
+beyond it, out to `microFarRadius` (the view's edge on every tier), are
+drawn from half-block microvoxels (`Lod.downsample`, factor 2) instead of
+textured blocks. Detail is meshed on a small pool of background threads,
+one fewer than the cores and at most three. Measured with
+`./gradlew :tools:artpreview:microScenePreview` on a 4-core desktop JVM:
+
+| Tier | Microvoxels near, blocks beyond | Microvoxels to the edge | Detail catch-up |
+|---|---|---|---|
+| LOW | 22,252 triangles, 3.1 MB | 27,716 triangles, 3.9 MB | 11 ms → 45 ms |
+| MEDIUM | 44,278 triangles, 6.2 MB | 46,622 triangles, 6.5 MB | 37 ms → 114 ms |
+| HIGH | 61,010 triangles, 8.5 MB | 60,620 triangles, 8.5 MB | 121 ms → 204 ms |
+
+Half-block microvoxels cost about what textured blocks did, so a view that
+is microvoxels to its edge costs almost nothing extra to draw. It takes
+longer to fill in after a move. Meshing one chunk takes 8.9 ms at full
+detail (10.2 ms before it read the generated chunk whole instead of block by
+block) and 5.8 ms at half-block. The game still plays on blocks: collision,
+pathing, digging and saves are unchanged.
+
+## Africa's geology and building traditions
+
+See [docs/AFRICAN-WORLD.md](../../docs/AFRICAN-WORLD.md): twenty
+geological provinces with their real rocks and landforms, and eighteen
+building traditions chosen by the land each town stands on.
+
 ## Shaping the world while it is played
 
 Terrain generation is a core part of play, not a setup screen. Every

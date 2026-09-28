@@ -156,6 +156,7 @@ class SceneBuilder(
         TerrainMesher(scene, textures, biomeAt),
         microTerrain?.let(::MicroDetailMesher),
         settings.microDetailRadius,
+        settings.microFarRadius,
     )
 
     /** Chunks drawn from microvoxels in the last frame, for profiling. */

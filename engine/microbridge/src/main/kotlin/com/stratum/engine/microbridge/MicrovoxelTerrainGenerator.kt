@@ -150,6 +150,8 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
 
     override fun materialForBlock(blockIndex: Int): Short = blocks?.materialForBlock(blockIndex) ?: MaterialPalette.AIR
 
+    override fun generatedChunk(x: Int, y: Int): ShortArray? = blocks?.let { convert(ChunkPos(x, y), it) }
+
     // ---- Conversion --------------------------------------------------------------------
 
     private fun convert(pos: ChunkPos, bp: BlockPalette): ShortArray = converted.getOrPut(pos) {

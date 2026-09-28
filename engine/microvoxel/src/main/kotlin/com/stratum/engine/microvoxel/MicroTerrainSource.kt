@@ -25,4 +25,12 @@ interface MicroTerrainSource {
 
     /** The micro material a block index is drawn as when it is not the generated one; AIR for air. */
     fun materialForBlock(blockIndex: Int): Short
+
+    /**
+     * Every generated block of the 16 x 16 block chunk at ([x], [y]), indexed
+     * as the block world's chunks are (x fastest, then y, then z); null when
+     * only [generatedBlock] is offered. A renderer comparing a whole chunk
+     * reads it once instead of asking block by block.
+     */
+    fun generatedChunk(x: Int, y: Int): ShortArray? = null
 }

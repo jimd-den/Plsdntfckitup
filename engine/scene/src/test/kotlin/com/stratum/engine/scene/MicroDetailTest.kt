@@ -45,9 +45,9 @@ class MicroDetailTest {
     }
 
     @Test
-    fun `chunks near the camera are drawn from microvoxels, the rest from blocks`() {
+    fun `with the far ring off, chunks near the camera are drawn from microvoxels, the rest from blocks`() {
         val world = world()
-        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM), microTerrain = generator)
+        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM).copy(microFarRadius = 0), microTerrain = generator)
         val frame = settle(builder, world)
         assertTrue(builder.detailedChunksLastFrame in 1 until frame.terrain.size, "detailed ${builder.detailedChunksLastFrame} of ${frame.terrain.size}")
         val plain = settle(SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM)), world)
@@ -58,7 +58,7 @@ class MicroDetailTest {
     @Test
     fun `detail stays off when the settings turn it off`() {
         val world = world()
-        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM).copy(microDetailRadius = 0), microTerrain = generator)
+        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM).copy(microDetailRadius = 0, microFarRadius = 0), microTerrain = generator)
         settle(builder, world)
         assertEquals(0, builder.detailedChunksLastFrame)
     }
@@ -85,5 +85,28 @@ class MicroDetailTest {
             world.setBlock(BlockPos(wx, wy, world.surfaceAt(wx, wy)), BlockRegistry.AIR_INDEX)
         }
         assertNull(MicroDetailMesher(generator).mesh(world, pos))
+    }
+
+    @Test
+    fun `half-block detail draws the same ground with far fewer quads`() {
+        val world = world()
+        val mesher = MicroDetailMesher(generator)
+        val pos = ChunkPos.containing(200, 200)
+        val full = assertNotNull(mesher.mesh(world, pos, 1)).mesh
+        val half = assertNotNull(mesher.mesh(world, pos, 2)).mesh
+        kotlin.test.assertTrue(half.triangleCount > 0, "the half-block mesh is empty")
+        kotlin.test.assertTrue(half.triangleCount * 2 < full.triangleCount, "half-block ${half.triangleCount} triangles against ${full.triangleCount}")
+    }
+
+    @Test
+    fun `with the far ring on, the whole view is drawn from microvoxels`() {
+        val world = world()
+        val settings = RenderSettings.of(QualityTier.MEDIUM)
+        val all = SceneBuilder(director, TextureLibrary(), settings = settings, microTerrain = generator)
+        settle(all, world)
+        val near = SceneBuilder(director, TextureLibrary(), settings = settings.copy(microFarRadius = 0), microTerrain = generator)
+        settle(near, world)
+        kotlin.test.assertTrue(all.detailedChunksLastFrame > near.detailedChunksLastFrame,
+            "far ring drew ${all.detailedChunksLastFrame} chunks in microvoxels, near only ${near.detailedChunksLastFrame}")
     }
 }

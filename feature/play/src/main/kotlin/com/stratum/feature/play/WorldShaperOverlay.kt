@@ -122,10 +122,13 @@ fun WorldShaperOverlay(
                 color = colors.inkMuted,
             )
 
+            // The one-tap shapes tune the generic hills; a geological landscape shapes itself (see its Landscape choice).
+            val land = panel.stages.firstOrNull { it.id == LAND_STAGE }
+            val classic = land == null || (land.values["geology"] ?: land.params.firstOrNull { it.key == "geology" }?.default ?: CLASSIC) == CLASSIC
+            if (classic) {
             Spacer(Modifier.height(Space.medium))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
                 items(LAND_SHAPES) { shape ->
-                    val land = panel.stages.firstOrNull { it.id == LAND_STAGE }
                     StratumChip(
                         label = shape.label,
                         selected = land != null && shape.options.all { (k, v) ->
@@ -135,6 +138,7 @@ fun WorldShaperOverlay(
                         onClick = { if (!panel.busy) onLandShape(shape.options) },
                     )
                 }
+            }
             }
 
             for (stage in panel.stages) {
@@ -213,3 +217,4 @@ private fun NumberKnob(stage: ShaperStage, p: StageParam.Number, busy: Boolean, 
 }
 
 internal const val LAND_STAGE = "micro:terrain"
+private const val CLASSIC = "classic"

@@ -251,7 +251,7 @@ object MicroScenePreview {
     ): String {
         val sb = StringBuilder()
         val cores = Runtime.getRuntime().availableProcessors()
-        sb.appendLine("Microvoxel ARPG benchmark (seed ${config.seed}, this JVM, $cores cores, single-threaded meshing)")
+        sb.appendLine("Microvoxel ARPG benchmark (seed ${config.seed}, this JVM, $cores cores)")
         sb.appendLine()
 
         // Generation: fresh chunks, as streaming meets them.
@@ -268,14 +268,35 @@ object MicroScenePreview {
         val layeredMs = (System.nanoTime() - t1) / 1e6 / n
         sb.appendLine("Generation per 16x16x48 block chunk: microvoxel %.1f ms (microvoxels + block conversion) vs the pack's default generator %.1f ms".format(genMs, layeredMs))
         sb.appendLine()
+        // Meshing one chunk from microvoxels, at each level of detail, and with the chunk read block by block (the old path).
+        run {
+            val world = StreamingWorld(content.registry, generator, config)
+            world.focusOn(BlockPos(start.first, start.second, 0))
+            val chunks = world.loadedChunks.map { it.pos }.take(16)
+            val slow = object : com.stratum.engine.microvoxel.MicroTerrainSource by generator {
+                override fun generatedChunk(x: Int, y: Int): ShortArray? = null
+            }
+            fun time(mesher: com.stratum.engine.scene.MicroDetailMesher, lod: Int): Double {
+                repeat(2) { chunks.forEach { mesher.mesh(world, it, lod) } } // warm
+                val t = System.nanoTime()
+                repeat(3) { chunks.forEach { mesher.mesh(world, it, lod) } }
+                return (System.nanoTime() - t) / 1e6 / (3 * chunks.size)
+            }
+            val fast = com.stratum.engine.scene.MicroDetailMesher(generator)
+            sb.appendLine("Meshing one 16x16x48 chunk from microvoxels: full detail %.1f ms (%.1f ms reading blocks one by one), half-block %.1f ms"
+                .format(time(fast, 1), time(com.stratum.engine.scene.MicroDetailMesher(slow), 1), time(fast, 2)))
+            sb.appendLine()
+        }
         sb.appendLine("tier    renderer  detail  first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB")
         // Every configuration runs twice and reports the second, so JIT warm-up does not land on whichever ran first.
         for (pass in 0..1) for (tier in listOf(QualityTier.LOW, QualityTier.MEDIUM, QualityTier.HIGH)) {
             val settings = RenderSettings.of(tier)
-            for (detail in listOf(false, true)) {
+            for (mode in 0..2) {
+                val detail = mode > 0
+                val tierSettings = if (mode == 1) settings.copy(microFarRadius = 0) else settings
                 val world = StreamingWorld(content.registry, generator, config)
                 world.focusOn(BlockPos(start.first, start.second, 0))
-                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = settings, microTerrain = if (detail) generator else null)
+                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = tierSettings, microTerrain = if (detail) generator else null)
                 fun frame(x: Int, y: Int): Pair<Double, SceneFrame> {
                     world.focusOn(BlockPos(x, y, 0))
                     val cam = SceneCamera(target = Vec3(x + 0.5f, y + 0.5f, world.surfaceAt(x, y) + 1f), aspect = 16f / 9f)
@@ -298,7 +319,8 @@ object MicroScenePreview {
                 val bytes = settledFrame.terrain.sumOf { it.vertexFloats.toLong() * 4 + it.indexCount.toLong() * 4 }
                 if (pass == 1) sb.appendLine(
                     "%-7s %-9s %-7s %8.1f ms   %8.2f / %6.1f ms        %8.0f ms      %,11d   %8.1f".format(
-                        tier.name, if (detail) "micro" else "blocks", if (detail) "${settings.microDetailRadius} blk" else "-",
+                        tier.name, when (mode) { 0 -> "blocks"; 1 -> "near"; else -> "all" },
+                        when (mode) { 0 -> "-"; 1 -> "${settings.microDetailRadius} blk"; else -> "${settings.microDetailRadius}+${settings.microFarRadius}" },
                         first, total / 96, worst, catchUp, tris, bytes / 1e6,
                     ),
                 )
@@ -307,7 +329,8 @@ object MicroScenePreview {
         sb.appendLine()
         sb.appendLine("first frame = every chunk in view meshed at once (entering a world, behind a loading moment).")
         sb.appendLine("walk = one block per frame diagonally for 96 blocks; the mesh cache paces off-screen chunks.")
-        sb.appendLine("detail is meshed on a background thread; catch-up = time after stopping until every chunk in the ring shows it.")
+        sb.appendLine("near = microvoxels only within the detail ring, blocks beyond; all = true microvoxels to the view's edge, half-block past the ring.")
+        sb.appendLine("detail is meshed on background threads; catch-up = time after stopping until every chunk in view shows it.")
         sb.appendLine("Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.")
         return sb.toString()
     }

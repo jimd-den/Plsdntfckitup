@@ -31,22 +31,38 @@ import com.stratum.engine.microvoxel.mesh.Quad
 class MicroDetailMesher(private val source: MicroTerrainSource) {
 
     private val palette: MaterialPalette get() = source.palette
-    private val mesher = BinaryGreedyMesher(source.palette)
-    private val out = MeshBuilder(MaterialKind.OPAQUE)
     private val r = source.microPerBlock
     private val blocksPerMicro = MicroChunk.SIZE / r
 
-    /** Quads emitted by the last [mesh], for profiling. */
-    var quadsLastMesh: Int = 0
-        private set
+    /** What one meshing thread works in; several workers may mesh at once. */
+    private inner class Work {
+        val mesher = BinaryGreedyMesher(source.palette)
+        val out = MeshBuilder(MaterialKind.OPAQUE)
+        val idx = IntArray(4)
+        val occ = FloatArray(4)
+    }
+
+    private val work = ThreadLocal.withInitial { Work() }
+    private val out: MeshBuilder get() = work.get().out
+
+    /** Quads emitted by the last [mesh] on the calling thread, for profiling. */
+    val quadsLastMesh: Int get() = lastQuads.get()
+    private val lastQuads = ThreadLocal.withInitial { 0 }
 
     /** Meshes from the live world; call on the thread that owns it. */
-    fun mesh(world: World, pos: ChunkPos): TerrainMesher.Result? = mesh(BlockSnapshot.of(world, pos), pos)
+    fun mesh(world: World, pos: ChunkPos, factor: Int = 1): TerrainMesher.Result? = mesh(BlockSnapshot.of(world, pos), pos, factor)
 
-    /** Meshes from a snapshot, which any thread may do. */
-    fun mesh(world: BlockSnapshot, pos: ChunkPos): TerrainMesher.Result? {
-        out.clear()
-        quadsLastMesh = 0
+    /**
+     * Meshes from a snapshot, which any thread may do. [factor] is the level
+     * of detail: 1 draws every quarter-block voxel; 2 draws half-block voxels
+     * (an eighth of the voxels, about a quarter of the quads), for the far
+     * ring of a view that is microvoxels to its edge.
+     */
+    fun mesh(world: BlockSnapshot, pos: ChunkPos, factor: Int = 1): TerrainMesher.Result? {
+        require(factor == 1 || factor == 2 || factor == 4) { "level of detail $factor is 1, 2 or 4" }
+        val w = work.get()
+        w.out.clear()
+        var quads = 0
         val props = ArrayList<PropInstance>()
         val lights = ArrayList<PointLight>()
         val changed = changedBlocks(world, pos) ?: return null
@@ -57,13 +73,21 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             val mine = changed[cz]
             if (generated.isEmpty() && mine.isEmpty()) continue
             val grid = if (mine.isEmpty()) generated else patched(generated, mine, pos, cz, world, props, lights)
-            val mesh = mesher.mesh(grid, neighbours(world, mpos), ambientOcclusion = true)
-            emit(mesh.quads, mesh.count, mpos)
-            quadsLastMesh += mesh.count
+            val neighbours = neighbours(world, mpos)
+            val mesh = if (factor == 1) w.mesher.mesh(grid, neighbours, ambientOcclusion = true)
+            else w.mesher.mesh(
+                com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
+                // Opacity beyond a coarse grid's edge, read at the middle of the coarse cell it would be.
+                NeighborOpacity { x, y, z -> neighbours.opaque(x * factor + factor / 2, y * factor + factor / 2, z * factor + factor / 2) },
+                ambientOcclusion = true,
+            )
+            emit(w, mesh.quads, mesh.count, mpos, factor)
+            quads += mesh.count
             water(grid, mpos)
             lamps(grid, mpos, lights)
         }
-        return TerrainMesher.Result(out.build(), props, lights)
+        lastQuads.set(quads)
+        return TerrainMesher.Result(w.out.build(), props, lights)
     }
 
     /**
@@ -75,6 +99,8 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
         val layers = Chunk.HEIGHT / blocksPerMicro
         val lists = Array(layers) { ArrayList<Int>() }
         var surfaceChanged = 0
+        // The whole chunk as generated, read once; asking block by block took a lock per block.
+        val generated = source.generatedChunk(pos.x, pos.y)
         for (y in 0 until Chunk.SIZE) for (x in 0 until Chunk.SIZE) {
             val wx = pos.originX + x; val wy = pos.originY + y
             val top = world.surface(wx, wy)
@@ -82,7 +108,8 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
                 val here = world.index(wx, wy, z)
                 if (here < 0) continue
                 val cell = (z % blocksPerMicro) * Chunk.SIZE * Chunk.SIZE + y * Chunk.SIZE + x
-                if (here == source.generatedBlock(wx, wy, z)) {
+                val made = if (generated != null) generated[Chunk.indexOf(x, y, z)].toInt() else source.generatedBlock(wx, wy, z)
+                if (here == made) {
                     // A pack prop the generator built (a town's brazier) is drawn as its sprite, like any prop --
                     // but a tree sprite standing in for microvoxel leaves is not: those leaves are drawn already.
                     if (here != BlockRegistry.AIR_INDEX && world.type(here).glyph != null && builtAsBlock(pos, x, y, z, here))
@@ -129,7 +156,11 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
     }
 
     /** Opacity just outside a micro chunk: the neighbour's microvoxels, or the block world where it was changed. */
-    private fun neighbours(world: BlockSnapshot, mpos: MicroChunkPos) = NeighborOpacity { x, y, z ->
+    private fun neighbours(world: BlockSnapshot, mpos: MicroChunkPos): NeighborOpacity {
+        // The mesher asks thousands of times along each face, almost always of the same neighbour.
+        var lastPos: MicroChunkPos? = null
+        var last: MicroChunk? = null
+        return NeighborOpacity { x, y, z ->
         val mx = mpos.originX + x; val my = mpos.originY + y; val mz = mpos.originZ + z
         if (mz < 0) return@NeighborOpacity true
         val bx = Math.floorDiv(mx, r); val by = Math.floorDiv(my, r); val bz = Math.floorDiv(mz, r)
@@ -140,12 +171,15 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             return@NeighborOpacity b.isOpaque && b.shape == BlockShape.CUBE && b.glyph == null
         }
         val npos = MicroChunkPos.containing(mx, my, mz)
-        val n = source.microChunk(npos)
+        val n = if (npos == lastPos) last!! else source.microChunk(npos).also { lastPos = npos; last = it }
         palette.isOpaque(n[mx - npos.originX, my - npos.originY, mz - npos.originZ])
+        }
     }
 
-    private fun emit(quads: LongArray, count: Int, mpos: MicroChunkPos) {
-        val s = 1f / r
+    private fun emit(work: Work, quads: LongArray, count: Int, mpos: MicroChunkPos, factor: Int) {
+        val out = work.out
+        val s = factor.toFloat() / r
+        val ox = mpos.originX / factor; val oy = mpos.originY / factor; val oz = mpos.originZ / factor
         for (i in 0 until count) {
             val q = quads[i]
             val face = Quad.face(q)
@@ -160,7 +194,6 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
                 2, 3 -> { val p = if (face == 2) y + 1 else y; y0 = p; y1 = p; x0 = x; x1 = x + w; z0 = z; z1 = z + h }
                 else -> { val p = z + 1; z0 = p; z1 = p; x0 = x; x1 = x + w; y0 = y; y1 = y + h }
             }
-            val ox = mpos.originX; val oy = mpos.originY; val oz = mpos.originZ
             val nx = NORMALS[face * 3]; val ny = NORMALS[face * 3 + 1]; val nz = NORMALS[face * 3 + 2]
             // A little tone per quad, from where it is: small pieces vary, big merged ones stay even.
             val tone = 1f + (hash(ox + x, oy + y, oz + z) - 0.5f) * 2f * mat.jitter * if (w * h <= 4) 1f else 0.35f
@@ -168,8 +201,8 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             // Lamps glow; lit windows only warm a little, or a town at noon would be lit up like a stage.
             val emissive = (mat.emission * 0.3f).coerceIn(0f, 1f)
             val order = ORDER[face]
-            val idx = IntArray(4)
-            val occ = FloatArray(4)
+            val idx = work.idx
+            val occ = work.occ
             for (k in 0 until 4) {
                 val c = order[k]
                 val su = c == 1 || c == 2; val sv = c >= 2

@@ -146,6 +146,8 @@ class HotTerrain(private val context: TerrainContext) : TerrainGenerator, BiomeS
 
     override fun materialForBlock(blockIndex: Int): Short = current.materialForBlock(blockIndex)
 
+    override fun generatedChunk(x: Int, y: Int): ShortArray? = current.generatedChunk(x, y)
+
     private companion object {
         const val REFUSED = "Those settings do not make a world"
     }
