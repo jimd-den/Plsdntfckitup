@@ -362,6 +362,68 @@ the director's dice; chests roll through the item generator with a rarity
 floor. Each marker is peopled once a session, with dice from the seed and
 the marker, so a cleared room stays cleared when its chunk reloads.
 
+## Saving a world
+
+A hero is kept on its own (`HeroSave`, one file per class under `heroes/`)
+so a character carries its levels, tree and gear into a fresh seed. A world
+is kept as well: `WorldSave` in `core/domain/.../session` holds what a hero
+cannot -- the ground the player changed, where they stand with how much
+life, resource and hunger, the blocks in their pockets, the outposts and
+followers, the towns freed, the markers already peopled, the clock, the
+seed and rules, and this world's own copy of the hero. A new world starts
+from the roster's hero; a saved world resumes from its own copy.
+
+**Only what changed is stored.** Terrain is a function of the seed, so the
+save keeps only the chunks the player edited (`StreamingWorld.dirtyChunks`,
+resident or not) and regenerates everything else byte for byte. Cells are
+stored against the block ids at save time, not the registry's indices, and
+remapped on load (`SavedChunk.remapTable`): a pack that adds a block between
+two sessions does not turn a wall into something else, and a block whose
+pack is gone comes back as air rather than failing the load.
+
+**One road into a world.** `WorldSession.worldSave(identity, savedAt)`
+copies all of that on the ticking thread -- block cells included -- so the
+result can be written anywhere without tearing. `WorldSession.restore`
+builds the session exactly as a new one is built, from the saved seed, rules,
+difficulty and hero, then lays the save over it: the saved chunks go to
+`StreamingWorld.restoreEdited` before the first chunk streams, markers are
+marked consumed before any is learnt, and the player, clock and realm are
+put back. Followers are kept by unit id and raised beside the player; a
+garrison that turned out for a raid goes back in its outpost, since the raid
+itself is not kept. Loot on the ground, statuses and wandering monsters are
+not kept: the director refills the wilds.
+
+**On disk** (`FileWorldSaveStore` in `core/data/.../save`) each world is a
+folder under `files/worlds/`: `summary.json` for the menu, `world.json` for
+the state, and `chunks-N.bin`, the changed chunks deflated behind a magic
+number and a version. Every file is written beside itself and renamed into
+place, and the chunk file takes a new name each save and is written before
+the state that points at it, so a phone that dies mid-save keeps the last
+good world whole. `list()` reads only the summaries. A world that will not
+read -- bad JSON, a newer format, a damaged chunk file -- is logged and
+skipped, never fatal. The JSON is its own schema, versioned, with the hero
+written by the hero store's schema so the two never disagree about an item.
+
+**When play saves.** `PlayViewModel` takes a snapshot on the game loop and
+`WorldSaver` writes it in a scope that outlives the screen, each write
+waiting for the one before so an older world never lands over a newer one:
+every minute of play and on a level, when the build changes, on death and
+on revive, when the app goes to the background (`ON_STOP`), when the player
+leaves for a new world, and when the screen closes. A sandbox world saves to
+its own slot and still never writes its conjured hero over the real one. A
+"Saved" cue shows for a moment when a save lands. Without a repository the
+screen saves only the hero, as it did before worlds were kept.
+
+**Wiring it.** The app makes one `WorldLibrary.inFiles(context.filesDir)`
+and lists, loads, renames and deletes through it. "Continue" is
+`library.latest()`; resuming passes the save to
+`PlayViewModel.factory(..., resume = save, worlds = library.repository)`,
+whose seed, rules, hero class and hero win over the ones passed in. A new
+world is named with `library.create(name, presetName, heroName, packIds)`
+and started with `factory(..., config = ..., worlds = library.repository,
+slot = identity)`; the screen writes its first save at once, so the world is
+in the list before the player has done anything.
+
 ## Progression: one modifier formula for everything
 
 Every lasting change to a character is a `StatModifier` of one of three
