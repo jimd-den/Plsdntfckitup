@@ -9,7 +9,10 @@ import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.stratum.app.hub.CreateHubActions
 import com.stratum.app.hub.CreateHubScreen
+import androidx.compose.ui.graphics.asImageBitmap
 import com.stratum.app.hub.HeroChoice
+import com.stratum.app.hub.LookChoice
+import com.stratum.core.domain.sprite.FrameRect
 import com.stratum.app.hub.ImportHubActions
 import com.stratum.app.hub.ImportHubScreen
 import com.stratum.app.hub.ImportHubState
@@ -85,7 +88,24 @@ class MenuScreenshotTest {
 
     @Test
     fun new_world_hero() = shoot("new_world_1_hero") {
-        NewWorldScreen(draft = NewWorldDraft(heroClassId = "amadioha"), heroes = HEROES, actions = NewWorldActions(), existingWorlds = 3, modifier = Modifier.fillMaxSize())
+        NewWorldScreen(
+            draft = NewWorldDraft(heroClassId = "amadioha"), heroes = HEROES, actions = NewWorldActions(), existingWorlds = 3,
+            looks = looks(), lookId = "hero:bronze_warden", modifier = Modifier.fillMaxSize(),
+        )
+    }
+
+    /** Two drawn looks: a little figure in a single idle frame each, as a sheet from the forge would give. */
+    private fun looks(): List<LookChoice> = listOf(
+        "hero:bronze_warden" to ("Bronze Warden" to 0xFFC8872E.toInt()),
+        "hero:storm_caller" to ("Storm Caller" to 0xFF2FB5A4.toInt()),
+    ).map { (id, look) ->
+        val bitmap = android.graphics.Bitmap.createBitmap(16, 24, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint()
+        paint.color = 0xFFE9D5B5.toInt(); canvas.drawRect(6f, 1f, 10f, 5f, paint)
+        paint.color = look.second; canvas.drawRect(4f, 6f, 12f, 16f, paint)
+        paint.color = 0xFF3A2A1C.toInt(); canvas.drawRect(5f, 16f, 7f, 23f, paint); canvas.drawRect(9f, 16f, 11f, 23f, paint)
+        LookChoice(id, look.first, bitmap.asImageBitmap(), FrameRect(0, 0, 16, 24))
     }
 
     @Test

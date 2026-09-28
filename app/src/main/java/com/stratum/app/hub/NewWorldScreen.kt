@@ -1,5 +1,7 @@
 package com.stratum.app.hub
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +55,18 @@ data class HeroChoice(
     val level: Int? = null,
 )
 
+/**
+ * A look the hero can wear: a character sheet the player drew or imported.
+ * [portrait] is one idle frame, cut from the sheet, so the choice shows who
+ * rather than a file name.
+ */
+data class LookChoice(
+    val id: String,
+    val name: String,
+    val portrait: androidx.compose.ui.graphics.ImageBitmap? = null,
+    val frame: com.stratum.core.domain.sprite.FrameRect? = null,
+)
+
 /** What the new-world flow can be asked to do. */
 data class NewWorldActions(
     val onBack: () -> Unit = {},
@@ -60,6 +74,10 @@ data class NewWorldActions(
     /** Detours to the class forge; the draft waits here for the new class. */
     val onQuickMake: () -> Unit = {},
     val onGo: () -> Unit = {},
+    /** Wears a look, or null for the class's own art. */
+    val onPickLook: (String?) -> Unit = {},
+    /** Detours to the sprite forge to draw a new look. */
+    val onMakeLook: () -> Unit = {},
 )
 
 /**
@@ -77,6 +95,9 @@ fun NewWorldScreen(
     existingWorlds: Int = 0,
     /** Whether a model is connected, so a described world also gets the crew writing it. */
     modelReady: Boolean = false,
+    /** Character art the hero can wear, and which is worn; null is the class's own art. */
+    looks: List<LookChoice> = emptyList(),
+    lookId: String? = null,
     jobsTray: @Composable () -> Unit = LocalJobsTray.current,
 ) {
     val heroId = draft.heroClassId ?: heroes.firstOrNull()?.id
@@ -110,9 +131,12 @@ fun NewWorldScreen(
             onStep = { actions.onChange(draft.copy(step = NewWorldStep.entries[it])) },
         )
         when (draft.step) {
-            NewWorldStep.HERO -> HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
+            NewWorldStep.HERO -> {
+                HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
+                LookStep(looks, lookId, actions.onPickLook, actions.onMakeLook)
+            }
             NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange)
-            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, existingWorlds, modelReady)
+            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, looks.firstOrNull { it.id == lookId }, existingWorlds, modelReady)
         }
     }
 }
@@ -132,6 +156,89 @@ private fun HeroStep(heroes: List<HeroChoice>, selected: String?, onPick: (Strin
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+/**
+ * How the hero looks. The class's own art is always the first choice, so a
+ * player with nothing drawn yet still sees a complete step, and one tap on
+ * the worn look goes back to it.
+ */
+@Composable
+private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String?) -> Unit, onMake: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionHeader("Your look", actionLabel = "Make a look", onAction = onMake)
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+            item { LookTile(name = "Class art", portrait = null, frame = null, selected = selected == null, onClick = { onPick(null) }) }
+            items(looks.size) { i ->
+                val look = looks[i]
+                LookTile(look.name, look.portrait, look.frame, selected = look.id == selected, onClick = { onPick(look.id) })
+            }
+        }
+        if (looks.isEmpty()) {
+            Text(
+                "Draw your hero once in the sprite forge and they will stand here to be picked.",
+                style = MaterialTheme.typography.bodySmall,
+                color = StratumTheme.colors.inkMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LookTile(
+    name: String,
+    portrait: androidx.compose.ui.graphics.ImageBitmap?,
+    frame: com.stratum.core.domain.sprite.FrameRect?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = StratumTheme.colors
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(LOOK_TILE_WIDTH)
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) colors.accent else colors.inkMuted.copy(alpha = 0.35f),
+            )
+            .clickable(onClick = onClick)
+            .padding(Space.small),
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.width(LOOK_TILE_WIDTH - 16.dp).height(LOOK_PORTRAIT_HEIGHT)) {
+            if (portrait != null && frame != null && frame.width > 0 && frame.height > 0) {
+                // Fitted by height and centred, pixels kept crisp, as the world draws them.
+                val drawHeight = size.height
+                val drawWidth = (drawHeight * frame.width / frame.height).coerceAtMost(size.width)
+                drawImage(
+                    image = portrait,
+                    srcOffset = androidx.compose.ui.unit.IntOffset(frame.left, frame.top),
+                    srcSize = androidx.compose.ui.unit.IntSize(frame.width, frame.height),
+                    dstOffset = androidx.compose.ui.unit.IntOffset(((size.width - drawWidth) / 2f).toInt(), 0),
+                    dstSize = androidx.compose.ui.unit.IntSize(drawWidth.toInt().coerceAtLeast(1), drawHeight.toInt()),
+                    filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
+                )
+            } else {
+                // No art: a silhouette placeholder in the theme's muted ink.
+                val ink = colors.inkMuted.copy(alpha = 0.5f)
+                val cx = size.width / 2f
+                drawCircle(ink, radius = size.height * 0.14f, center = androidx.compose.ui.geometry.Offset(cx, size.height * 0.22f))
+                drawRoundRect(
+                    ink,
+                    topLeft = androidx.compose.ui.geometry.Offset(cx - size.height * 0.2f, size.height * 0.4f),
+                    size = androidx.compose.ui.geometry.Size(size.height * 0.4f, size.height * 0.55f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f),
+                )
+            }
+        }
+        Spacer(Modifier.height(Space.tight))
+        Text(
+            name,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) colors.accent else colors.ink,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -205,12 +312,14 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boo
 }
 
 @Composable
-private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, existingWorlds: Int, modelReady: Boolean) {
+private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, existingWorlds: Int, modelReady: Boolean) {
     val colors = StratumTheme.colors
     StratumPanel(Modifier.fillMaxWidth()) {
         Text(draft.resolvedName(existingWorlds), style = MaterialTheme.typography.displaySmall, color = colors.ink)
         Spacer(Modifier.height(Space.medium))
         SummaryRow("Hero", hero?.let { h -> h.name + (h.level?.let { " · Lv $it" } ?: " · new") } ?: "—")
+        StratumDivider()
+        SummaryRow("Wears", look?.name ?: "Class art")
         StratumDivider()
         SummaryRow("World", draft.presetLabel().ifEmpty { NewWorldDraft.CUSTOM })
         StratumDivider()
@@ -241,6 +350,8 @@ private fun SummaryRow(label: String, value: String) {
 }
 
 private val GO_HEIGHT = 56.dp
+private val LOOK_TILE_WIDTH = 104.dp
+private val LOOK_PORTRAIT_HEIGHT = 112.dp
 
 /** One line each for the built-in presets, so the cards scan; a preset not listed shows its own description. */
 private val PRESET_LINES = mapOf(
