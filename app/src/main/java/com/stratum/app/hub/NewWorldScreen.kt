@@ -1,6 +1,5 @@
 package com.stratum.app.hub
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,6 +40,8 @@ import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumDivider
 import com.stratum.core.designsystem.component.StratumPanel
 import com.stratum.core.designsystem.component.StratumScreen
+import com.stratum.core.designsystem.component.LookChoice
+import com.stratum.core.designsystem.component.LookRow
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.world.RulesPresets
@@ -53,18 +54,6 @@ data class HeroChoice(
     val line: String,
     /** The kept hero's level, or null for a class never played. */
     val level: Int? = null,
-)
-
-/**
- * A look the hero can wear: a character sheet the player drew or imported.
- * [portrait] is one idle frame, cut from the sheet, so the choice shows who
- * rather than a file name.
- */
-data class LookChoice(
-    val id: String,
-    val name: String,
-    val portrait: androidx.compose.ui.graphics.ImageBitmap? = null,
-    val frame: com.stratum.core.domain.sprite.FrameRect? = null,
 )
 
 /** What the new-world flow can be asked to do. */
@@ -168,13 +157,7 @@ private fun HeroStep(heroes: List<HeroChoice>, selected: String?, onPick: (Strin
 private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String?) -> Unit, onMake: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("Your look", actionLabel = "Make a look", onAction = onMake)
-        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-            item { LookTile(name = "Class art", portrait = null, frame = null, selected = selected == null, onClick = { onPick(null) }) }
-            items(looks.size) { i ->
-                val look = looks[i]
-                LookTile(look.name, look.portrait, look.frame, selected = look.id == selected, onClick = { onPick(look.id) })
-            }
-        }
+        LookRow(looks, selected, onPick)
         if (looks.isEmpty()) {
             Text(
                 "Draw your hero once in the sprite forge and they will stand here to be picked.",
@@ -182,63 +165,6 @@ private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String
                 color = StratumTheme.colors.inkMuted,
             )
         }
-    }
-}
-
-@Composable
-private fun LookTile(
-    name: String,
-    portrait: androidx.compose.ui.graphics.ImageBitmap?,
-    frame: com.stratum.core.domain.sprite.FrameRect?,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = StratumTheme.colors
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(LOOK_TILE_WIDTH)
-            .border(
-                width = if (selected) 3.dp else 1.dp,
-                color = if (selected) colors.accent else colors.inkMuted.copy(alpha = 0.35f),
-            )
-            .clickable(onClick = onClick)
-            .padding(Space.small),
-    ) {
-        androidx.compose.foundation.Canvas(Modifier.width(LOOK_TILE_WIDTH - 16.dp).height(LOOK_PORTRAIT_HEIGHT)) {
-            if (portrait != null && frame != null && frame.width > 0 && frame.height > 0) {
-                // Fitted by height and centred, pixels kept crisp, as the world draws them.
-                val drawHeight = size.height
-                val drawWidth = (drawHeight * frame.width / frame.height).coerceAtMost(size.width)
-                drawImage(
-                    image = portrait,
-                    srcOffset = androidx.compose.ui.unit.IntOffset(frame.left, frame.top),
-                    srcSize = androidx.compose.ui.unit.IntSize(frame.width, frame.height),
-                    dstOffset = androidx.compose.ui.unit.IntOffset(((size.width - drawWidth) / 2f).toInt(), 0),
-                    dstSize = androidx.compose.ui.unit.IntSize(drawWidth.toInt().coerceAtLeast(1), drawHeight.toInt()),
-                    filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
-                )
-            } else {
-                // No art: a silhouette placeholder in the theme's muted ink.
-                val ink = colors.inkMuted.copy(alpha = 0.5f)
-                val cx = size.width / 2f
-                drawCircle(ink, radius = size.height * 0.14f, center = androidx.compose.ui.geometry.Offset(cx, size.height * 0.22f))
-                drawRoundRect(
-                    ink,
-                    topLeft = androidx.compose.ui.geometry.Offset(cx - size.height * 0.2f, size.height * 0.4f),
-                    size = androidx.compose.ui.geometry.Size(size.height * 0.4f, size.height * 0.55f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f),
-                )
-            }
-        }
-        Spacer(Modifier.height(Space.tight))
-        Text(
-            name,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (selected) colors.accent else colors.ink,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -350,8 +276,6 @@ private fun SummaryRow(label: String, value: String) {
 }
 
 private val GO_HEIGHT = 56.dp
-private val LOOK_TILE_WIDTH = 104.dp
-private val LOOK_PORTRAIT_HEIGHT = 112.dp
 
 /** One line each for the built-in presets, so the cards scan; a preset not listed shows its own description. */
 private val PRESET_LINES = mapOf(

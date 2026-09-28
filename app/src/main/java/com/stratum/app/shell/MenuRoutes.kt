@@ -12,11 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stratum.app.ProviderSettingsScreen
-import androidx.compose.ui.graphics.asImageBitmap
 import com.stratum.app.hub.HeroChoice
-import com.stratum.app.hub.LookChoice
-import com.stratum.core.domain.sprite.AnimationState
-import com.stratum.core.domain.sprite.SpriteNamespace
 import com.stratum.app.hub.ImportHubActions
 import com.stratum.app.hub.ImportHubScreen
 import com.stratum.app.hub.ImportHubState
@@ -134,26 +130,8 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
             }
         }
     }
-    // Every hero look the player has: drawn in the forges or brought in by a
-    // plugin. Portraits are decoded off the main thread; the store caches them.
     val loadout by app.game.loadout.collectAsStateWithLifecycle()
-    val drawnSheets by app.graph.ai.sprites.sheets.collectAsStateWithLifecycle()
-    val looks by produceState(emptyList<LookChoice>(), drawnSheets, content.spriteSheets) {
-        value = withContext(Dispatchers.IO) {
-            (drawnSheets + content.spriteSheets)
-                .distinctBy { it.id }
-                .filter { SpriteNamespace.servesHero(it.id) }
-                .map { sheet ->
-                    val idle = sheet.clipOrFallback(AnimationState.IDLE)?.firstFrame ?: 0
-                    LookChoice(
-                        id = sheet.id,
-                        name = sheet.name,
-                        portrait = app.graph.ai.sprites.drawableBitmapFor(sheet.id)?.asImageBitmap(),
-                        frame = sheet.frameRect(idle),
-                    )
-                }
-        }
-    }
+    val looks = rememberLookChoices(app, content)
     NewWorldScreen(
         draft = draft.copy(heroClassId = draft.heroClassId ?: app.game.loadout.value.heroClassId),
         heroes = heroes,

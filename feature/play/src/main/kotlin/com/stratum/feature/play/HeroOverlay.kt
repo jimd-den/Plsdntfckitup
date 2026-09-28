@@ -2,6 +2,7 @@ package com.stratum.feature.play
 
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.stratum.core.designsystem.component.ActionEmphasis
+import com.stratum.core.designsystem.component.LookRow
+import com.stratum.core.designsystem.component.RoundIconButton
 import com.stratum.core.designsystem.component.SectionLabel
 import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
@@ -58,14 +61,17 @@ data class HeroActions(
  * pixel a phone has; the fight keeps running behind it, as the bag does.
  */
 @Composable
-fun HeroOverlay(state: PlayUiState, actions: HeroActions, modifier: Modifier = Modifier) {
+fun HeroOverlay(state: PlayUiState, actions: HeroActions, modifier: Modifier = Modifier, looks: HeroLooks = HeroLooks()) {
     val colors = StratumTheme.colors
     val panel = state.hero
     Column(modifier = modifier.fillMaxSize().background(colors.surface).safeContent().padding(Space.medium)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-            HeroTab.entries.forEach { tab -> StratumChip(label = tab.label, selected = panel.tab == tab, onClick = { actions.onSelectTab(tab) }) }
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = "Close", onClick = actions.onClose, emphasis = ActionEmphasis.QUIET)
+            // The tabs scroll sideways on a narrow phone rather than squeezing Close.
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                HeroTab.entries.forEach { tab -> StratumChip(label = tab.label, selected = panel.tab == tab, onClick = { actions.onSelectTab(tab) }) }
+            }
+            // A round ✕, as the pause menu closes, so five tabs fit a phone held upright.
+            RoundIconButton(glyph = "✕", description = "Close", onClick = actions.onClose)
         }
         Spacer(Modifier.height(Space.small))
         when (panel.tab) {
@@ -73,6 +79,32 @@ fun HeroOverlay(state: PlayUiState, actions: HeroActions, modifier: Modifier = M
             HeroTab.SKILLS -> SkillsPage(state, actions, Modifier.weight(1f))
             HeroTab.STATS -> StatsPage(state, actions, Modifier.weight(1f))
             HeroTab.WORLDS -> WorldsPage(state, actions, Modifier.weight(1f))
+            HeroTab.LOOK -> LookPage(looks, Modifier.weight(1f))
+        }
+    }
+}
+
+/**
+ * How the hero looks, changed mid-fight: the class's own art first, then every
+ * look the player drew or imported. The world behind redraws them at once.
+ */
+@Composable
+private fun LookPage(looks: HeroLooks, modifier: Modifier) {
+    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.small)) {
+        SectionLabel("Wearing")
+        Text(
+            looks.looks.firstOrNull { it.id == looks.wornId }?.name ?: "Class art",
+            style = MaterialTheme.typography.titleMedium,
+            color = StratumTheme.colors.accent,
+        )
+        LookRow(looks.looks, looks.wornId, looks.onPick, Modifier.fillMaxWidth())
+        if (looks.looks.isEmpty()) {
+            Muted("Draw your hero in the sprite forge and they will stand here to be worn, in this world and every other.")
+        } else {
+            Muted("Your look goes with you: every world you enter shows the one you wear.")
+        }
+        looks.onMake?.let { make ->
+            StratumAction(label = "Make a look", onClick = make, emphasis = ActionEmphasis.SECONDARY)
         }
     }
 }

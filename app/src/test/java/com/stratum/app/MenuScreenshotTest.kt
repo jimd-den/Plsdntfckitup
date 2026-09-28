@@ -11,7 +11,7 @@ import com.stratum.app.hub.CreateHubActions
 import com.stratum.app.hub.CreateHubScreen
 import androidx.compose.ui.graphics.asImageBitmap
 import com.stratum.app.hub.HeroChoice
-import com.stratum.app.hub.LookChoice
+import com.stratum.core.designsystem.component.LookChoice
 import com.stratum.core.domain.sprite.FrameRect
 import com.stratum.app.hub.ImportHubActions
 import com.stratum.app.hub.ImportHubScreen

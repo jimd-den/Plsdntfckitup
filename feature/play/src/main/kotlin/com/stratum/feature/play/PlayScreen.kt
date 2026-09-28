@@ -61,6 +61,8 @@ fun PlayScreen(
     /** Hints already taught, so each appears once ever. */
     seenHints: Set<String> = emptySet(),
     onHintSeen: (String) -> Unit = {},
+    /** The player's looks, worn and changed from the hero panel. */
+    looks: HeroLooks = HeroLooks(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var menuOpen by rememberSaveable { mutableStateOf(false) }
@@ -175,6 +177,7 @@ fun PlayScreen(
         seenHints = seenHints,
         onHintSeen = onHintSeen,
         heroActions = heroActions,
+        looks = looks,
         survivalActions = survivalActions,
         realmActions = realmActions,
         gearActions = gearActions,
@@ -228,6 +231,7 @@ fun PlayScreenContent(
     seenHints: Set<String> = emptySet(),
     onHintSeen: (String) -> Unit = {},
     heroActions: HeroActions = HeroActions(),
+    looks: HeroLooks = HeroLooks(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
     gearActions: GearActions = GearActions(),
@@ -414,7 +418,7 @@ fun PlayScreenContent(
         }
 
         if (state.hero.open && !state.isDead) {
-            HeroOverlay(state = state, actions = heroActions)
+            HeroOverlay(state = state, actions = heroActions, looks = looks)
         }
 
         if (state.sandbox.open && !state.isDead) {

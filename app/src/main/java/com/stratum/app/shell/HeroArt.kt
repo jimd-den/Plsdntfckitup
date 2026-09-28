@@ -1,6 +1,12 @@
 package com.stratum.app.shell
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stratum.core.designsystem.component.LookChoice
+import com.stratum.core.domain.sprite.AnimationState
 import com.stratum.app.AiWiring
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.session.PlayerLoadout
@@ -11,6 +17,35 @@ import com.stratum.core.domain.sprite.WeaponRig
 import com.stratum.feature.play.DrawableSprite
 import com.stratum.feature.play.DrawableWeapon
 import com.stratum.feature.play.SpriteKey
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/**
+ * Every hero look the player has: drawn in the forges or brought in by a
+ * plugin, each with its first idle frame to show. Read off the main thread;
+ * the sprite store caches the decoded images, so a second screen asking is cheap.
+ */
+@Composable
+internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): List<LookChoice> {
+    val drawnSheets by app.graph.ai.sprites.sheets.collectAsStateWithLifecycle()
+    val looks by produceState(emptyList<LookChoice>(), drawnSheets, content.spriteSheets) {
+        value = withContext(Dispatchers.IO) {
+            (drawnSheets + content.spriteSheets)
+                .distinctBy { it.id }
+                .filter { SpriteNamespace.servesHero(it.id) }
+                .map { sheet ->
+                    val idle = sheet.clipOrFallback(AnimationState.IDLE)?.firstFrame ?: 0
+                    LookChoice(
+                        id = sheet.id,
+                        name = sheet.name,
+                        portrait = app.graph.ai.sprites.drawableBitmapFor(sheet.id)?.asImageBitmap(),
+                        frame = sheet.frameRect(idle),
+                    )
+                }
+        }
+    }
+    return looks
+}
 
 /**
  * Decides what every actor in a world is drawn with.

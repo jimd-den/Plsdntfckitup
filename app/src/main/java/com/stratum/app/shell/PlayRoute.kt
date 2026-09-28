@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,8 +26,10 @@ import com.stratum.core.designsystem.component.EmptyState
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.session.WorldSave
+import com.stratum.feature.play.HeroLooks
 import com.stratum.feature.play.PlayScreen
 import com.stratum.feature.play.PlayViewModel
+import com.stratum.feature.play.SpriteKey
 
 /** A resume's save as it loads: still reading, read, or unreadable. */
 private sealed interface Loaded {
@@ -95,7 +98,14 @@ private fun Session(
     // the player's current picks, since those belong to them, not the world.
     val heroClassId = resume?.heroClassId ?: (launch as? WorldLaunch.New)?.heroClassId ?: content.heroClasses.firstOrNull()?.id
     val worldLoadout = loadout.copy(heroClassId = heroClassId)
-    val spriteResolver = remember(content, worldLoadout, characters) { heroSpriteResolver(ai, content, worldLoadout) }
+    // Drawing reads the live sheets, not the visit's held content: a look
+    // picked or drawn mid-play must show without rebuilding the session.
+    val spriteResolver = remember(liveContent, worldLoadout, characters) { heroSpriteResolver(ai, liveContent, worldLoadout) }
+    // The session is built once, so it is handed a lookup that always asks
+    // the newest resolver; the hero changes look the frame after the pick.
+    val latestResolver by rememberUpdatedState(spriteResolver)
+    val drawSprite = remember { { key: SpriteKey -> latestResolver(key) } }
+    val looks = rememberLookChoices(app, liveContent)
     val radius = remember { graph.graphics.startingSettings().streamingRadius }
     // How far the world streams is this device's choice, not the save's.
     val resumed = remember(resume) { resume?.let { it.copy(config = it.config.copy(simulationRadius = radius)) } }
@@ -112,7 +122,7 @@ private fun Session(
             factory = PlayViewModel.factory(
                 content, config,
                 heroClassId = heroClassId,
-                spriteResolver = spriteResolver,
+                spriteResolver = drawSprite,
                 imageModel = ai.imageModel,
                 kitDirectory = graph.forgeDirectory,
                 kitOverlays = graph.plugins.textureDirectories() + ai.models.textureDirectory,
@@ -139,6 +149,12 @@ private fun Session(
                 graph.hints.markSeen(id)
                 seenHints = seenHints + id
             },
+            looks = HeroLooks(
+                looks = looks,
+                wornId = loadout.heroSheetId,
+                // Null is the class's own art; picking the worn look again also goes back to it.
+                onPick = app.game::chooseHeroSheet,
+            ),
         )
     }
 }

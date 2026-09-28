@@ -2,6 +2,7 @@ package com.stratum.app
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -665,6 +666,46 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_tree_landscape.png")
+    }
+
+    /** Changing look mid-world: the hero panel's Look page, a drawn look worn. */
+    @Test
+    fun hero_look() {
+        val content = GameSetup.assemble()
+        val session = WorldSession(content, WorldConfig(seed = 99L, simulationRadius = 2))
+        repeat(10) { session.tick(0.2f) }
+        val looks = listOf(
+            Triple("hero:bronze_warden", "Bronze Warden", 0xFFC8872E.toInt()),
+            Triple("hero:storm_caller", "Storm Caller", 0xFF2FB5A4.toInt()),
+        ).map { (id, name, body) ->
+            val bitmap = android.graphics.Bitmap.createBitmap(16, 24, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val paint = android.graphics.Paint()
+            paint.color = 0xFFE9D5B5.toInt(); canvas.drawRect(6f, 1f, 10f, 5f, paint)
+            paint.color = body; canvas.drawRect(4f, 6f, 12f, 16f, paint)
+            paint.color = 0xFF3A2A1C.toInt(); canvas.drawRect(5f, 16f, 7f, 23f, paint); canvas.drawRect(9f, 16f, 11f, 23f, paint)
+            com.stratum.core.designsystem.component.LookChoice(id, name, bitmap.asImageBitmap(), com.stratum.core.domain.sprite.FrameRect(0, 0, 16, 24))
+        }
+
+        composeTestRule.setContent {
+            StratumTheme(palette = content.palette, darkTheme = true) {
+                PlayScreenContent(
+                    state = PlayUiState(
+                        player = session.player,
+                        camera = session.player.position,
+                        projection = IsometricProjection(zoom = 1f),
+                        palette = content.palette,
+                        biomeName = session.currentBiome.name,
+                        skills = session.skills,
+                        hero = com.stratum.feature.play.HeroPanelState(open = true, tab = com.stratum.feature.play.HeroTab.LOOK),
+                    ),
+                    world = session.world,
+                    looks = com.stratum.feature.play.HeroLooks(looks = looks, wornId = "hero:storm_caller"),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/hero_look.png")
     }
 
     @Test
