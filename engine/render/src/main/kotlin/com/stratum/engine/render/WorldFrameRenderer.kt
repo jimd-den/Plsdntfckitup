@@ -43,6 +43,49 @@ class WorldFrameRenderer(
     var director: WorldArtDirector,
 ) {
 
+    /**
+     * Blocks around the player, on screen, that are cut away when they stand
+     * in front of them and above their feet: the 2D twin of the 3D view's
+     * reveal (`ShadingModel.revealCut`). 0 turns it off.
+     */
+    var revealRadius: Float = REVEAL_RADIUS
+
+    /**
+     * Whether a cube at [x],[y],[z] is hidden so the player at [camera] shows:
+     * at or above the level their feet are in, in front of them in draw
+     * order, and within [revealRadius] blocks of their body on screen.
+     */
+    fun isRevealed(x: Int, y: Int, z: Int, camera: WorldPoint): Boolean {
+        if (revealRadius <= 0f) return false
+        val px = floor(camera.x).toInt(); val py = floor(camera.y).toInt()
+        if (z < floor(camera.z).toInt() || x + y < px + py) return false
+        // In whole tiles: across the screen, and down it (a tile is half as tall as wide, a level lifts one tile height).
+        val across = ((x + 0.5f) - (y + 0.5f)) - (camera.x - camera.y)
+        val down = ((x + 0.5f) + (y + 0.5f)) - (camera.x + camera.y) - (z + 0.5f - camera.z - REVEAL_BODY) *
+            (projection.blockHeight / (projection.tileHeight / 2f))
+        return across * across + down * down * 0.25f < revealRadius * revealRadius
+    }
+
+    /**
+     * What the painted terrain's reveal depends on: the player's cell while
+     * something near them would be cut, else null -- so walking in the open
+     * never forces a repaint, and walking under cover repaints once a block.
+     */
+    fun revealKey(world: World, camera: WorldPoint): Long? {
+        if (revealRadius <= 0f) return null
+        val px = floor(camera.x).toInt(); val py = floor(camera.y).toInt(); val pz = floor(camera.z).toInt()
+        val r = kotlin.math.ceil(revealRadius).toInt() + 1
+        for (dy in -r..r) for (dx in -r..r) {
+            val x = px + dx; val y = py + dy
+            if (x + y < px + py) continue
+            val top = world.surfaceAt(x, y)
+            for (z in pz..top) if (!world.blockAt(BlockPos(x, y, z)).isAir && isRevealed(x, y, z, camera)) {
+                return (px.toLong() shl 40) xor (py.toLong() shl 16 and 0xFFFFFF0000L) xor (pz.toLong() and 0xFFFF)
+            }
+        }
+        return null
+    }
+
     /** Reused across frames. A frame allocating per cube was the old profile's worst line. */
     private val scratch = FloatArray(MAX_POLYGON_POINTS * 2)
     private val emissiveX = IntArray(MAX_EMISSIVE)
@@ -128,6 +171,7 @@ class WorldFrameRenderer(
                 val pos = BlockPos(x, y, z)
                 val block = world.blockAt(pos)
                 if (block.isAir) continue
+                if (isRevealed(x, y, z, camera)) continue
                 if (block.glyph != null) {
                     propZ = z
                     continue
@@ -560,6 +604,11 @@ class WorldFrameRenderer(
     }
 
     private companion object {
+        /** Blocks, on screen; matches the 3D view's reveal. */
+        const val REVEAL_RADIUS = 2.6f
+        /** The cut is centred on the body, a level above the feet. */
+        const val REVEAL_BODY = 1f
+
         /** Levels drawn below a column's surface, so cliffs have sides. */
         const val VISIBLE_DEPTH = 6
         const val MAX_POLYGON_POINTS = 32

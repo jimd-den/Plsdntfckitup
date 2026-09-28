@@ -189,4 +189,17 @@ class WorldFrameRendererTest {
         const val WIDTH = 900f
         const val HEIGHT = 600f
     }
+
+    @Test
+    fun `blocks in front of the hero and above their feet are left out, the floor and what is behind are not`() {
+        val r = WorldFrameRenderer(projection, StyleSheetArtDirector())
+        val hero = com.stratum.core.domain.world.WorldPoint(10.5f, 10.5f, 5f)
+        kotlin.test.assertTrue(r.isRevealed(11, 11, 6, hero), "a wall just in front, at head height")
+        kotlin.test.assertTrue(r.isRevealed(10, 10, 7, hero), "the roof overhead")
+        kotlin.test.assertFalse(r.isRevealed(11, 11, 4, hero), "the floor")
+        kotlin.test.assertFalse(r.isRevealed(9, 9, 6, hero), "behind the hero")
+        kotlin.test.assertFalse(r.isRevealed(16, 5, 6, hero), "far off to the side")
+        r.revealRadius = 0f
+        kotlin.test.assertFalse(r.isRevealed(11, 11, 6, hero), "switched off")
+    }
 }

@@ -193,6 +193,29 @@ object ShadingModel {
         return (h - kotlin.math.floor(h)).toFloat()
     }
 
+    /**
+     * How much of a surface point is cut away so the player shows through,
+     * 0 (kept) to 1 (gone). Twin of `revealCut` in the GLES shader.
+     *
+     * The cut is a cylinder around the line from the eye to the middle of
+     * the player's body, [Reveal.radius] wide with a soft rim: anything in it,
+     * in front of the player and above their feet, is removed. The ground they
+     * stand on stays, roofs and hills between them and the camera open up,
+     * and everything behind them is left alone.
+     */
+    fun revealCut(r: Reveal, eyeX: Float, eyeY: Float, eyeZ: Float, wx: Float, wy: Float, wz: Float): Float {
+        if (r.radius <= 0f || wz <= r.z + Reveal.FLOOR_CLEARANCE) return 0f
+        var dx = r.x - eyeX; var dy = r.y - eyeY; var dz = r.z + Reveal.BODY_CENTRE - eyeZ
+        val len = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(1e-4f)
+        dx /= len; dy /= len; dz /= len
+        val vx = wx - eyeX; val vy = wy - eyeY; val vz = wz - eyeZ
+        val t = vx * dx + vy * dy + vz * dz
+        if (t >= len - Reveal.BEHIND_MARGIN) return 0f
+        val px = vx - dx * t; val py = vy - dy * t; val pz = vz - dz * t
+        val off = kotlin.math.sqrt(px * px + py * py + pz * pz)
+        return 1f - smoothstep(r.radius - Reveal.FEATHER, r.radius, off)
+    }
+
     fun smoothstep(a: Float, b: Float, x: Float): Float {
         val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)

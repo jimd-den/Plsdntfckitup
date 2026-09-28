@@ -55,7 +55,8 @@ class SceneRasterizer(
         val shade = FloatArray(3)
 
         val surface = Surface(terms, frame, eye.x, eye.y, eye.z, lightColors, shade)
-        frame.opaque.forEach { rasterize(it, viewProj, surface) }
+        // The land and its models open up around the player; actors and the rest never do.
+        frame.opaque.forEach { rasterize(it, viewProj, surface, if (it === frame.actors) null else frame.reveal) }
         rasterize(frame.cutout, viewProj, surface)
         rasterize(frame.decals, viewProj, surface)
         rasterize(frame.glows, viewProj, surface)
@@ -154,7 +155,7 @@ class SceneRasterizer(
     )
 
     /** Screen-space triangles with perspective-correct attributes. */
-    private fun rasterize(batch: MeshBatch, viewProj: FloatArray, s: Surface) {
+    private fun rasterize(batch: MeshBatch, viewProj: FloatArray, s: Surface, reveal: com.stratum.engine.scene.Reveal? = null) {
         val v = batch.vertices
         val idx = batch.indices
         val clip = FloatArray(4)
@@ -176,14 +177,14 @@ class SceneRasterizer(
             }
             i += 3
             if (behind) continue
-            triangle(batch.kind, sx, sy, sz, iw, attr, s, scratch)
+            triangle(batch.kind, sx, sy, sz, iw, attr, s, scratch, reveal)
         }
     }
 
     private fun triangle(
         kind: MaterialKind,
         x: FloatArray, y: FloatArray, z: FloatArray, iw: FloatArray,
-        a: Array<FloatArray>, s: Surface, clip: FloatArray,
+        a: Array<FloatArray>, s: Surface, clip: FloatArray, reveal: com.stratum.engine.scene.Reveal? = null,
     ) {
         val area = edge(x[0], y[0], x[1], y[1], x[2], y[2])
         if (abs(area) < 1e-6f) return
@@ -224,6 +225,10 @@ class SceneRasterizer(
                     else -> Unit
                 }
 
+                if (reveal != null) {
+                    val cut = ShadingModel.revealCut(reveal, s.eyeX, s.eyeY, s.eyeZ, p[Vertex.PX], p[Vertex.PX + 1], p[Vertex.PX + 2])
+                    if (cut > 0f && cut >= Vertex.DITHER[((py / supersample) and 3) * 4 + ((px / supersample) and 3)]) continue
+                }
                 if (kind == MaterialKind.CUTOUT && p[Vertex.AO] < 0.999f) {
                     // Screen-door fade, in output pixels so the pattern does
                     // not vanish into the supersample average.

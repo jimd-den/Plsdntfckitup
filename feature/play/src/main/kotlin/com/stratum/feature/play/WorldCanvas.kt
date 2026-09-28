@@ -1100,6 +1100,7 @@ private class TerrainLayer {
             underground = time.isUnderground,
             highlight = highlight,
             director = renderer.director,
+            reveal = renderer.revealKey(world, camera),
         )
         if (bitmap == null || rules.needsPaint(key, originX, originY)) {
             val layerWidth = (width + 2 * margin).toInt().coerceAtLeast(1)

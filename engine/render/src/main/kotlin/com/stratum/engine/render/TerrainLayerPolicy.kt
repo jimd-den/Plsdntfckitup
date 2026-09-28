@@ -34,6 +34,8 @@ class TerrainLayerPolicy(
         val highlight: Any?,
         /** Identity of the art direction; a new director repaints. */
         val director: Any,
+        /** Where the player is cut out of the scenery, when anything is; see [WorldFrameRenderer.revealKey]. */
+        val reveal: Long? = null,
     )
 
     private var painted: Key? = null

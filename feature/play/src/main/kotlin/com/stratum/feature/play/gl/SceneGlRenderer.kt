@@ -326,9 +326,12 @@ class SceneGlRenderer(
 
     /** Terrain from the chunk buffers already on the GPU; actor bodies streamed fresh. */
     private fun drawOpaque(frame: SceneFrame) {
+        // The land and its models open up around the player; actors never do.
+        frame.reveal?.let { GLES30.glUniform4f(loc(lit, "uReveal"), it.x, it.y, it.z, it.radius) }
         frame.terrain.forEach { draw(it, static = true) }
         // Model props change only with the terrain, so they are kept on the GPU like it.
         frame.models.forEach { draw(it, static = true) }
+        GLES30.glUniform4f(loc(lit, "uReveal"), 0f, 0f, 0f, 0f)
         frame.actors?.let { drawStreamed(it, actorMesh) }
     }
 

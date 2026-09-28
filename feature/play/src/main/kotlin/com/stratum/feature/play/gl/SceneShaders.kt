@@ -69,6 +69,8 @@ internal object SceneShaders {
         // 0: no shadow map this tier; 1: one hard sample; 9: the 3x3 filter ShadingModel uses.
         uniform int uShadowTaps;
         uniform bool uCutout;
+        // The see-through cut around the player: feet xyz, radius in w (0 = off). See ShadingModel.revealCut.
+        uniform vec4 uReveal;
         uniform vec3 uEye;
         uniform vec3 uSun;
         uniform vec3 uFill;
@@ -102,6 +104,22 @@ internal object SceneShaders {
             int i = y * 4 + x;
             float m[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
             return m[i] / 16.0;
+        }
+
+        const float REVEAL_FEATHER = 0.9;
+        const float REVEAL_FLOOR = 0.3;
+        const float REVEAL_BODY = 1.0;
+        const float REVEAL_BEHIND = 0.6;
+        float revealCut(vec3 w) {
+            if (uReveal.w <= 0.0 || w.z <= uReveal.z + REVEAL_FLOOR) return 0.0;
+            vec3 toBody = vec3(uReveal.xy, uReveal.z + REVEAL_BODY) - uEye;
+            float len = max(length(toBody), 1e-4);
+            vec3 d = toBody / len;
+            vec3 v = w - uEye;
+            float t = dot(v, d);
+            if (t >= len - REVEAL_BEHIND) return 0.0;
+            float off = length(v - d * t);
+            return 1.0 - smoothstep(uReveal.w - REVEAL_FEATHER, uReveal.w, off);
         }
 
         float sunlit(float ndl) {
@@ -181,6 +199,8 @@ internal object SceneShaders {
 
         void main() {
             if (uCutout && vAo < 0.999 && vAo <= dither(gl_FragCoord.xy)) discard;
+            float cut = revealCut(vWorld);
+            if (cut > 0.0 && cut >= dither(gl_FragCoord.xy)) discard;
             vec3 albedo = vColor;
             if (vLayer >= 0.0) {
                 vec2 uv = uCutout ? clamp(vUv, 0.0, 1.0) : vUv;

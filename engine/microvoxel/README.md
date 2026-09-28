@@ -119,6 +119,29 @@ counts are well inside what GLES 3.0 phones draw at 30 fps; the LOW tier's
 
 ---
 
+## An endless world, and a hero who is never hidden
+
+**Infinite.** Every chunk is a function of the seed and its position alone,
+so the world streams in wherever the player walks, and chunks left behind are
+released. Only the chunks the player changed are kept, and saved.
+`InfiniteTerrainTest` walks away from home and samples land 100 thousand,
+1 million and 3 million blocks out. A scan of the height field finds the
+same share of land (about 70%) and the same roughness out to 10 million
+blocks. The practical limit is integer range: microvoxel coordinates are
+four per block, so about 500 million blocks from spawn in any direction.
+
+**See-through around the player.** Hills, walls and roofs between the camera
+and the hero are cut away in a soft-edged circle, so the hero is never
+covered. In 3D the cut is a cylinder along the line from the eye to the
+hero's body: `Reveal` on the frame, `ShadingModel.revealCut` in Kotlin, and
+`revealCut` in the GLES shader, with a dithered rim. It removes only what is
+in front of the hero and above their feet. The floor underfoot and everything
+behind them stays, and actors are never cut. The 2D view does the same per
+block (`WorldFrameRenderer.isRevealed`), and repaints its cached terrain
+layer only while something near the hero is actually being cut. Set
+`SceneBuilder.revealRadius` or `WorldFrameRenderer.revealRadius` to 0 to turn
+it off. See `docs/screenshots/microvoxel/reveal-indoors-off-vs-on.png`.
+
 ## Shaping the world while it is played
 
 Terrain generation is a core part of play, not a setup screen. Every

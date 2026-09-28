@@ -87,6 +87,7 @@ object MicroScenePreview {
             println("wrote micro-$name.png (vantage ${v.first},${v.second} ground $ground)")
         }
         hotEdits(out, content, config, hot, director, textures)
+        reveal(out, content, config, generator, director, textures)
         val report = benchmark(content, config, generator, director, textures, vantages.first().second)
         File(out, "micro-benchmark.txt").writeText(report)
         println(report)
@@ -129,6 +130,37 @@ object MicroScenePreview {
             println("wrote hot-$name.png (retune ${"%.0f".format(ms)} ms)")
         }
         hot.retune(base)
+    }
+
+    /**
+     * The hero indoors, under a thatched roof: without the reveal the roof
+     * hides them, with it the roof and front wall open in a soft circle.
+     */
+    private fun reveal(
+        out: File, content: AssembledContent, config: WorldConfig, gen: MicrovoxelTerrainGenerator,
+        director: StyleSheetArtDirector, textures: TextureLibrary,
+    ) {
+        val home = (gen as? com.stratum.core.domain.settlement.SettlementAtlas)?.settlementsNear(0, 0, 0)?.firstOrNull() ?: return
+        val b = home.buildings.maxByOrNull { it.width * it.depth } ?: return
+        val x = b.x + b.width / 2; val y = b.y + b.depth / 2
+        val world = StreamingWorld(content.registry, gen, config)
+        world.focusOn(BlockPos(x, y, 0))
+        val feet = home.groundZ + 1f
+        val actors = listOf(
+            SceneActor(x + 0.5f, y + 0.5f, feet, ActorPresentation("p", ActorRole.PLAYER), 1f, -0.3f, spriteKey = "actor:igbo:dike_ozo"),
+            SceneActor(b.doorX + 0.5f, b.doorY + 0.5f, feet, ActorPresentation("e", ActorRole.ENEMY, EnemyRank.ELITE), -1f, -0.4f, spriteKey = "actor:igbo:shadow_leopard"),
+        )
+        val camera = SceneCamera(target = Vec3(x + 0.5f, y + 0.5f, feet), aspect = WIDTH.toFloat() / HEIGHT, distance = 30f)
+        val time = WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)
+        fun shot(radius: Float): BufferedImage {
+            val builder = SceneBuilder(director, textures, biomeAt = { bx, by -> gen.biomeAt(bx, by) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = gen)
+            builder.revealRadius = radius
+            return SceneRasterizer(WIDTH, HEIGHT, textures).render(settled(builder) { builder.build(world, camera, actors, time) })
+        }
+        val off = shot(0f); val on = shot(com.stratum.engine.scene.Reveal.DEFAULT_RADIUS)
+        ImageIO.write(on, "png", File(out, "reveal-indoors.png"))
+        ImageIO.write(sideBySide(off, on, "Reveal off", "Reveal on: the hero is never covered"), "png", File(out, "reveal-indoors-off-vs-on.png"))
+        println("wrote reveal-indoors.png (${b.template.id} at $x,$y)")
     }
 
     /** Builds frames until the background detail meshes are all in, as a player standing still would see. */
@@ -244,7 +276,10 @@ object MicroScenePreview {
         return sb.toString()
     }
 
-    private fun sideBySide(a: BufferedImage, b: BufferedImage): BufferedImage {
+    private fun sideBySide(
+        a: BufferedImage, b: BufferedImage,
+        left: String = "Blocks (the game today)", right: String = "Microvoxel detail near the hero",
+    ): BufferedImage {
         val img = BufferedImage(a.width + b.width + 6, a.height, BufferedImage.TYPE_INT_RGB)
         val g = img.createGraphics()
         g.color = java.awt.Color(20, 20, 24); g.fillRect(0, 0, img.width, img.height)
@@ -252,8 +287,8 @@ object MicroScenePreview {
         runCatching {
             g.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 18)
             g.color = java.awt.Color.WHITE
-            g.drawString("Blocks (the game today)", 14, 28)
-            g.drawString("Microvoxel detail near the hero", a.width + 20, 28)
+            g.drawString(left, 14, 28)
+            g.drawString(right, a.width + 20, 28)
         }
         g.dispose()
         return img

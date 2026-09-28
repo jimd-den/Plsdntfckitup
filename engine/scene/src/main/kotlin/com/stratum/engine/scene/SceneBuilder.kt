@@ -50,6 +50,26 @@ data class SceneActor(
  * rasteriser both take exactly this, which is what makes a screenshot from a
  * build machine evidence about the game rather than a mock-up of it.
  */
+/**
+ * The see-through cylinder around the player: everything in front of them
+ * and above their feet within [radius] of the line from the camera is cut
+ * away (dithered at the rim), so a hill, a roof or a wall never covers the
+ * hero. See [ShadingModel.revealCut].
+ */
+data class Reveal(val x: Float, val y: Float, val z: Float, val radius: Float) {
+    companion object {
+        /** Blocks. Wide enough for the hero and what they are fighting next to them. */
+        const val DEFAULT_RADIUS = 2.6f
+        const val FEATHER = 0.9f
+        /** Surfaces this far above the feet are kept: the floor underfoot, the kerb beside it. */
+        const val FLOOR_CLEARANCE = 0.3f
+        /** The line runs to the body's middle, not the feet. */
+        const val BODY_CENTRE = 1.0f
+        /** How close in front of the player's centre the cut stops, so the wall behind them stays. */
+        const val BEHIND_MARGIN = 0.6f
+    }
+}
+
 class SceneFrame(
     val camera: SceneCamera,
     val lighting: SceneLighting,
@@ -81,6 +101,8 @@ class SceneFrame(
      * again.
      */
     val residentTerrain: List<MeshBatch> = terrain,
+    /** Where the world is cut open so the player is never hidden; null cuts nothing. Applies to [terrain] and [models], never to actors. */
+    val reveal: Reveal? = null,
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -180,6 +202,9 @@ class SceneBuilder(
 
     // This frame's sun on the ground: which way shadows fall, how long they
     // are per unit of height, and how dark. Set at the start of build().
+    /** How wide the see-through cut around the player is, in blocks; 0 turns it off. See [Reveal]. */
+    var revealRadius: Float = Reveal.DEFAULT_RADIUS
+
     private var shadowDirX = 0f
     private var shadowDirY = 1f
     private var shadowReach = 0.7f
@@ -324,6 +349,9 @@ class SceneBuilder(
             decals = decals.build(recycler),
             glows = glows.build(recycler),
             models = listOfNotNull(terrain.models),
+            reveal = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
+                ?.takeIf { revealRadius > 0f }
+                ?.let { Reveal(it.x, it.y, it.z, revealRadius) },
         )
     }
 
