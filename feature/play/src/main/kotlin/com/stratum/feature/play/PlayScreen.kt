@@ -15,13 +15,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stratum.core.designsystem.component.ActionEmphasis
 import com.stratum.core.designsystem.component.GameButton
@@ -48,6 +53,9 @@ fun PlayScreen(
     onOpenMenu: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // The app going into the background is the last moment it is sure to be
+    // alive: a phone may kill it from there without another word.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.onBackground() }
     val heroActions = remember(viewModel) {
         HeroActions(
             onClose = viewModel::toggleHero,
@@ -440,8 +448,40 @@ fun PlayScreenContent(
             }
         }
 
+        SavedCue(
+            notice = state.saveNotice,
+            modifier = Modifier.align(Alignment.BottomCenter).safeContent().padding(bottom = Space.large),
+        )
     }
 }
+
+/**
+ * A quiet word that the world was written down, shown for a moment after
+ * each save lands. Keyed on the notice's serial, so two saves in a row both
+ * show, and nothing shows until the first save of this screen.
+ */
+@Composable
+private fun SavedCue(notice: SaveNotice?, modifier: Modifier = Modifier) {
+    var shown by remember { mutableStateOf<SaveNotice?>(null) }
+    LaunchedEffect(notice?.serial) {
+        if (notice == null) return@LaunchedEffect
+        shown = notice
+        kotlinx.coroutines.delay(SAVED_CUE_MILLIS)
+        shown = null
+    }
+    val visible = shown ?: return
+    val colors = StratumTheme.colors
+    Text(
+        text = visible.message,
+        style = MaterialTheme.typography.labelSmall,
+        color = colors.inkMuted,
+        modifier = modifier
+            .background(colors.surface.copy(alpha = 0.7f), MaterialTheme.shapes.small)
+            .padding(horizontal = Space.small, vertical = Space.tight),
+    )
+}
+
+private const val SAVED_CUE_MILLIS = 1_500L
 
 /**
  * The play HUD, laid out for the way the phone is held.
