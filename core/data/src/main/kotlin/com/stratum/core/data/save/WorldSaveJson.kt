@@ -142,13 +142,24 @@ internal data class ConfigSchema(
     val caveDensity: Float = DEFAULT_CONFIG.caveDensity,
     val oreRichness: Float = DEFAULT_CONFIG.oreRichness,
     val rules: RulesSchema = RulesSchema(),
+    /** The terrain as tuned in the World panel; absent in saves from before it, and for untuned worlds. */
+    val terrainPasses: List<PassSchema>? = null,
 ) {
-    fun toDomain() = WorldConfig(seed, simulationRadius, seaLevel, surfaceVariation, caveDensity, oreRichness, rules.toDomain())
+    fun toDomain() = WorldConfig(
+        seed, simulationRadius, seaLevel, surfaceVariation, caveDensity, oreRichness, rules.toDomain(),
+        terrainPasses?.map { com.stratum.core.domain.world.PassSpec(it.id, it.options) },
+    )
 
     companion object {
-        fun of(c: WorldConfig) = ConfigSchema(c.seed, c.simulationRadius, c.seaLevel, c.surfaceVariation, c.caveDensity, c.oreRichness, RulesSchema.of(c.rules))
+        fun of(c: WorldConfig) = ConfigSchema(
+            c.seed, c.simulationRadius, c.seaLevel, c.surfaceVariation, c.caveDensity, c.oreRichness, RulesSchema.of(c.rules),
+            c.terrainPasses?.map { PassSchema(it.id, it.options) },
+        )
     }
 }
+
+@Serializable
+internal data class PassSchema(val id: String, val options: Map<String, String> = emptyMap())
 
 /** World rules by name and value; a survival mode a later build added and this one lacks reads as the default. */
 @Serializable

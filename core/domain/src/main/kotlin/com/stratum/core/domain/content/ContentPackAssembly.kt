@@ -422,7 +422,7 @@ data class AssembledContent(
 
     /** What a terrain generator is built from, for this content and [config]. */
     fun terrainContext(config: WorldConfig): TerrainContext =
-        TerrainContext(config, biomes, terrain, maps, settlements, structureTemplates, blocks = registry.all)
+        TerrainContext(config, biomes, config.terrainPasses?.let { terrain.copy(passes = it) } ?: terrain, maps, settlements, structureTemplates, blocks = registry.all)
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 

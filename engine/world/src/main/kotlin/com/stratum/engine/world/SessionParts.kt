@@ -30,7 +30,8 @@ import kotlin.random.Random
  */
 internal class SessionParts(
     val content: AssembledContent,
-    val config: WorldConfig,
+    /** Changes only when the player retunes the terrain; everything else about a world is fixed at its start. */
+    var config: WorldConfig,
     heroClassId: String?,
     terrainGenerator: TerrainGenerator?,
     val difficulty: Difficulty,
@@ -44,6 +45,9 @@ internal class SessionParts(
 
     /** The microvoxels behind the blocks, when the terrain was made of them; renderers draw the fine version from it. */
     val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = landscape as? com.stratum.engine.microvoxel.MicroTerrainSource
+
+    /** The terrain, when it can be retuned while played; see [WorldSession.retuneTerrain]. */
+    val hotTerrain: com.stratum.engine.microbridge.HotTerrain? = landscape as? com.stratum.engine.microbridge.HotTerrain
 
     /** Only generators that claim to know about biomes are asked; one that does not leaves the region unnamed. */
     val biomeSource: BiomeSource? = generator as? BiomeSource

@@ -26,7 +26,7 @@ class MicroDetailTest {
 
     private val content = ContentPackAssembler().assemble(listOf(IgboContentPack.pack)).copy(terrain = TerrainRecipe(generatorId = TerrainRecipe.MICROVOXEL))
     private val config = WorldConfig(seed = 20260928L, simulationRadius = 2)
-    private val generator = StratumTerrain.create(content.terrainContext(config)) as MicrovoxelTerrainGenerator
+    private val generator = (StratumTerrain.create(content.terrainContext(config)) as com.stratum.engine.microbridge.HotTerrain).current
     private val director = StyleSheetArtDirector(StyleLexicon.interpret("house").direction)
 
     private fun world() = StreamingWorld(content.registry, generator, config).also { it.focusOn(BlockPos(200, 200, 0)) }

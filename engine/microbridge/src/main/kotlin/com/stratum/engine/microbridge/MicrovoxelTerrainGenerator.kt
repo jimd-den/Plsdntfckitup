@@ -87,8 +87,14 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
         Layers(top, blockMaterials[biome.subsurfaceBlockId] ?: top, blockMaterials[biome.bedrockFillerBlockId] ?: blockMaterials[biome.subsurfaceBlockId] ?: top)
     }
 
-    val micro: MicroGenerator = stagesFor(context, blockMaterials) { x, y -> biomeAt(x, y).id }
-        .build(context.config.seed, specsFor(context), blockMaterials.palette) { fields ->
+    /** Every stage this world could run, the packs' own among them: what the World panel offers. */
+    val stages: StageRegistry = stagesFor(context, blockMaterials) { x, y -> biomeAt(x, y).id }
+
+    /** The stages as the recipe names them, before the world's sea level and ceiling are added: what a panel edits. */
+    val passes: List<StageSpec> = passesFor(context)
+
+    val micro: MicroGenerator = stages
+        .build(context.config.seed, withWorld(context, passes), blockMaterials.palette) { fields ->
             if (context.blocks.isNotEmpty() && context.biomes.isNotEmpty() && context.recipe.options["strata"] != "builtin") fields.publish(Fields.STRATA, strata)
         }
 
@@ -338,7 +344,8 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
         private const val EXACT_SLOTS = 6
         private const val BLOCK_CACHE = 96
 
-        val factory = TerrainGeneratorFactory { context -> create(context) }
+        /** Microvoxel worlds are always hot: the World panel can retune them while they are played. */
+        val factory = TerrainGeneratorFactory { context -> HotTerrain(context) }
 
         /**
          * The generator a recipe asks for. When its stages build the packs'
@@ -384,24 +391,53 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
 
         /**
          * The stages a recipe asks for: its own `passes` when it lists any,
-         * else its `preset`'s. The terrain stage gets the world's sea level and
-         * a ceiling under the block world's top unless the recipe set them.
+         * else its `preset`'s. A world whose packs have towns always builds
+         * them: without [SettlementsStage] in the list it is added after the
+         * land, so the home town is never missing.
          */
-        fun specsFor(context: TerrainContext): List<StageSpec> {
+        fun passesFor(context: TerrainContext): List<StageSpec> {
             val recipe = context.recipe
             val preset = recipe.options["preset"] ?: ANCIENT
             val specs = if (recipe.passes.isNotEmpty()) recipe.passes.map { StageSpec(it.id, it.options) }
             else presets[preset] ?: MicroWorldgen.presets[preset] ?: throw IllegalArgumentException(
                 "No microvoxel preset '$preset'. Known: ${(presets.keys + MicroWorldgen.presets.keys).joinToString()}",
             )
-            return specs.map { spec ->
+            // Towns stand on the land, so only a list that makes land gets them.
+            if (context.settlements.isEmpty() || specs.none { it.id == TerrainStage.ID } || specs.any { it.id == SettlementsStage.ID }) return specs
+            return withStage(specs, StageSpec(SettlementsStage.ID))
+        }
+
+        /**
+         * The order stages belong in. A stage switched on in the World panel
+         * goes after the last one before it here, so turning trees off and on
+         * again does not plant them before the land.
+         */
+        val ORDER = listOf(
+            TerrainStage.ID, com.stratum.engine.microvoxel.gen.CavesStage.ID, CityPlanStage.ID, SettlementsStage.ID,
+            com.stratum.engine.microvoxel.gen.RoadsStage.ID, com.stratum.engine.microvoxel.gen.BuildingsStage.ID,
+            com.stratum.engine.microvoxel.gen.GroundcoverStage.ID, com.stratum.engine.microvoxel.gen.TreesStage.ID,
+        )
+
+        /** [specs] with [spec] in its place: replacing a stage of the same id, else inserted in [ORDER]. */
+        fun withStage(specs: List<StageSpec>, spec: StageSpec): List<StageSpec> {
+            val at = specs.indexOfFirst { it.id == spec.id }
+            if (at >= 0) return specs.toMutableList().also { it[at] = spec }
+            val rank = ORDER.indexOf(spec.id).let { if (it < 0) ORDER.size else it }
+            val after = specs.indexOfLast { ORDER.indexOf(it.id).let { r -> r in 0 until rank } }
+            return specs.toMutableList().also { it.add(after + 1, spec) }
+        }
+
+        /** The stages a recipe asks for, with the world's sea level and a ceiling under the block world's top unless it set them. */
+        fun specsFor(context: TerrainContext): List<StageSpec> = withWorld(context, passesFor(context))
+
+        private fun withWorld(context: TerrainContext, specs: List<StageSpec>): List<StageSpec> =
+            specs.map { spec ->
                 if (spec.id != TerrainStage.ID) spec
                 else spec.copy(options = mapOf(
                     "seaLevel" to (context.config.seaLevel * MICRO_PER_BLOCK).toString(),
                     "maxHeight" to ((Chunk.HEIGHT - 8) * MICRO_PER_BLOCK).toString(),
                 ) + spec.options)
             }
-        }
     }
 }
 

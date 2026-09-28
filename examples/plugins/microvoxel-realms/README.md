@@ -38,3 +38,12 @@ the generator keeps the land under 40 unless told otherwise.
 
 This is also what the studio's AI writes when asked for a new kind of
 world: a `terrain` section like this one.
+
+## Ships inside the APK
+
+The build zips this folder into `assets/plugins/microvoxel-realms.stratum`
+(the `bundlePlugins` task in `app/build.gradle.kts`). On first launch it is
+installed like any downloaded plugin. The player can switch it off or
+uninstall it, and a newer build's copy replaces the old one. In a world it
+makes, open **⛰ World** in the menu to reshape the land and the home town
+while you play.

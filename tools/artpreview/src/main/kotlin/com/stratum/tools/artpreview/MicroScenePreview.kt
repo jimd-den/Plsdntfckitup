@@ -59,7 +59,9 @@ object MicroScenePreview {
         val config = WorldConfig(seed = seed, simulationRadius = 3)
         // From a real session, so the home town is the one a player starts in: the session decides
         // which towns are welcoming by the player's standing with each faction.
-        val generator = com.stratum.engine.world.WorldSession(content, config).microTerrain as MicrovoxelTerrainGenerator
+        val session = com.stratum.engine.world.WorldSession(content, config)
+        val hot = requireNotNull(session.hotTerrain) { "a microvoxel world is hot" }
+        val generator = hot.current
 
         val director = StyleSheetArtDirector(
             StyleLexicon.interpret("stratum house style", ArtDirection.HOUSE, seed).direction,
@@ -84,9 +86,49 @@ object MicroScenePreview {
             ImageIO.write(sideBySide(a, b), "png", File(out, "micro-$name-vs-blocks.png"))
             println("wrote micro-$name.png (vantage ${v.first},${v.second} ground $ground)")
         }
+        hotEdits(out, content, config, hot, director, textures)
         val report = benchmark(content, config, generator, director, textures, vantages.first().second)
         File(out, "micro-benchmark.txt").writeText(report)
         println(report)
+    }
+
+    /**
+     * The World panel's edits, rendered: the same world and vantage, the
+     * generator retuned between shots exactly as the in-game panel retunes it.
+     */
+    private fun hotEdits(
+        out: File, content: AssembledContent, config: WorldConfig, hot: com.stratum.engine.microbridge.HotTerrain,
+        director: StyleSheetArtDirector, textures: TextureLibrary,
+    ) {
+        val base = hot.passes
+        fun with(id: String, options: Map<String, String>) = { passes: List<com.stratum.engine.microvoxel.gen.StageSpec> ->
+            val old = passes.firstOrNull { it.id == id } ?: com.stratum.engine.microvoxel.gen.StageSpec(id)
+            MicrovoxelTerrainGenerator.withStage(passes, old.copy(options = old.options + options))
+        }
+        val land = "micro:terrain"; val towns = "micro:settlements"
+        val edits = listOf(
+            "as-shipped" to { p: List<com.stratum.engine.microvoxel.gen.StageSpec> -> p },
+            "highlands" to with(land, mapOf("height" to "0.75", "mountains" to "1.4", "scale" to "0.6")),
+            "terraces" to with(land, mapOf("height" to "0.4", "mountains" to "0.5", "terrace" to "6")),
+            "home-city-walled" to with(towns, mapOf("homeSize" to "1.8", "homeWalls" to "on", "homeLayout" to "stratum:grid")),
+            "home-hamlet" to with(towns, mapOf("homeSize" to "0.75", "homeWalls" to "off", "homeVariant" to "3")),
+            "home-plain-style" to with(towns, mapOf("style" to "plain", "sacredTree" to "false")),
+        )
+        for ((name, edit) in edits) {
+            val t0 = System.nanoTime()
+            hot.retune(edit(base))?.let { error("$name: $it") }
+            val ms = (System.nanoTime() - t0) / 1e6
+            val v = homeVantage(hot.current)
+            val world = StreamingWorld(content.registry, hot, config)
+            world.focusOn(BlockPos(v.first, v.second, 0))
+            val ground = world.surfaceAt(v.first, v.second)
+            val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = 62f)
+            val micro = SceneBuilder(director, textures, biomeAt = { x, y -> hot.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = hot)
+            val frame = settled(micro) { micro.build(world, camera, actorsAround(world, v.first, v.second), WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)) }
+            ImageIO.write(SceneRasterizer(WIDTH, HEIGHT, textures).render(frame), "png", File(out, "hot-$name.png"))
+            println("wrote hot-$name.png (retune ${"%.0f".format(ms)} ms)")
+        }
+        hot.retune(base)
     }
 
     /** Builds frames until the background detail meshes are all in, as a player standing still would see. */

@@ -313,6 +313,81 @@ class PlayViewModel(
         _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
     }
 
+    // ---- shaping the world ---------------------------------------------------
+
+    /** Counts requests to reshape the land, so only the newest one lands when several overlap. */
+    private var shapeTicket = 0
+
+    /** Opens or closes the World panel. Like the anvil, the world keeps running behind it. */
+    fun toggleWorldShaper() {
+        val panel = _state.value.worldShaper
+        _state.value = _state.value.copy(worldShaper = shaperPanel().copy(open = !panel.open))
+        publish()
+    }
+
+    /** One knob of one stage, applied now. */
+    fun setTerrainOption(stageId: String, key: String, value: String) {
+        val hot = session.hotTerrain ?: return
+        val stage = hot.passes.firstOrNull { it.id == stageId } ?: com.stratum.engine.microvoxel.gen.StageSpec(stageId)
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, stage.copy(options = stage.options + (key to value))))
+    }
+
+    /** The land stage's options replaced by a whole shape at once: plains, hills, terraces. */
+    fun shapeLand(options: Map<String, String>) {
+        val hot = session.hotTerrain ?: return
+        val land = hot.passes.firstOrNull { it.id == LAND_STAGE } ?: return
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, land.copy(options = land.options + options)))
+    }
+
+    /** Switches a stage on (with its defaults) or off. */
+    fun toggleTerrainStage(stageId: String, enabled: Boolean) {
+        val hot = session.hotTerrain ?: return
+        reshape(
+            if (enabled) com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, com.stratum.engine.microvoxel.gen.StageSpec(stageId))
+            else hot.passes.filter { it.id != stageId },
+        )
+    }
+
+    /** A stage back to its defaults. */
+    fun resetTerrainStage(stageId: String) {
+        val hot = session.hotTerrain ?: return
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, com.stratum.engine.microvoxel.gen.StageSpec(stageId)))
+    }
+
+    /**
+     * Builds the new land on a worker, then swaps it in between frames: the
+     * slow part (every stage set up, a chunk generated to prove it works)
+     * never stalls the game, and the game thread only regenerates what is
+     * near. A request overtaken by a newer one is dropped.
+     */
+    private fun reshape(passes: List<com.stratum.engine.microvoxel.gen.StageSpec>) {
+        val target = session
+        val hot = target.hotTerrain ?: return
+        val ticket = ++shapeTicket
+        _state.value = _state.value.copy(worldShaper = _state.value.worldShaper.copy(busy = true))
+        viewModelScope.launch {
+            val prepared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hot.prepare(passes) }
+            if (ticket != shapeTicket || target !== session) return@launch
+            val problem = target.installTerrain(prepared)
+            _state.value = _state.value.copy(worldShaper = shaperPanel().copy(open = _state.value.worldShaper.open, busy = false))
+            if (problem == null) persist(SaveReason.AUTOSAVE)
+            publish(message = problem ?: "The land reshapes around you")
+        }
+    }
+
+    /** The panel as the live generator describes it. */
+    private fun shaperPanel(): WorldShaperPanel {
+        val hot = session.hotTerrain ?: return WorldShaperPanel()
+        val running = hot.passes.associateBy { it.id }
+        return WorldShaperPanel(
+            available = true,
+            stages = hot.catalogue().map { info ->
+                ShaperStage(info.id, info.title, info.summary, info.id in running, info.params, running[info.id]?.options.orEmpty())
+            },
+            revision = hot.revision,
+        )
+    }
+
     // ---- survival ----------------------------------------------------------
 
     fun toggleCamp() {
@@ -687,6 +762,7 @@ class PlayViewModel(
         biomeAt = { x, y -> session.biomeAt(x, y) },
         // The world's quarter-block detail, when it was generated in microvoxels.
         microTerrain = session.microTerrain,
+        worldShaper = shaperPanel(),
     )
 
     /**
@@ -1363,6 +1439,8 @@ data class PlayUiState(
     val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
     /** Microvoxel detail behind the blocks, for worlds generated that way; null draws blocks only. */
     val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
+    /** The World panel: the terrain's stages, live-editable in microvoxel worlds. */
+    val worldShaper: WorldShaperPanel = WorldShaperPanel(),
     /** What the player last asked for, so the field can show it back to them. */
     val stylePrompt: String = "",
     /** What the game understood by it, which is how a player learns the vocabulary. */

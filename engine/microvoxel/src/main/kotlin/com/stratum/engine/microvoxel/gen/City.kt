@@ -316,7 +316,16 @@ class DefaultCityPlanner(
  * `styles` (comma-separated style ids to build with, default all),
  * `maxFloors` (cap on every building).
  */
-object CityPlanStage : MicroStageFactory {
+object CityPlanStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Cities", "Grid cities with boulevards and lots, flattening the land under them.",
+        listOf(
+            StageParam.Number("density", "City density", "How much of the land is city.", 0f, 1f, 0.5f),
+            StageParam.Number("regionSize", "District size", "How big each city district is, in quarter-blocks.", 256f, 1024f, 512f, 64f),
+            StageParam.Number("maxFloors", "Tallest", "No building rises above this many floors.", 1f, 16f, 16f, 1f),
+        ),
+    )
+
     const val ID = "micro:city_plan"
     val KEY = FieldKey<CityPlanner>("city")
 
@@ -351,7 +360,12 @@ object CityPlanStage : MicroStageFactory {
  * pavements, lane markings, and street lamps. Where two roads overlap it is a
  * junction: asphalt wins over pavement and markings are left out.
  */
-object RoadsStage : MicroStageFactory {
+object RoadsStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Streets", "The cities' asphalt, kerbs, markings and lamps.",
+        listOf(StageParam.Number("lampSpacing", "Lamp spacing", "Quarter-blocks between street lamps.", 16f, 96f, 40f, 4f)),
+    )
+
     const val ID = "micro:roads"
 
     override fun create(setup: StageSetup): MicroStage {

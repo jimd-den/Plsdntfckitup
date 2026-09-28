@@ -397,7 +397,9 @@ class TowerStyle(palette: MaterialPalette) : ArchitectureStyle {
  * Each is resolved from its lot by the style the planner picked, sampled over
  * the intersection of its bounding box and the chunk, and nothing else.
  */
-object BuildingsStage : MicroStageFactory {
+object BuildingsStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(ID, "City buildings", "Terraces, villas and towers on the cities' lots.")
+
     const val ID = "micro:buildings"
 
     override fun create(setup: StageSetup): MicroStage {

@@ -153,6 +153,18 @@ class StageRegistry {
     fun copy(): StageRegistry = StageRegistry().also { it.factories.putAll(factories) }
 
     /**
+     * What a stage is and which knobs it offers. A stage that does not
+     * describe itself is still listed, by id, with nothing to tune.
+     */
+    fun describe(id: String): StageInfo? {
+        val factory = factories[id] ?: return null
+        return (factory as? Describable)?.describe() ?: StageInfo(id, id.substringAfter(':').replace('_', ' ').replaceFirstChar(Char::uppercase), "")
+    }
+
+    /** Every stage, described, in registration order. */
+    fun describeAll(): List<StageInfo> = factories.keys.mapNotNull(::describe)
+
+    /**
      * @param prepare runs before any stage is set up, to publish services the
      *   stages may read -- how a host (the block-world bridge) hands the
      *   pipeline things it knows and the pipeline does not: a pack's soils,

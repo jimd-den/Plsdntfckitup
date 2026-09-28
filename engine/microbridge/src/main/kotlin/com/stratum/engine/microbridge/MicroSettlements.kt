@@ -17,9 +17,14 @@ import com.stratum.engine.microvoxel.gen.LatticeHeight
 import com.stratum.engine.microvoxel.gen.MicroGenContext
 import com.stratum.engine.microvoxel.gen.MicroStage
 import com.stratum.engine.microvoxel.gen.MicroStageFactory
+import com.stratum.engine.microvoxel.gen.Describable
+import com.stratum.engine.microvoxel.gen.StageInfo
+import com.stratum.engine.microvoxel.gen.StageParam
 import com.stratum.engine.microvoxel.gen.StageSetup
 import com.stratum.engine.microvoxel.gen.TerrainStage
 import com.stratum.engine.microvoxel.gen.TreesStage
+import com.stratum.engine.settlement.HomeTown
+import com.stratum.engine.settlement.SettlementLayouts
 import com.stratum.engine.settlement.SettlementPlanner
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -48,25 +53,49 @@ import kotlin.math.sqrt
  * Options: `style` -- `earthen` (default: plinths, rounded mud corners, uli
  * bands in white nzu, timber doorways, lattice windows, steep thatch with
  * ragged eaves, round huts, compound walls, a sacred tree in the square) or
- * `plain` (the block buildings, cleanly bevelled).
+ * `plain` (the block buildings, cleanly bevelled); `density` scales the
+ * world rules' town density; `sacredTree` plants the square's iroko.
+ *
+ * The home town is the player's to reshape: `homeRecipe` (a settlement id,
+ * or `auto`), `homeSize` (0.5..2 times its radius), `homeLayout` (`auto` or
+ * a layout id), `homeWalls` (`auto`, `on`, `off`) and `homeVariant` (another
+ * roll of the same town). See [HomeTown].
  */
-class SettlementsStage(private val context: TerrainContext, private val blocks: BlockMaterials, private val biomeId: (Int, Int) -> String?) : MicroStageFactory {
+class SettlementsStage(private val context: TerrainContext, private val blocks: BlockMaterials, private val biomeId: (Int, Int) -> String?) : MicroStageFactory, Describable {
+
+    override fun describe() = StageInfo(
+        ID, "Towns & home", "The packs' towns and your home town, built in mud, thatch and timber.",
+        listOf(
+            StageParam.Choice("style", "Look", "Earthen: mud walls, uli bands, thatch and round huts. Plain: the block buildings.", listOf(EARTHEN, PLAIN), EARTHEN),
+            StageParam.Number("density", "Towns", "How many towns the wilds hold, relative to the world rules.", 0f, 3f, 1f),
+            StageParam.Toggle("sacredTree", "Sacred tree", "An iroko in each earthen town's square.", true),
+            StageParam.Choice("homeRecipe", "Home town", "Which kind of town you begin in.", listOf(AUTO) + context.settlements.map { it.id }, AUTO),
+            StageParam.Number("homeSize", "Home size", "Hamlet to city: scales the home town's radius.", 0.5f, 2f, 1f),
+            StageParam.Choice("homeLayout", "Home streets", "The home town's street pattern.", listOf(AUTO) + SettlementLayouts.standard.ids, AUTO),
+            StageParam.Choice("homeWalls", "Home walls", "Whether the home town is walled.", listOf(AUTO, "on", "off"), AUTO),
+            StageParam.Number("homeVariant", "Home layout roll", "Another arrangement of the same town.", 0f, 20f, 0f, 1f),
+        ),
+    )
 
     override fun create(setup: StageSetup): MicroStage {
-        val style = setup.options.string("style", EARTHEN)
+        val o = setup.options
+        val style = o.string("style", EARTHEN)
         require(style == EARTHEN || style == PLAIN) { "Stage '$ID' option 'style' is '$EARTHEN' or '$PLAIN', not '$style'" }
         val fields = setup.fields
         val natural = fields.require(Fields.SURFACE)
         val rules = context.config.rules
+        val home = homeOf(o)
         val planner = SettlementPlanner(
             seed = context.config.seed,
             recipes = context.settlements,
             biomeAt = biomeId,
             groundAt = { x, y -> floor(natural.heightAt(x * R + R / 2, y * R + R / 2) / R).toInt() },
             startingTown = rules.startInTown,
-            density = rules.townDensity,
+            density = rules.townDensity * o.float("density", 1f).coerceIn(0f, 3f),
             welcoming = context.welcoming,
+            home = home,
         )
+        val sacred = o.boolean("sacredTree", true)
         fields.publish(KEY, planner)
 
         // The ground: flat at each town's level inside it, easing back into the land over the blend ring.
@@ -76,7 +105,24 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         fields.publish(Fields.FOOTPRINT, TownFootprint(planner, previous))
 
         val grammar = TownGrammar(setup.palette, blocks, style == EARTHEN)
-        return MicroStage { ctx -> build(ctx, planner, grammar) }
+        return MicroStage { ctx -> build(ctx, planner, grammar, sacred) }
+    }
+
+    /** The home-town options, checked: an unknown recipe or layout is an error, not a silent default. */
+    private fun homeOf(o: com.stratum.engine.microvoxel.gen.StageOptions): HomeTown {
+        val recipe = o.string("homeRecipe", AUTO).takeIf { it != AUTO }
+        require(recipe == null || context.settlements.any { it.id == recipe }) {
+            "Stage '$ID' option 'homeRecipe' '$recipe' is not a settlement. Known: ${context.settlements.joinToString { it.id }}"
+        }
+        val layout = o.string("homeLayout", AUTO).takeIf { it != AUTO }
+        require(layout == null || layout in SettlementLayouts.standard.ids) {
+            "Stage '$ID' option 'homeLayout' '$layout' is not a layout. Known: ${SettlementLayouts.standard.ids.joinToString()}"
+        }
+        val walls = when (val w = o.string("homeWalls", AUTO)) {
+            AUTO -> null; "on" -> true; "off" -> false
+            else -> throw IllegalArgumentException("Stage '$ID' option 'homeWalls' is auto, on or off, not '$w'")
+        }
+        return HomeTown(recipe, o.float("homeSize", 1f).coerceIn(0.5f, 2f), layout, walls, o.int("homeVariant", 0))
     }
 
     private fun levelled(planner: SettlementPlanner, natural: HeightFunction, mx: Int, my: Int): Float {
@@ -89,7 +135,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         return flat + (h - flat) * t
     }
 
-    private fun build(ctx: MicroGenContext, planner: SettlementPlanner, g: TownGrammar) {
+    private fun build(ctx: MicroGenContext, planner: SettlementPlanner, g: TownGrammar, sacred: Boolean) {
         val bx0 = Math.floorDiv(ctx.x0, R); val by0 = Math.floorDiv(ctx.y0, R)
         val span = MicroChunk.SIZE / R
         val plans = planner.settlementsNear(bx0 + span / 2, by0 + span / 2, span)
@@ -111,7 +157,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
                         }
                 furniture(ctx, plan, b, g)
             }
-            if (g.earthen) sacredTree(ctx, plan)
+            if (g.earthen && sacred) sacredTree(ctx, plan)
         }
     }
 
@@ -217,6 +263,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         const val ID = "micro:settlements"
         const val EARTHEN = "earthen"
         const val PLAIN = "plain"
+        const val AUTO = "auto"
         val KEY = FieldKey<SettlementAtlas>("settlements")
 
         internal const val R = MicrovoxelTerrainGenerator.MICRO_PER_BLOCK

@@ -19,7 +19,16 @@ import kotlin.math.sqrt
  * (`temperate`: oaks and firs; `tropical`: iroko, oil palm and baobab by
  * how wet the land is).
  */
-object TreesStage : MicroStageFactory {
+object TreesStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Trees", "Forests and lone trees by climate.",
+        listOf(
+            StageParam.Choice("style", "Kind", "Temperate oaks and firs, or iroko, oil palm and baobab.", listOf("temperate", "tropical"), "temperate"),
+            StageParam.Number("density", "Density", "How thickly trees grow.", 0f, 2f, 1f),
+            StageParam.Number("cell", "Spacing", "Quarter-blocks between trees at their thickest.", 12f, 40f, 22f, 1f),
+        ),
+    )
+
     const val ID = "micro:trees"
     private const val REACH = 14 // max canopy radius; how far outside a chunk a tree can still touch it
 
@@ -250,7 +259,15 @@ object TreesStage : MicroStageFactory {
  * Options: `density` (0..2), `tall` (0..1: share of tufts that grow up to a
  * block high, as elephant grass does).
  */
-object GroundcoverStage : MicroStageFactory {
+object GroundcoverStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Grass & flowers", "Tufts, flowers, shrubs and pebbles.",
+        listOf(
+            StageParam.Number("density", "Density", "How much of the ground is covered.", 0f, 2f, 1f),
+            StageParam.Number("tall", "Tall grass", "Share of tufts that grow to elephant grass.", 0f, 1f, 0f),
+        ),
+    )
+
     const val ID = "micro:groundcover"
     private const val NONE = 0
     private const val GREEN = 1

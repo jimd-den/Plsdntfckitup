@@ -119,6 +119,37 @@ counts are well inside what GLES 3.0 phones draw at 30 fps; the LOW tier's
 
 ---
 
+## Shaping the world while it is played
+
+Terrain generation is a core part of play, not a setup screen. Every
+microvoxel world is a `HotTerrain` (in `:engine:microbridge`): the session,
+renderers and encounters hold one reference for the whole run while the
+generator behind it is swapped.
+
+- **Stages describe themselves.** A stage factory that implements
+  `Describable` returns a `StageInfo`: a title, a summary and its knobs as
+  `StageParam`s (`Number` with a range and step, `Choice`, `Toggle`). The
+  in-game World panel (⛰ in the menu) builds its sliders from these, so a
+  plugin's own stage gets controls without any UI code.
+- **Retuning is safe.** `HotTerrain.prepare(passes)` builds and test-runs a
+  whole new generator on a worker thread. A bad value comes back as a
+  message and the old land stays. `WorldSession.installTerrain` swaps the new
+  one in between frames, remakes every chunk the player has not changed, and
+  puts the hero back on the ground. Chunks the player built or dug in keep
+  their changes.
+- **It saves.** The tuned stage list is stored in `WorldConfig.terrainPasses`
+  and overrides the packs' `passes` for that world only.
+- **The home town is editable.** `micro:settlements` takes `homeRecipe`,
+  `homeSize` (0.5–2×), `homeLayout`, `homeWalls` (auto/on/off),
+  `homeVariant` (a different arrangement of the same town), `density`,
+  `style` and `sacredTree`. The land stage's `spawnRise` and `spawnRadius`
+  shape the ground the town stands on.
+
+Measured on the desktop JVM (`./gradlew :tools:artpreview:microScenePreview`),
+a retune takes 3–10 ms to prepare. Screenshots of each edit are in
+`docs/screenshots/microvoxel/hot-*.png`, and the panel itself is in
+`app/src/test/screenshots/world_shaper.png`.
+
 ## The generator contract
 
 Every stage keeps three rules (see `gen/Pipeline.kt`):

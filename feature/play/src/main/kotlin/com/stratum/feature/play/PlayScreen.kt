@@ -123,6 +123,15 @@ fun PlayScreen(
     val survivalActions = remember(viewModel) {
         SurvivalActions(onToggleCamp = viewModel::toggleCamp, onEat = viewModel::eat, onDrink = viewModel::drink, onMake = viewModel::make)
     }
+    val shaperActions = remember(viewModel) {
+        WorldShaperActions(
+            onToggle = viewModel::toggleWorldShaper,
+            onSet = viewModel::setTerrainOption,
+            onToggleStage = viewModel::toggleTerrainStage,
+            onResetStage = viewModel::resetTerrainStage,
+            onLandShape = viewModel::shapeLand,
+        )
+    }
     val realmActions = remember(viewModel) {
         RealmActions(
             onToggle = viewModel::toggleRealm,
@@ -180,6 +189,7 @@ fun PlayScreen(
         looks = looks,
         survivalActions = survivalActions,
         realmActions = realmActions,
+        shaperActions = shaperActions,
         gearActions = gearActions,
         sandboxActions = sandboxActions,
     )
@@ -234,6 +244,7 @@ fun PlayScreenContent(
     looks: HeroLooks = HeroLooks(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
+    shaperActions: WorldShaperActions = WorldShaperActions(),
     gearActions: GearActions = GearActions(),
     sandboxActions: SandboxActions = SandboxActions(),
 ) {
@@ -332,7 +343,10 @@ fun PlayScreenContent(
         }
 
         val menuEntries = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle) +
-            listOfNotNull(DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active })
+            listOfNotNull(
+                DockEntry("⛰", "World", shaperActions.onToggle, active = state.worldShaper.open).takeIf { state.worldShaper.available },
+                DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active },
+            )
 
         if (!state.isDead) {
             Hud(
@@ -416,6 +430,17 @@ fun PlayScreenContent(
 
         if (state.realmOpen && !state.isDead) {
             RealmOverlay(panel = state.realm, actions = realmActions)
+        }
+
+        if (state.worldShaper.open && !state.isDead) {
+            WorldShaperOverlay(
+                panel = state.worldShaper,
+                onSet = shaperActions.onSet,
+                onToggleStage = shaperActions.onToggleStage,
+                onResetStage = shaperActions.onResetStage,
+                onLandShape = shaperActions.onLandShape,
+                onClose = shaperActions.onToggle,
+            )
         }
 
         if (state.hero.open && !state.isDead) {

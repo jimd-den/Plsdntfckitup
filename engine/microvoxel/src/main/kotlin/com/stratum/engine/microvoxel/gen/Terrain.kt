@@ -149,7 +149,19 @@ fun interface ColumnSource {
  * When a host publishes [Fields.STRATA], the surface, soil and rock are the
  * host's own (a pack's biome blocks); beaches, snow, scree and water stay.
  */
-object TerrainStage : MicroStageFactory {
+object TerrainStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Land", "Hills, valleys, lakes and the ground's own soils.",
+        listOf(
+            StageParam.Number("height", "Hilliness", "How tall the land rises and how deep it falls.", 0.05f, 1f, 1f),
+            StageParam.Number("mountains", "Mountains", "How much of the land is ridged peaks.", 0f, 2f, 1f),
+            StageParam.Number("scale", "Breadth", "How wide hills and valleys are; bigger is broader.", 0.3f, 2f, 1f),
+            StageParam.Number("terrace", "Plateaus", "Gathers the land into shelves this many quarter-blocks tall; 0 is off.", 0f, 16f, 0f, 1f),
+            StageParam.Number("spawnRise", "Home rise", "How far above the water the land around home is lifted.", 0f, 40f, 10f, 1f),
+            StageParam.Number("spawnRadius", "Home land", "How far the lifted land around home reaches, in quarter-blocks.", 0f, 800f, 360f, 8f),
+        ),
+    )
+
     const val ID = "micro:terrain"
 
     override fun create(setup: StageSetup): MicroStage {
@@ -348,7 +360,15 @@ internal class SurfaceMaterials(p: MaterialPalette) {
  *
  * Options: `threshold` (0..1, lower = more cave), `minDepth` (micro below surface).
  */
-object CavesStage : MicroStageFactory {
+object CavesStage : MicroStageFactory, Describable {
+    override fun describe() = StageInfo(
+        ID, "Caves", "Tunnels winding under the ground.",
+        listOf(
+            StageParam.Number("threshold", "Openness", "How much of the underground is tunnel.", 0.02f, 0.3f, 0.12f),
+            StageParam.Number("minDepth", "Roof", "How far under the surface tunnels stay, in quarter-blocks.", 4f, 40f, 14f, 1f),
+        ),
+    )
+
     const val ID = "micro:caves"
     override fun create(setup: StageSetup): MicroStage {
         val threshold = setup.options.float("threshold", 0.12f)
