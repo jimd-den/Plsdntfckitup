@@ -66,10 +66,7 @@ fun ModelForgeScreen(
         modifier = modifier.fillMaxSize().background(colors.surface).safeContent()
             .verticalScroll(rememberScrollState()).padding(Space.large),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SectionLabel("Model forge")
-            StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "3D models", onBack = onBack)
         Spacer(Modifier.height(Space.small))
         Text(
             "Props, weapons, creatures and statues as real 3D models, from ${state.provider.ifBlank { "your 3D provider" }}.",

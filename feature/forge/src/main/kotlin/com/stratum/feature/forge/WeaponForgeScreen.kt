@@ -140,14 +140,7 @@ fun WeaponForgeContent(
             .verticalScroll(rememberScrollState())
             .padding(Space.large),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SectionLabel("Weapon forge")
-            StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Weapon forge", onBack = onBack)
 
         Spacer(Modifier.height(Space.medium))
         Text(

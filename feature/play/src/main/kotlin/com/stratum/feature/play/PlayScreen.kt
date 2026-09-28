@@ -347,7 +347,8 @@ fun PlayScreenContent(
                 menuBadge = menuBadge(menuEntries),
                 onDrink = survivalActions.onDrink,
                 onOpenSandbox = sandboxActions.onToggle,
-                seenHints = seenHints,
+                // Nothing to teach while paused: the hint waits for the world.
+                seenHints = if (menuOpen) Hints.all else seenHints,
                 onHintSeen = onHintSeen,
             )
         }

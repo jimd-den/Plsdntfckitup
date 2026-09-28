@@ -82,11 +82,7 @@ fun CrewScreen(viewModel: CrewViewModel, onBack: () -> Unit, onOpenSettings: () 
 fun CrewScreenContent(state: CrewUiState, actions: CrewActions, modifier: Modifier = Modifier) {
     val colors = StratumTheme.colors
     Column(modifier.fillMaxSize().safeContent().verticalScroll(rememberScrollState()).padding(Space.large)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Agent studio", style = MaterialTheme.typography.headlineSmall, color = colors.ink)
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = "Back", onClick = actions.onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Agent crew", onBack = actions.onBack)
         Text(
             "Describe a world. A crew of agents writes it the way a small team would -- lore, land, monsters, towns, " +
                 "food, outposts, rules -- each checked like a plugin before the next begins. Everything they are asked and " +

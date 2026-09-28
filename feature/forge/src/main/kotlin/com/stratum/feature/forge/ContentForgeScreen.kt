@@ -103,11 +103,7 @@ fun ContentForgeScreen(
 fun ContentForgeContent(state: ContentForgeUiState, actions: ContentForgeActions, modifier: Modifier = Modifier) {
     val colors = StratumTheme.colors
     Column(modifier.fillMaxSize().safeContent().verticalScroll(rememberScrollState()).padding(Space.large)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Content forge", style = MaterialTheme.typography.headlineSmall, color = colors.ink)
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = "Back", onClick = actions.onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Lore & gear", onBack = actions.onBack)
         Text(
             "Lore, weapons, armour, uniques, sets and affixes, written by a model from the words this world already uses. " +
                 "Broken builds welcome -- every result says how strong it is.",

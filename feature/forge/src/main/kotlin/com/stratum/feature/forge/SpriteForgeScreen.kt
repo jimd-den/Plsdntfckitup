@@ -127,13 +127,7 @@ fun SpriteForgeContent(
             .verticalScroll(rememberScrollState())
             .padding(Space.large),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            SectionLabel("Sprite forge")
-            StratumAction(label = "Back", onClick = onBack, emphasis = ActionEmphasis.QUIET)
-        }
+        com.stratum.core.designsystem.component.StratumTopBar(title = "Sprite forge", onBack = onBack)
 
         Spacer(Modifier.height(Space.medium))
         Text(
