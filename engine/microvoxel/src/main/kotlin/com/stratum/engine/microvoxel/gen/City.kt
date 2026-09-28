@@ -109,6 +109,8 @@ class DefaultCityPlanner(
     override val regionSize: Int,
     private val density: Float,
     private val styles: ArchitectureRegistry,
+    /** No building rises above this many floors; a world with a low ceiling says so here. */
+    private val maxFloors: Int = Int.MAX_VALUE,
 ) : CityPlanner {
 
     private val noise = Noise(seed xor 0xC17L)
@@ -234,7 +236,7 @@ class DefaultCityPlanner(
                 val rect = if (alongX) Rect(at, rowRect.y0, at + width - 1, rowRect.y1) else Rect(rowRect.x0, at, rowRect.x1, at + width - 1)
                 val park = Hash.unit(seed, rx, ry, index * 64 + row * 32 + n, 23) < 0.08f + max(0f, dist - 0.55f) * 0.5f
                 out += if (park) Lot(rect, LotUse.PARK, "park", 0, front, lotSeed)
-                else Lot(rect, LotUse.BUILDING, style.id, style.floors(downtown, lotSeed), front, lotSeed)
+                else Lot(rect, LotUse.BUILDING, style.id, style.floors(downtown, lotSeed).coerceIn(1, maxFloors), front, lotSeed)
                 at += width
                 n++
             }
@@ -310,7 +312,9 @@ class DefaultCityPlanner(
  * `micro:city_plan` -- publishes the city map and reshapes the terrain under it.
  * Writes no voxels itself; [RoadsStage] and [BuildingsStage] draw the plan.
  *
- * Options: `regionSize` (micro, default 512 = 128 blocks), `density` (0..1).
+ * Options: `regionSize` (micro, default 512 = 128 blocks), `density` (0..1),
+ * `styles` (comma-separated style ids to build with, default all),
+ * `maxFloors` (cap on every building).
  */
 object CityPlanStage : MicroStageFactory {
     const val ID = "micro:city_plan"
@@ -318,13 +322,21 @@ object CityPlanStage : MicroStageFactory {
 
     override fun create(setup: StageSetup): MicroStage {
         val f = setup.fields
+        val all = f.get(ArchitectureRegistry.KEY) ?: ArchitectureRegistry.standard(setup.palette).also { f.publish(ArchitectureRegistry.KEY, it) }
+        val wanted = setup.options.string("styles", "").split(',').map(String::trim).filter(String::isNotEmpty)
+        val styles = if (wanted.isEmpty()) all else ArchitectureRegistry().also { r ->
+            wanted.forEach { id ->
+                r.register(all[id] ?: throw IllegalArgumentException("Stage '$ID' option 'styles' names unknown style '$id'. Known: ${all.all.joinToString { it.id }}"))
+            }
+        }
         val planner = DefaultCityPlanner(
             seed = setup.seed,
             natural = f.require(Fields.NATURAL_HEIGHT),
             sea = f.require(Fields.SEA_LEVEL),
             regionSize = setup.options.int("regionSize", 512),
             density = setup.options.float("density", 0.5f),
-            styles = f.get(ArchitectureRegistry.KEY) ?: ArchitectureRegistry.standard(setup.palette).also { f.publish(ArchitectureRegistry.KEY, it) },
+            styles = styles,
+            maxFloors = setup.options.int("maxFloors", Int.MAX_VALUE),
         )
         f.publish(KEY, planner)
         f.publish(Fields.FOOTPRINT, planner)

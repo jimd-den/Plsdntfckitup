@@ -282,6 +282,14 @@ class WorldSession private constructor(
     /** Which region a column belongs to, or null when the generator has none. Art direction is per region. */
     fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = parts.biomeSource?.biomeAt(worldX, worldY)
 
+    /**
+     * Quarter-block detail behind the blocks, when this world was generated
+     * in microvoxels (`stratum:microvoxel`); null otherwise. Read-only: the
+     * block [world] stays the truth for play, and a renderer draws blocks
+     * wherever the player has changed them.
+     */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? get() = parts.microTerrain
+
     /** The biome under the player's feet, from the same function of position that made the terrain. */
     val currentBiome: BiomeDefinition get() = parts.biomeAt(player.blockPos.x, player.blockPos.y)
 

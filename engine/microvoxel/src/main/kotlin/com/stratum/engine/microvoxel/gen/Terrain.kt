@@ -75,7 +75,8 @@ fun interface ColumnSource {
  * come out as quarter-block steps -- a hillside instead of a staircase.
  *
  * Options: `seaLevel` (micro), `scale` (horizontal stretch, 1 = default),
- * `height` (vertical stretch), `mountains` (0..2), `snowLine` (micro above sea).
+ * `height` (vertical stretch), `mountains` (0..2), `snowLine` (micro above sea),
+ * `maxHeight` / `minHeight` (micro; peaks ease under the ceiling).
  */
 object TerrainStage : MicroStageFactory {
     const val ID = "micro:terrain"
@@ -87,6 +88,15 @@ object TerrainStage : MicroStageFactory {
         val vertical = o.float("height", 1f)
         val mountains = o.float("mountains", 1f)
         val snowLine = sea + o.int("snowLine", 230)
+        // A world with a ceiling -- the block world is 48 blocks tall -- rounds
+        // its peaks off softly below it instead of slicing them flat.
+        val maxHeight = o.float("maxHeight", Float.MAX_VALUE)
+        val minHeight = o.float("minHeight", 2f)
+        // Dry land where the player arrives: the ground within `spawnRadius` of
+        // the origin is lifted at least `spawnRise` above the sea, easing back to
+        // the natural land at the edge. 0 turns it off.
+        val spawnRadius = o.float("spawnRadius", 360f)
+        val spawnRise = o.float("spawnRise", 10f)
         val seed = setup.seed
         val noise = Noise(seed)
         val climateNoise = Noise(seed xor 0x5A17)
@@ -97,7 +107,12 @@ object TerrainStage : MicroStageFactory {
             val hills = noise.erodedFbm(wx * 0.0042f, wy * 0.0042f, 6, erosion = 0.9f)
             val mask = smooth(0.05f, 0.4f, noise.fbm(x * 0.0007f + 400f, y * 0.0007f - 250f, 2))
             val ridge = if (mask > 0f) noise.ridged(wx * 0.0032f, wy * 0.0032f, 5) else 0f
-            sea + vertical * (continent * 150f + 18f + hills * 80f + mask * mountains * ridge * 300f)
+            var h = sea + vertical * (continent * 150f + 18f + hills * 80f + mask * mountains * ridge * 300f)
+            if (spawnRadius > 0f && h < sea + spawnRise) {
+                val d = kotlin.math.sqrt(ix.toFloat() * ix + iy.toFloat() * iy) / spawnRadius
+                if (d < 1f) h += (sea + spawnRise - h) * smooth(0f, 1f, 1f - d)
+            }
+            softCeiling(h, maxHeight).coerceAtLeast(minHeight)
         }
         val climate = object : Climate {
             override fun temperature(x: Int, y: Int) =
@@ -188,6 +203,15 @@ object TerrainStage : MicroStageFactory {
 
     /** Deepest soil layer; anything below it is rock and can be bulk-filled. */
     private const val SOIL_MAX = 8
+
+    /** Leaves heights well under [ceiling] alone and eases the rest towards it, never past it. */
+    internal fun softCeiling(h: Float, ceiling: Float): Float {
+        if (ceiling == Float.MAX_VALUE) return h
+        val knee = ceiling - 24f
+        if (h <= knee) return h
+        val over = h - knee
+        return knee + 24f * (over / (over + 24f))
+    }
 
     internal fun smooth(a: Float, b: Float, x: Float): Float {
         val t = ((x - a) / (b - a)).coerceIn(0f, 1f)

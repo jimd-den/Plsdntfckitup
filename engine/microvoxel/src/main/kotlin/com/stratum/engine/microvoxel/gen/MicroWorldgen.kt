@@ -22,6 +22,14 @@ object MicroWorldgen {
     const val MIXED = "micro:mixed"
     const val CAVERNS = "micro:caverns"
 
+    /**
+     * Tuned for the isometric ARPG: the whole landscape fits a 48-block
+     * column (192 microvoxels), hills are walkable, and towns are low
+     * terraces and villas with doors at street level -- places to fight
+     * through, not skylines. A bridge fills in `seaLevel` from the world config.
+     */
+    const val ARPG = "micro:arpg"
+
     val stages: StageRegistry = StageRegistry()
         .register(TerrainStage.ID, TerrainStage)
         .register(CavesStage.ID, CavesStage)
@@ -44,6 +52,26 @@ object MicroWorldgen {
             s(RoadsStage.ID), s(BuildingsStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID, "density" to "0.8"),
         ),
         CAVERNS to listOf(s(TerrainStage.ID), s(CavesStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID)),
+        ARPG to listOf(
+            s(TerrainStage.ID, "height" to "0.28", "mountains" to "0.35", "scale" to "0.7", "maxHeight" to "168", "minHeight" to "8"),
+            s(CityPlanStage.ID, "density" to "0.3", "regionSize" to "384", "styles" to "terrace,villa", "maxFloors" to "3"),
+            s(RoadsStage.ID), s(BuildingsStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID, "density" to "0.9"),
+        ),
+    )
+
+    /**
+     * What each built-in stage does and the options it reads, as plain text
+     * -- the reference an AI world-builder (or a settings screen) needs to
+     * write a `terrain.passes` list without reading Kotlin.
+     */
+    val catalogue: Map<String, String> = linkedMapOf(
+        TerrainStage.ID to "The ground: continents, eroded hills, ridged mountains, sea. Options: seaLevel, scale, height, mountains (0..2), snowLine, maxHeight, minHeight (microvoxels; 4 per block).",
+        CavesStage.ID to "Tunnels under the surface. Options: threshold (0..1, lower = more cave), minDepth.",
+        CityPlanStage.ID to "Towns on an endless grid of regions, flattening the land under them. Options: density (0..1), regionSize, styles (terrace,villa,tower), maxFloors.",
+        RoadsStage.ID to "Draws the town's roads, kerbs, markings and lamps. Options: lampSpacing.",
+        BuildingsStage.ID to "Raises each town lot's building in its style. No options.",
+        GroundcoverStage.ID to "Grass tufts, flowers, shrubs and pebbles. Options: density (0..2).",
+        TreesStage.ID to "Broadleaf and conifer trees by climate. Options: cell (spacing), density (0..2).",
     )
 
     fun build(seed: Long, specs: List<StageSpec>, palette: MaterialPalette = MaterialPalette.standard()): MicroGenerator =

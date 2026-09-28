@@ -69,9 +69,11 @@ class ArchitectureRegistry {
     operator fun get(id: String): ArchitectureStyle? = styles[id]
 
     fun pick(downtown: Float, seed: Long): ArchitectureStyle {
+        require(styles.isNotEmpty()) { "No architecture styles registered" }
         val weights = styles.values.map { max(0f, it.weight(downtown)) }
         val total = weights.sum()
-        require(total > 0f) { "No architecture style wants a lot at downtown=$downtown" }
+        // A restricted set may have no style that wants this spot; take the least unwilling.
+        if (total <= 0f) return styles.values.maxByOrNull { it.weight(downtown) }!!
         var r = ((seed ushr 11) and 0xFFFFFF) / 16777216f * total
         styles.values.forEachIndexed { i, s -> r -= weights[i]; if (r <= 0f) return s }
         return styles.values.last()

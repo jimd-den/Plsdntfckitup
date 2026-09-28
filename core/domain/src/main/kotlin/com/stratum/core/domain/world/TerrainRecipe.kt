@@ -156,6 +156,14 @@ data class TerrainRecipe(
         /** Level ground at sea level, for sandboxes and tests. */
         const val FLAT_GENERATOR = "stratum:flat"
 
+        /**
+         * Generated in quarter-block microvoxels and played on blocks: smooth
+         * slopes, towns with streets, detailed buildings. [passes] lists its
+         * stages (`micro:terrain`, `micro:city_plan`, ...); see the microvoxel
+         * bridge for options.
+         */
+        const val MICROVOXEL = "stratum:microvoxel"
+
         /** The [options] key naming which map a [TILE_MAP] recipe plays on. */
         const val MAP_OPTION = "map"
 

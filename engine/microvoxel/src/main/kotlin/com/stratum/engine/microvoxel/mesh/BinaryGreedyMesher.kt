@@ -40,7 +40,9 @@ class QuadMesh(val quads: LongArray, val count: Int) {
  *  bits 24-29  h - 1  extent along the face's v axis
  *  bits 30-32  face   0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z
  *  bits 33-48  material id
+ *  bits 49-56  corner occlusion, 2 bits a corner (0 open .. 3 enclosed), when meshed with AO
  * ```
+ * Corners run (u0,v0), (u1,v0), (u1,v1), (u0,v1).
  * u/v are (y, z) for X faces, (x, z) for Y faces, (x, y) for Z faces. A
  * vertex shader expands one instance into four corners with
  * `gl_VertexID`, so the GPU never sees a float position array.
@@ -57,6 +59,12 @@ object Quad {
     fun h(q: Long) = ((q ushr 24) and 63).toInt() + 1
     fun face(q: Long) = ((q ushr 30) and 7).toInt()
     fun material(q: Long) = ((q ushr 33) and 0xFFFF).toShort()
+
+    /** Occluders at [corner] (0..3): 0 is open sky, 3 a closed inside corner. */
+    fun ao(q: Long, corner: Int) = ((q ushr (49 + corner * 2)) and 3).toInt()
+
+    internal fun packKey(x: Int, y: Int, z: Int, w: Int, h: Int, face: Int, key: Int): Long =
+        pack(x, y, z, w, h, face, (key and 0xFFFF).toShort()) or (((key ushr 16).toLong() and 0xFF) shl 49)
 }
 
 /**
@@ -71,7 +79,13 @@ object Quad {
  */
 class BinaryGreedyMesher(private val palette: MaterialPalette) {
 
-    fun mesh(grid: VoxelGrid, neighbors: NeighborOpacity = NeighborOpacity.OPEN): QuadMesh {
+    /**
+     * @param ambientOcclusion also record each quad's corner occlusion, and
+     *   merge only faces whose occlusion matches -- so a merged quad shades
+     *   exactly like the faces it replaced. Costs a few more quads along
+     *   creases; flat open ground still merges into large quads.
+     */
+    fun mesh(grid: VoxelGrid, neighbors: NeighborOpacity = NeighborOpacity.OPEN, ambientOcclusion: Boolean = false): QuadMesh {
         val n = grid.size
         require(n in 1..64) { "Grids up to 64 per side, got $n" }
         val full = if (n == 64) -1L else (1L shl n) - 1
@@ -100,7 +114,7 @@ class BinaryGreedyMesher(private val palette: MaterialPalette) {
                 val other = if (dir == 0) (if (z + 1 < n) rows[(z + 1) * n + y] else posZ[y]) else (if (z > 0) rows[(z - 1) * n + y] else negZ[y])
                 plane[z * n + y] = r and other.inv()
             }
-            merge(plane, n, grid, 4 + dir, out)
+            merge(plane, n, grid, 4 + dir, out, ambientOcclusion, neighbors)
         }
         // ±Y: slice y, rows z, bits x.
         for (dir in 0..1) {
@@ -109,7 +123,7 @@ class BinaryGreedyMesher(private val palette: MaterialPalette) {
                 val other = if (dir == 0) (if (y + 1 < n) rows[z * n + y + 1] else posY[z]) else (if (y > 0) rows[z * n + y - 1] else negY[z])
                 plane[y * n + z] = r and other.inv()
             }
-            merge(plane, n, grid, 2 + dir, out)
+            merge(plane, n, grid, 2 + dir, out, ambientOcclusion, neighbors)
         }
         // ±X: cull along the row's own bits, then scatter into slice x, rows z, bits y.
         for (dir in 0..1) {
@@ -125,28 +139,32 @@ class BinaryGreedyMesher(private val palette: MaterialPalette) {
                     plane[x * n + z] = plane[x * n + z] or (1L shl y)
                 }
             }
-            merge(plane, n, grid, dir, out)
+            merge(plane, n, grid, dir, out, ambientOcclusion, neighbors)
         }
         return QuadMesh(out.quads, out.count)
     }
 
-    /** Greedy merge of one direction's planes: widen along the bits, then grow down the rows while every voxel matches. */
-    private fun merge(plane: LongArray, n: Int, grid: VoxelGrid, face: Int, out: QuadSink) {
+    /** Greedy merge of one direction's planes: widen along the bits, then grow down the rows while every face's key matches. */
+    private fun merge(plane: LongArray, n: Int, grid: VoxelGrid, face: Int, out: QuadSink, ao: Boolean, neighbors: NeighborOpacity) {
+        fun key(slice: Int, u: Int, v: Int): Int {
+            val m = material(grid, face, slice, u, v).toInt() and 0xFFFF
+            return if (ao) m or (occlusion(grid, n, neighbors, face, slice, u, v) shl 16) else m
+        }
         for (slice in 0 until n) {
             val base = slice * n
             for (v in 0 until n) {
                 while (plane[base + v] != 0L) {
                     val bits = plane[base + v]
                     val u = java.lang.Long.numberOfTrailingZeros(bits)
-                    val m = material(grid, face, slice, u, v)
+                    val k = key(slice, u, v)
                     var w = 1
-                    while (u + w < n && ((bits ushr (u + w)) and 1L) == 1L && material(grid, face, slice, u + w, v) == m) w++
+                    while (u + w < n && ((bits ushr (u + w)) and 1L) == 1L && key(slice, u + w, v) == k) w++
                     val span = (if (w == 64) -1L else (1L shl w) - 1) shl u
                     var h = 1
                     grow@ while (v + h < n) {
                         val row = plane[base + v + h]
                         if ((row and span) != span) break
-                        for (k in u until u + w) if (material(grid, face, slice, k, v + h) != m) break@grow
+                        for (i in u until u + w) if (key(slice, i, v + h) != k) break@grow
                         plane[base + v + h] = row and span.inv()
                         h++
                     }
@@ -157,10 +175,34 @@ class BinaryGreedyMesher(private val palette: MaterialPalette) {
                         2, 3 -> { x = u; y = slice; z = v }
                         else -> { x = u; y = v; z = slice }
                     }
-                    out.add(Quad.pack(x, y, z, w, h, face, m))
+                    out.add(Quad.packKey(x, y, z, w, h, face, k))
                 }
             }
         }
+    }
+
+    /** Corner occlusion of one face, four 2-bit counts, from the voxels in the layer the face looks into. */
+    private fun occlusion(grid: VoxelGrid, n: Int, nb: NeighborOpacity, face: Int, slice: Int, u: Int, v: Int): Int {
+        val out = if (face % 2 == 0) 1 else -1
+        fun solid(du: Int, dv: Int): Int {
+            val x: Int; val y: Int; val z: Int
+            when (face) {
+                0, 1 -> { x = slice + out; y = u + du; z = v + dv }
+                2, 3 -> { x = u + du; y = slice + out; z = v + dv }
+                else -> { x = u + du; y = v + dv; z = slice + out }
+            }
+            val opaque = if (x in 0 until n && y in 0 until n && z in 0 until n) palette.isOpaque(grid[x, y, z]) else nb.opaque(x, y, z)
+            return if (opaque) 1 else 0
+        }
+        var sig = 0
+        for (corner in 0..3) {
+            val su = if (corner == 1 || corner == 2) 1 else -1
+            val sv = if (corner >= 2) 1 else -1
+            val a = solid(su, 0); val b = solid(0, sv)
+            val level = if (a == 1 && b == 1) 3 else a + b + solid(su, sv)
+            sig = sig or (level shl (corner * 2))
+        }
+        return sig
     }
 
     private fun material(grid: VoxelGrid, face: Int, slice: Int, u: Int, v: Int): Short = when (face) {

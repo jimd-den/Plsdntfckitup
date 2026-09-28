@@ -139,6 +139,14 @@ class MicroChunk(val pos: MicroChunkPos, fill: Short = MaterialPalette.AIR) : Vo
         return out
     }
 
+    /** An independent copy: bricks are copied only where they carry detail. */
+    fun copy(): MicroChunk {
+        val c = MicroChunk(pos)
+        uniform.copyInto(c.uniform)
+        for (b in 0 until BRICKS) c.detail[b] = detail[b]?.copy()
+        return c
+    }
+
     /** Raw copy of every voxel, x fastest. For saving and tests; never on a hot path. */
     fun export(): ShortArray {
         val out = ShortArray(SIZE * SIZE * SIZE)
@@ -202,6 +210,11 @@ private class Brick(initial: Short) {
     }
 
     fun approximateBytes(): Int = raw?.let { it.size * 2 } ?: (VOXELS + palette.size * 2 + 32)
+
+    fun copy(): Brick = Brick(0).also { b ->
+        b.palette = palette.copyOf(); b.paletteSize = paletteSize
+        b.indices = indices?.copyOf(); b.raw = raw?.copyOf()
+    }
 
     companion object { const val VOXELS = 512 }
 }

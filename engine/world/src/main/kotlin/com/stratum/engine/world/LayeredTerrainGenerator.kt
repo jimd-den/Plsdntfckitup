@@ -472,6 +472,7 @@ object StratumTerrain {
             LayeredTerrainGenerator(context.config, context.biomes, context.recipe)
         },
     ).register(TerrainRecipe.TILE_MAP, TileMapTerrainGenerator.factory)
+        .register(TerrainRecipe.MICROVOXEL, com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.factory)
         .let(com.stratum.engine.worldgen.StratumWorldgen::registerPresets)
 
     fun create(context: TerrainContext): TerrainGenerator = registry.create(context)

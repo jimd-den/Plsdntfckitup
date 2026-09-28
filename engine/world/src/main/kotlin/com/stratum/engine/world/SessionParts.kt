@@ -42,6 +42,9 @@ internal class SessionParts(
     private val landscape: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(content.terrainContext(config).copy(welcoming = ::welcoming))
     private val generator: TerrainGenerator = terrainGenerator ?: withTowns(landscape)
 
+    /** The microvoxels behind the blocks, when the terrain was made of them; renderers draw the fine version from it. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = landscape as? com.stratum.engine.microvoxel.MicroTerrainSource
+
     /** Only generators that claim to know about biomes are asked; one that does not leaves the region unnamed. */
     val biomeSource: BiomeSource? = generator as? BiomeSource
     val world = StreamingWorld(content.registry, generator, config)
@@ -92,16 +95,22 @@ internal class SessionParts(
      * the origin column happens to be unsuitable, so a spawn is never inside rock.
      */
     fun spawnPoint(): WorldPoint {
+        // Standing ground first: a column topped with water or a sprite is a
+        // surface, but not one to arrive on. Any surface at all is the fallback.
+        var fallback: WorldPoint? = null
         for (radius in 0..SPAWN_SEARCH_RADIUS) {
             for (y in -radius..radius) {
                 for (x in -radius..radius) {
                     if (maxOf(abs(x), abs(y)) != radius) continue
                     val surface = world.surfaceAt(x, y)
-                    if (surface in 1 until Chunk.HEIGHT - 2) return WorldPoint(x + 0.5f, y + 0.5f, (surface + 1).toFloat())
+                    if (surface !in 1 until Chunk.HEIGHT - 2) continue
+                    val point = WorldPoint(x + 0.5f, y + 0.5f, (surface + 1).toFloat())
+                    if (world.isSolid(com.stratum.core.domain.world.BlockPos(x, y, surface))) return point
+                    if (fallback == null) fallback = point
                 }
             }
         }
-        return WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
+        return fallback ?: WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
     }
 
     /**

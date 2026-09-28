@@ -55,6 +55,8 @@ include(":engine:model")
 // Microvoxels: sub-block storage, pluggable terrain/city/architecture stages,
 // binary greedy meshing and LOD. Pure Kotlin, depends on nothing.
 include(":engine:microvoxel")
+// Plays a microvoxel world on the block engine: the `stratum:microvoxel` generator.
+include(":engine:microbridge")
 include(":feature:play")
 include(":feature:forge")
 include(":feature:hero")
