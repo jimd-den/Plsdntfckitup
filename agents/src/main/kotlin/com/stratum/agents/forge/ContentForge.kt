@@ -4,6 +4,7 @@ import com.stratum.agents.ApprovalGate
 import com.stratum.agents.StepStatus
 import com.stratum.agents.StudioJournal
 import com.stratum.agents.StudioPipeline
+import com.stratum.core.domain.ai.GenerationObserver
 import com.stratum.core.domain.ai.LanguageModelPort
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.ContentPackAssembler
@@ -56,6 +57,7 @@ class ContentForge(
         context: ForgeContext = ForgeContext(),
         packId: String = Creations.ID,
         packName: String = Creations.NAME,
+        observer: GenerationObserver = GenerationObserver.None,
         onProgress: (StudioJournal) -> Unit = {},
     ): ForgeOutcome {
         if (order.prompt.isBlank()) {
@@ -64,7 +66,7 @@ class ContentForge(
         val role = ForgeRoles.role(order)
         val brief = ForgeRoles.brief(order, context, vocabulary, packId, packName)
         val pipeline = StudioPipeline(model, base, clock, ForgeRepair(vocabulary, order, context))
-        val outcome = pipeline.run(brief, listOf(role), ApprovalGate.ApproveAll, onProgress)
+        val outcome = pipeline.run(brief, listOf(role), ApprovalGate.ApproveAll, observer, onProgress)
         // The crew keeps whatever loads; the forge was asked for one thing, and an empty pack is not it.
         val done = outcome.journal.steps.all { it.status == StepStatus.DONE }
         val pack = outcome.pack?.takeIf { done } ?: return ForgeOutcome.Rejected(reasonFor(outcome.journal), outcome.journal)
