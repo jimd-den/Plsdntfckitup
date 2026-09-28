@@ -83,7 +83,7 @@ fun TitleScreen(
                     Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(Space.medium, Alignment.CenterVertically),
                 ) {
-                    Doors(lastWorld, actions)
+                    Doors(lastWorld, actions, compact = true)
                 }
             }
         } else {
@@ -103,8 +103,9 @@ fun TitleScreen(
                 PackLine(packLine)
             }
         }
+        // Top-left in landscape, where the art column has room; top-right in portrait.
         Row(
-            Modifier.align(Alignment.TopEnd).padding(Space.medium),
+            Modifier.align(if (landscape) Alignment.TopStart else Alignment.TopEnd).padding(Space.medium),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.small),
         ) {
@@ -115,7 +116,7 @@ fun TitleScreen(
 }
 
 @Composable
-private fun ColumnScope.Doors(lastWorld: WorldSummary?, actions: TitleActions) {
+private fun ColumnScope.Doors(lastWorld: WorldSummary?, actions: TitleActions, compact: Boolean = false) {
     if (lastWorld != null) {
         DoorCard(
             glyph = "▶",
@@ -124,6 +125,7 @@ private fun ColumnScope.Doors(lastWorld: WorldSummary?, actions: TitleActions) {
             onClick = { actions.onContinue(lastWorld) },
             emphasis = DoorEmphasis.PRIMARY,
             modifier = Modifier.fillMaxWidth(),
+            compact = compact,
         )
     }
     DoorCard(
@@ -133,6 +135,7 @@ private fun ColumnScope.Doors(lastWorld: WorldSummary?, actions: TitleActions) {
         onClick = actions.onPlay,
         emphasis = if (lastWorld == null) DoorEmphasis.PRIMARY else DoorEmphasis.NORMAL,
         modifier = Modifier.fillMaxWidth(),
+        compact = compact,
     )
     DoorCard(
         glyph = "✎",
@@ -140,14 +143,16 @@ private fun ColumnScope.Doors(lastWorld: WorldSummary?, actions: TitleActions) {
         promise = "Heroes, worlds, lore, gear and art",
         onClick = actions.onCreate,
         modifier = Modifier.fillMaxWidth(),
+        compact = compact,
         tint = StratumTheme.colors.accentAlt,
     )
     DoorCard(
         glyph = "⇄",
         title = "Import & Share",
-        promise = "Plugins, Tiled and Flame games, your creations",
+        promise = "Plugins, games, your creations",
         onClick = actions.onShare,
         modifier = Modifier.fillMaxWidth(),
+        compact = compact,
         tint = StratumTheme.colors.ink,
     )
 }

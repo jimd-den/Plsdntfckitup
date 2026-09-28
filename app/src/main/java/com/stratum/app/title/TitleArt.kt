@@ -43,7 +43,7 @@ internal fun TitleArt(modifier: Modifier = Modifier) {
                 for (z in 0 until height) {
                     val top = z == height - 1
                     val base = when {
-                        !top -> ground
+                        !top -> lerp(bronze, ground, 0.55f)
                         height >= 4 -> bronze
                         else -> grass
                     }

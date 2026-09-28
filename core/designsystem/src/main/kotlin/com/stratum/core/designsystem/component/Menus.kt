@@ -204,15 +204,18 @@ fun DoorCard(
     modifier: Modifier = Modifier,
     emphasis: DoorEmphasis = DoorEmphasis.NORMAL,
     tint: Color = StratumTheme.colors.accent,
+    /** Shorter, one-line doors, for a landscape phone where height is scarce. */
+    compact: Boolean = false,
 ) {
     val colors = StratumTheme.colors
     val primary = emphasis == DoorEmphasis.PRIMARY
+    val glyphSize = if (compact) DOOR_GLYPH_COMPACT else DOOR_GLYPH
     val fill = if (primary) tint else colors.surfaceRaised
     val ink = if (primary) colors.surface else colors.ink
     val muted = if (primary) colors.surface.copy(alpha = 0.78f) else colors.inkMuted
     Row(
         modifier = modifier
-            .defaultMinSize(minHeight = DOOR_MIN_HEIGHT)
+            .defaultMinSize(minHeight = if (compact) DOOR_MIN_HEIGHT_COMPACT else DOOR_MIN_HEIGHT)
             .clip(Cut.large)
             .background(fill)
             .border(if (primary) Stroke.edge else Stroke.hairline, if (primary) tint else colors.hairline, Cut.large)
@@ -222,13 +225,13 @@ fun DoorCard(
     ) {
         Box(
             Modifier
-                .size(DOOR_GLYPH)
+                .size(glyphSize)
                 .clip(CircleShape)
                 .background(if (primary) colors.surface.copy(alpha = 0.16f) else tint.copy(alpha = 0.16f))
                 .border(Stroke.edge, if (primary) colors.surface.copy(alpha = 0.5f) else tint, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(glyph, color = if (primary) colors.surface else tint, fontSize = 26.sp, maxLines = 1)
+            Text(glyph, color = if (primary) colors.surface else tint, fontSize = (glyphSize.value * 0.46f).sp, maxLines = 1)
         }
         Spacer(Modifier.width(Space.large))
         Column(Modifier.weight(1f)) {
@@ -240,7 +243,7 @@ fun DoorCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(Space.hair))
-            Text(promise, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(promise, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
         }
         Text("›", color = muted, fontSize = 28.sp, modifier = Modifier.padding(start = Space.small))
     }
@@ -479,5 +482,7 @@ private val TOP_BAR_HEIGHT = 56.dp
 private val ICON_BUTTON = 48.dp
 private val DOOR_MIN_HEIGHT = 96.dp
 private val DOOR_GLYPH = 56.dp
+private val DOOR_MIN_HEIGHT_COMPACT = 72.dp
+private val DOOR_GLYPH_COMPACT = 44.dp
 private val HUB_GLYPH = 48.dp
 private val SCREEN_MAX_WIDTH = 760.dp

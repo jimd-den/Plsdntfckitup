@@ -137,7 +137,7 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, onChange: (NewW
         RulesPresets.all.forEach { preset ->
             ChoiceCard(
                 title = preset.name,
-                body = preset.description,
+                body = PRESET_LINES[preset.id] ?: preset.description,
                 selected = draft.presetId == preset.id && draft.rules == preset.rules,
                 onClick = { onChange(draft.choosePreset(preset)) },
                 modifier = Modifier.fillMaxWidth(),
@@ -211,3 +211,13 @@ private fun SummaryRow(label: String, value: String) {
 }
 
 private val GO_HEIGHT = 56.dp
+
+/** One line each for the built-in presets, so the cards scan; a preset not listed shows its own description. */
+private val PRESET_LINES = mapOf(
+    "adventure" to "Fights, loot and towns. The default.",
+    "story" to "Few monsters, no hunger. Explore and read.",
+    "survivor" to "Harsh needs, long nights, few towns.",
+    "conqueror" to "Many towns, raids. Take and hold the land.",
+    "unbound" to "Every combat cap lifted. Break builds.",
+    "sandbox" to "Every build tool, training dummies, a meter.",
+)

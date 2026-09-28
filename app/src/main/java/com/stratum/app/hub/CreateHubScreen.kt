@@ -77,14 +77,14 @@ fun CreateHubScreen(
             else -> "${status.classCount} classes" to StatusTone.NEUTRAL
         }
         HubCard(
-            glyph = "⚔", title = "Heroes", promise = "Build a class, then draw how they look and what they hold",
+            glyph = "⚔", title = "Heroes", promise = "A class, a look, a weapon",
             onClick = actions.onClasses, status = heroes.first, statusTone = heroes.second,
             links = listOf(HubLink("Class", actions.onClasses), HubLink("Look", actions.onPoses), HubLink("Weapons", actions.onWeapons)),
             modifier = Modifier.fillMaxWidth(),
         )
         val worlds = ai(status.paintedStyle?.let { "Wearing: $it" to StatusTone.READY } ?: ("Ready" to StatusTone.READY))
         HubCard(
-            glyph = "🌍", title = "Worlds", promise = "A crew of agents writes a whole world; a painter gives it a look",
+            glyph = "🌍", title = "Worlds", promise = "AI writes a whole world and paints it",
             onClick = actions.onWorldCrew, status = worlds.first, statusTone = worlds.second,
             links = listOf(HubLink("World crew", actions.onWorldCrew), HubLink("Texture style", actions.onTextures)),
             modifier = Modifier.fillMaxWidth(),
@@ -92,7 +92,7 @@ fun CreateHubScreen(
         )
         val lore = if (status.keptCreations > 0) "${status.keptCreations} kept" to StatusTone.NEUTRAL else ai("Ready" to StatusTone.READY)
         HubCard(
-            glyph = "⚒", title = "Lore & gear", promise = "Weapons, armour, uniques, sets and lore. Broken builds welcome",
+            glyph = "⚒", title = "Lore & gear", promise = "Uniques, sets, affixes and lore",
             onClick = actions.onLore, status = lore.first, statusTone = lore.second,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -101,7 +101,7 @@ fun CreateHubScreen(
             else -> ai("Ready" to StatusTone.READY)
         }
         HubCard(
-            glyph = "🎨", title = "Art", promise = "Paint textures, animate sprites, build props in 3D",
+            glyph = "🎨", title = "Art", promise = "Textures, sprites and 3D props",
             onClick = actions.onTextures, status = art.first, statusTone = art.second,
             links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
             modifier = Modifier.fillMaxWidth(),
@@ -109,7 +109,7 @@ fun CreateHubScreen(
         )
         val advanced = ai("Every step on the record" to StatusTone.NEUTRAL)
         HubCard(
-            glyph = "🤖", title = "Advanced", promise = "Run the agent crew by hand; cut sprite sheets frame by frame",
+            glyph = "🤖", title = "Advanced", promise = "The agent crew and the sprite mapper",
             onClick = actions.onCrew, status = advanced.first, statusTone = advanced.second,
             links = listOf(HubLink("Agent crew", actions.onCrew), HubLink("Sprite mapper", actions.onMapper), HubLink("Model keys", actions.onSettings)),
             modifier = Modifier.fillMaxWidth(),

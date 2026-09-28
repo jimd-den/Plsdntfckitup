@@ -53,19 +53,19 @@ fun ImportHubScreen(
     StratumScreen(title = "Import & Share", onBack = actions.onBack, modifier = modifier, jobsTray = jobsTray) {
         StatusBanner(state.status, actions.onDismissStatus)
         HubCard(
-            glyph = "⬇", title = "Install a plugin", promise = "A .stratum file from a friend or the web: worlds, classes, rules",
+            glyph = "⬇", title = "Install a plugin", promise = "A .stratum file: worlds, classes, rules",
             onClick = actions.onInstall,
             status = if (working) "Installing…" else null, statusTone = StatusTone.BUSY,
             modifier = Modifier.fillMaxWidth(),
         )
         HubCard(
-            glyph = "🗺", title = "Import a game", promise = "A zipped Tiled map or Flame project becomes a world you can play",
+            glyph = "🗺", title = "Import a game", promise = "A Tiled map or Flame game, made playable",
             onClick = actions.onImportProject,
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accentAlt,
         )
         HubCard(
-            glyph = "⇪", title = "Share my creations", promise = "Your classes, gear and lore as one plugin anyone can install",
+            glyph = "⇪", title = "Share my creations", promise = "Your classes, gear and lore as one plugin",
             onClick = actions.onShare,
             status = if (state.shareable > 0) "${state.shareable} to share" else "Make something first",
             statusTone = if (state.shareable > 0) StatusTone.READY else StatusTone.NEUTRAL,
@@ -73,7 +73,7 @@ fun ImportHubScreen(
         )
         SectionHeader("Installed")
         HubCard(
-            glyph = "🧩", title = "Manage plugins", promise = "Switch them on and off, and choose their load order",
+            glyph = "🧩", title = "Manage plugins", promise = "On, off, and load order",
             onClick = actions.onManage,
             status = when {
                 state.installed == 0 -> "Only the built-in pack"
