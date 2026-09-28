@@ -179,6 +179,16 @@ fun StratumApp(modifier: Modifier = Modifier) {
     // it exists to protect work in flight, and one that started with the
     // screen would be a permanent notification about nothing.
     val generating by PoseRun.running.collectAsStateWithLifecycle()
+
+    // Creation jobs: one centre for the whole app. A world pack the crew
+    // finished while a world was being played waits in the inbox and is
+    // installed once play ends, never swapped in under the player.
+    val jobs = CreationJobs.center
+    val jobScope = androidx.compose.runtime.rememberCoroutineScope()
+    val installGenerated: (ContentPack) -> Unit = { pack -> jobScope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } }
+    LaunchedEffect(destination) {
+        if (destination != Destination.PLAY) CreationJobs.inbox.release(installGenerated)
+    }
     LaunchedEffect(generating) {
         if (generating) PoseGenerationService.start(context)
     }
@@ -429,6 +439,7 @@ fun StratumApp(modifier: Modifier = Modifier) {
                     model = ai.imageModel.takeIf { ai.isConfigured() },
                     root = forgeDirectory,
                     initialPrompt = stylePrompt,
+                    jobs = jobs,
                 ),
             )
             TextureForgeScreen(
@@ -467,6 +478,7 @@ fun StratumApp(modifier: Modifier = Modifier) {
                     },
                     loadClasses = classStore::all,
                     loadSheets = ai.sprites::all,
+                    queueLook = { subject, onDrawn -> CreationJobs.queueHeroLook(ai, subject, onDrawn) },
                 ),
             )
             ClassForgeScreen(
@@ -486,6 +498,15 @@ fun StratumApp(modifier: Modifier = Modifier) {
                     isProviderConfigured = ai::isConfigured,
                     onInstall = { pack -> scope.launch { plugins.installGenerated(pack); plugins.repository.refresh() } },
                     initialPreset = crewPreset,
+                    jobs = jobs,
+                    modelName = { ai.settings.load().model },
+                    onPlayNow = { world ->
+                        styles.save(world.stylePrompt)
+                        stylePrompt = world.stylePrompt
+                        seed = System.currentTimeMillis()
+                        destination = Destination.PLAY
+                    },
+                    deliver = { pack -> CreationJobs.inbox.arrive(pack, sessionRunning = destination == Destination.PLAY, install = installGenerated) },
                 ),
             )
             // The view model outlives this screen, so a preset chosen on the way back in is applied, then forgotten.
@@ -509,6 +530,8 @@ fun StratumApp(modifier: Modifier = Modifier) {
                     isProviderConfigured = ai::isConfigured,
                     creations = plugins::creations,
                     saveCreations = { pack -> plugins.installCreations(pack) },
+                    jobs = jobs,
+                    modelName = { ai.settings.load().model },
                 ),
             )
             LaunchedEffect(armoury) { armoury.refreshProvider() }
@@ -554,6 +577,7 @@ fun StratumApp(modifier: Modifier = Modifier) {
                             },
                         )
                     },
+                    jobs = jobs,
                 ),
             )
             SpriteForgeScreen(
@@ -862,6 +886,7 @@ fun StratumApp(modifier: Modifier = Modifier) {
                     isProviderConfigured = { ai.settings.isModelProviderConfigured },
                     encodePng = AndroidImageCodec::encodePng,
                     onContentChanged = { modelRevision++ },
+                    jobs = jobs,
                 ),
             )
             val referencePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
