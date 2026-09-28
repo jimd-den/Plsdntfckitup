@@ -53,13 +53,18 @@ object TreesStage : MicroStageFactory, Describable {
             val climate = ctx.fields.require(Fields.CLIMATE)
             val sea = ctx.fields.require(Fields.SEA_LEVEL)
             val footprint = ctx.fields.get(Fields.FOOTPRINT)
+            val geology = ctx.fields.get(Fields.GEOLOGY)
             for (gy in Math.floorDiv(ctx.y0 - REACH, cell)..Math.floorDiv(ctx.y1 + REACH, cell))
                 for (gx in Math.floorDiv(ctx.x0 - REACH, cell)..Math.floorDiv(ctx.x1 + REACH, cell)) {
                     val tx = gx * cell + 3 + Hash.int(seed, gx, gy, 1, cell - 6)
                     val ty = gy * cell + 3 + Hash.int(seed, gx, gy, 2, cell - 6)
                     val moist = climate.moisture(tx, ty)
-                    val groves = TerrainStage.smooth(0.35f, 0.75f, 0.5f + clump.fbm(tx * 0.006f, ty * 0.006f, 3) * 0.9f)
-                    var chance = density * (0.15f + moist * 0.9f) * groves
+                    val province = geology?.provinceAt(tx, ty)
+                    var groves = TerrainStage.smooth(0.35f, 0.75f, 0.5f + clump.fbm(tx * 0.006f, ty * 0.006f, 3) * 0.9f)
+                    // Rainforest closes its canopy: few clearings where the province is richest.
+                    if (province != null) groves = (groves + (province.fertility - 0.6f).coerceAtLeast(0f) * 1.8f).coerceAtMost(1f)
+                    // With geology, the province says how much grows: rainforest thick, savanna scattered, erg bare.
+                    var chance = density * groves * if (province != null) province.fertility * 1.05f else (0.15f + moist * 0.9f)
                     val urban = footprint?.urban(tx, ty) ?: 0f
                     chance *= (1f - urban)
                     if (Hash.unit(seed, gx, gy, 0, 3) >= chance) continue
@@ -69,8 +74,18 @@ object TreesStage : MicroStageFactory, Describable {
                     if (slope > 0.9f) continue
                     if (footprint?.isOccupied(tx, ty) == true) continue
                     val base = floor(h).toInt() + 1
-                    val cold = climate.temperature(tx, ty) < 0.38f || h > sea + 190
                     val treeSeed = Hash.mix(seed, gx, gy, 0, 77)
+                    if (province != null && province.trees.isNotEmpty()) {
+                        // The province's own trees, the first commonest: roll a geometric pick down the list.
+                        val roll = Hash.unit(seed, gx, gy, 0, 5)
+                        var i = 0
+                        var share = 0.55f
+                        var acc = share
+                        while (roll > acc && i < province.trees.size - 1) { i++; share *= 0.55f; acc += share }
+                        plant(ctx, kindOf(province.trees[i]), tx, ty, base, treeSeed)
+                        continue
+                    }
+                    val cold = climate.temperature(tx, ty) < 0.38f || h > sea + 190
                     if (cold) conifer(ctx, tx, ty, base, treeSeed, bark, leaves)
                     else if (tropical) {
                         // Wet forest is iroko and oil palm; dry savanna is baobab with the odd palm.
@@ -86,10 +101,22 @@ object TreesStage : MicroStageFactory, Describable {
         }
     }
 
+    /** A province's tree name as a [Kind]. */
+    fun kindOf(name: String): Kind = when (name) {
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.IROKO -> Kind.IROKO
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.OIL_PALM -> Kind.OIL_PALM
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.BAOBAB -> Kind.BAOBAB
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.ACACIA -> Kind.ACACIA
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.DATE_PALM -> Kind.DATE_PALM
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.EUPHORBIA -> Kind.EUPHORBIA
+        com.stratum.engine.microvoxel.geo.Provinces.Trees.MANGROVE -> Kind.MANGROVE
+        else -> Kind.BROADLEAF
+    }
+
     private fun abs2(a: Float, b: Float) = sqrt(a * a + b * b)
 
     /** The kinds of tree [plant] can grow. */
-    enum class Kind { BROADLEAF, CONIFER, IROKO, OIL_PALM, BAOBAB }
+    enum class Kind { BROADLEAF, CONIFER, IROKO, OIL_PALM, BAOBAB, ACACIA, DATE_PALM, EUPHORBIA, MANGROVE }
 
     /**
      * Grows one tree of [kind] at a spot, for other stages: the sacred tree in
@@ -105,6 +132,91 @@ object TreesStage : MicroStageFactory, Describable {
             Kind.IROKO -> iroko(ctx, x, y, base, seed, bark, leaves)
             Kind.OIL_PALM -> oilPalm(ctx, x, y, base, seed, bark, p.id(M.PALM), p.id(M.FRUIT))
             Kind.BAOBAB -> baobab(ctx, x, y, base, seed, p.id(M.TIMBER), leaves)
+            Kind.ACACIA -> acacia(ctx, x, y, base, seed, bark, leaves)
+            Kind.DATE_PALM -> datePalm(ctx, x, y, base, seed, bark, p.id(M.PALM))
+            Kind.EUPHORBIA -> euphorbia(ctx, x, y, base, seed, p.id(M.PALM))
+            Kind.MANGROVE -> mangrove(ctx, x, y, base, seed, bark, leaves)
+        }
+    }
+
+    /**
+     * Umbrella thorn (Vachellia tortilis): a short trunk forking low into
+     * crooked limbs under one wide, thin, flat-topped canopy -- the savanna's
+     * signature tree.
+     */
+    private fun acacia(ctx: MicroGenContext, tx: Int, ty: Int, base: Int, seed: Long, bark: Short, leaves: Short) {
+        val fork = 5 + (seed and 3L).toInt()
+        val top = base + 13 + ((seed ushr 3) and 3L).toInt()
+        if (!ctx.overlaps(tx - REACH, ty - REACH, base - 1, tx + REACH, ty + REACH, top + 3)) return
+        for (z in base - 1 until base + fork) ctx.place(tx, ty, z, bark)
+        val limbs = 3
+        repeat(limbs) { i ->
+            val a = i * 2.094f + (seed and 7L) * 0.5f
+            for (z in base + fork until top) {
+                val k = (z - base - fork) * 0.55f
+                ctx.place(tx + (kotlin.math.cos(a) * k).toInt(), ty + (kotlin.math.sin(a) * k).toInt(), z, bark)
+            }
+        }
+        // The canopy: a flat, feathered disc two layers thick, wider than tall by far.
+        val r = 9f + Hash.unit(seed, 0, 0, 0, 30) * 3f
+        val ri = r.toInt() + 1
+        for (dz in 0..1) for (dy in -ri..ri) for (dx in -ri..ri) {
+            val d = sqrt((dx * dx + dy * dy).toFloat())
+            val edge = r - dz * 1.5f - Hash.unit(seed, tx + dx, ty + dy, dz, 31) * 2f
+            if (d < edge && Hash.unit(seed, tx + dx, ty + dy, dz, 32) > 0.18f) ctx.place(tx + dx, ty + dy, top + dz, leaves)
+        }
+    }
+
+    /** Date palm: a tall, straight, rough trunk and a head of stiff grey-green fronds; the oasis tree. */
+    private fun datePalm(ctx: MicroGenContext, tx: Int, ty: Int, base: Int, seed: Long, bark: Short, palm: Short) {
+        val height = 20 + (seed and 7L).toInt()
+        val top = base + height
+        if (!ctx.overlaps(tx - REACH, ty - REACH, base - 1, tx + REACH, ty + REACH, top + 6)) return
+        for (z in base - 1 until top) ctx.place(tx, ty, z, bark)
+        repeat(11) { i ->
+            val a = i * 0.571f + Hash.unit(seed, i, 0, 0, 33) * 0.3f
+            val len = 6 + Hash.int(seed, i, 0, 34, 3)
+            val lift = if (i % 3 == 0) 0.9f else 0.35f
+            for (k in 1..len) ctx.place(tx + (kotlin.math.cos(a) * k).toInt(), ty + (kotlin.math.sin(a) * k).toInt(), top + (k * lift).toInt() - (k * k * 0.05f).toInt(), palm)
+        }
+    }
+
+    /**
+     * Candelabra tree (Euphorbia candelabrum): a short trunk branching into
+     * upright green succulent arms, like a many-branched candlestick -- the
+     * Rift's and the Ethiopian highlands' silhouette.
+     */
+    private fun euphorbia(ctx: MicroGenContext, tx: Int, ty: Int, base: Int, seed: Long, green: Short) {
+        val trunk = 5 + (seed and 3L).toInt()
+        val top = base + trunk + 10
+        if (!ctx.overlaps(tx - REACH, ty - REACH, base - 1, tx + REACH, ty + REACH, top + 2)) return
+        for (z in base - 1 until base + trunk) { ctx.place(tx, ty, z, green); ctx.place(tx + 1, ty, z, green) }
+        val arms = 5 + ((seed ushr 4) and 3L).toInt()
+        repeat(arms) { i ->
+            val a = i * 6.2831855f / arms
+            val reach = 2 + (i % 3)
+            val ax = tx + (kotlin.math.cos(a) * reach).toInt(); val ay = ty + (kotlin.math.sin(a) * reach).toInt()
+            for (k in 0..reach) ctx.place(tx + (kotlin.math.cos(a) * k).toInt(), ty + (kotlin.math.sin(a) * k).toInt(), base + trunk, green)
+            val armTop = top - Hash.int(seed, i, 0, 35, 4)
+            for (z in base + trunk until armTop) ctx.place(ax, ay, z, green)
+        }
+    }
+
+    /** Mangrove: arching stilt roots lifting a dense, low, dark crown off the mud. */
+    private fun mangrove(ctx: MicroGenContext, tx: Int, ty: Int, base: Int, seed: Long, bark: Short, leaves: Short) {
+        val top = base + 9 + (seed and 3L).toInt()
+        if (!ctx.overlaps(tx - REACH, ty - REACH, base - 3, tx + REACH, ty + REACH, top + 6)) return
+        repeat(6) { i ->
+            val a = i * 1.047f + (seed and 7L) * 0.2f
+            for (k in 0..5) {
+                val x = tx + (kotlin.math.cos(a) * (5 - k)).toInt(); val y = ty + (kotlin.math.sin(a) * (5 - k)).toInt()
+                ctx.place(x, y, base - 1 + k, bark)
+            }
+        }
+        for (z in base + 4 until top) ctx.place(tx, ty, z, bark)
+        for (z in top - 2..top + 4) for (dy in -6..6) for (dx in -6..6) {
+            val dz = (z - top - 1) * 1.6f
+            if (sqrt(dx * dx + dy * dy + dz * dz) < 6f - Hash.unit(seed, tx + dx, ty + dy, z, 36) * 1.5f) ctx.place(tx + dx, ty + dy, z, leaves)
         }
     }
 
@@ -287,7 +399,10 @@ object GroundcoverStage : MicroStageFactory, Describable {
         val blooms = LatticeHeight(step = 4, source = HeightFunction { x, y -> 0.5f + meadow.fbm(x * 0.01f + 90f, y * 0.01f, 2) })
         // Tall grass: the share of tufts that grow up to a block high -- elephant grass on a savanna.
         val tall = setup.options.float("tall", 0f)
-        val bare = setOf(p.id(M.SAND), gravel, stone, p.id(M.DARK_STONE), p.id(M.SNOW), p.id(M.WATER))
+        val bare = setOf(p.id(M.SAND), gravel, stone, p.id(M.DARK_STONE), p.id(M.SNOW), p.id(M.WATER)) +
+            com.stratum.engine.microvoxel.geo.R.BARE.mapNotNull { runCatching { p.id(it) }.getOrNull() }
+        val pebbly = com.stratum.engine.microvoxel.geo.R.PEBBLY.mapNotNull { runCatching { p.id(it) }.getOrNull() }.toSet() + gravel
+        val varnish = runCatching { p.id(com.stratum.engine.microvoxel.geo.R.DESERT_VARNISH) }.getOrDefault(stone)
         // What grows on a surface, decided once per material: its own green on turf, sparse dry
         // grass on bare earth (a pack's red laterite), nothing on sand, rock and snow.
         val growth = java.util.concurrent.ConcurrentHashMap<Short, Int>()
@@ -307,7 +422,11 @@ object GroundcoverStage : MicroStageFactory, Describable {
             val cols = ctx.fields.require(Fields.COLUMNS).columns(ctx.pos.x, ctx.pos.y)
             val occupied = ctx.fields.get(Fields.FOOTPRINT)?.occupancyMask(ctx.pos.x, ctx.pos.y)
             val sea = ctx.fields.require(Fields.SEA_LEVEL)
+            val geology = ctx.fields.get(Fields.GEOLOGY)
             val s = MicroChunk.SIZE
+            // With geology, the province sets how thickly the ground is grown over; once per chunk is plenty.
+            val fertile = geology?.provinceAt(ctx.x0 + s / 2, ctx.y0 + s / 2)?.fertility?.let { 0.15f + it * 1.1f } ?: 1f
+            val density = density * fertile
             for (ly in 0 until s) for (lx in 0 until s) {
                 val h = cols.height(lx, ly)
                 if (h + 1 < ctx.z0 || h + 1 > ctx.z1 || h <= sea) continue
@@ -340,9 +459,7 @@ object GroundcoverStage : MicroStageFactory, Describable {
                     }
                     continue
                 }
-                when (top) {
-                    gravel -> if (r < 0.05f * density) ctx.place(wx, wy, h + 1, stone)
-                }
+                if (top in pebbly && r < 0.05f * density.coerceAtLeast(0.6f)) ctx.place(wx, wy, h + 1, if (top == gravel) stone else varnish)
             }
         }
     }

@@ -13,10 +13,13 @@
       {
         "id": "micro:terrain",
         "options": {
-          "height": "0.26",
-          "mountains": "0.3",
-          "scale": "0.75"
+          "geology": "africa",
+          "home": "forest_hills",
+          "spawnRise": "12"
         }
+      },
+      {
+        "id": "micro:features"
       },
       {
         "id": "micro:settlements",
@@ -34,8 +37,7 @@
       {
         "id": "micro:trees",
         "options": {
-          "style": "tropical",
-          "density": "0.85"
+          "style": "tropical"
         }
       }
     ]

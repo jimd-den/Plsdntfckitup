@@ -1,5 +1,8 @@
 package com.stratum.engine.microvoxel
 
+import com.stratum.engine.microvoxel.arch.ArchMaterials
+import com.stratum.engine.microvoxel.geo.GeoMaterials
+
 /**
  * What a microvoxel is made of.
  *
@@ -97,6 +100,13 @@ class MaterialPalette {
             register(M.PALM, 0x5E8F2C, jitter = 0.14f)
             register(M.FRUIT, 0xD8581E, jitter = 0.1f)
             register(M.BEATEN_EARTH, 0xB07A52, jitter = 0.1f)
+            // Africa's rocks and regoliths, then its building materials: see the geo and arch packages.
+            GeoMaterials.all.forEach { (name, color, jitter) -> register(name, color, jitter = jitter) }
+            register(M.SALT_WATER, 0x5E9AA8, opaque = false, solid = false, gloss = 0.85f, jitter = 0f)
+            register(M.SODA_WATER, 0xB86A5A, opaque = false, solid = false, gloss = 0.7f, jitter = 0f)
+            register(M.OBSIDIAN, 0x1E1B22, gloss = 0.7f, jitter = 0.04f)
+            register(M.LAVA_GLOW, 0xE8561E, emission = 2.2f, jitter = 0.1f)
+            ArchMaterials.all.forEach { (name, color, jitter) -> register(name, color, jitter = jitter) }
         }
     }
 }
@@ -143,4 +153,9 @@ object M {
     const val PALM = "palm"
     const val FRUIT = "fruit"
     const val BEATEN_EARTH = "beaten_earth"
+    const val SALT_WATER = "salt_water"
+    /** The red-pink brine of a soda lake (Natron, Magadi), coloured by salt-loving algae. */
+    const val SODA_WATER = "soda_water"
+    const val OBSIDIAN = "obsidian"
+    const val LAVA_GLOW = "lava_glow"
 }

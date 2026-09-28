@@ -6,6 +6,8 @@ import com.stratum.core.domain.world.BlockShape
 import com.stratum.core.domain.world.BlockType
 import com.stratum.engine.microvoxel.M
 import com.stratum.engine.microvoxel.MaterialPalette
+import com.stratum.engine.microvoxel.arch.A
+import com.stratum.engine.microvoxel.geo.R
 
 /**
  * Which of a pack's blocks each microvoxel material becomes.
@@ -67,9 +69,9 @@ class BlockPalette(
     fun materialForBlock(index: Int): Short = materialFor.getOrElse(index) { MaterialPalette.AIR }
 
     private fun choose(name: String, color: Int): Int {
-        val wanted = KINDS[name] ?: return -1
+        val wanted = KINDS[name] ?: kindsByFamily(name) ?: return -1
         for (kind in wanted) {
-            val structural = name in STRUCTURAL
+            val structural = isStructural(name)
             val best = registry.all.indices.filter { i -> candidate(registry.typeOf(i), kind, structural) }
                 .minByOrNull { i -> distance(registry.typeOf(i), color) }
             if (best != null) return best
@@ -111,6 +113,31 @@ class BlockPalette(
             M.ROOF_TILE to listOf(ST, W, S), M.ROOF_SLATE to listOf(ST, S), M.GLASS to listOf(ST, S), M.GLASS_LIT to listOf(ST, S),
             M.METAL to listOf(ME, ST), M.LAMP to listOf(ME, ST),
         )
+
+        private val LOOSE = setOf(
+            R.LATERITE, R.MOTTLED_CLAY, R.SAPROLITE, R.FERRALSOL, R.VERTISOL, R.ANDOSOL, R.GYPCRETE, R.SALT, R.TRONA, R.SULPHUR,
+            R.KALAHARI_SAND, R.ERG_SAND, R.NAMIB_SAND, R.CORAL_SAND, R.REG_GRAVEL, R.DELTA_MUD, R.DIATOMITE, R.TERMITE_CLAY,
+            R.TALUS, R.NANKA_SAND,
+        )
+        private val WOODEN = setOf(A.TORON, A.MANGROVE_POLE, A.CARVED_DOOR, A.POST, A.AKSUM_TIMBER, A.THORN)
+        private val THATCHED = setOf(A.MILLET_THATCH, A.GRASS_WEAVE, A.RAFFIA)
+
+        /**
+         * Kinds by family, for the African rocks and building materials: soils and sands want soil
+         * blocks, rock wants stone, timber wants wood, thatch (like the built-in thatch) is detail
+         * that reads as air at block scale, and walls must never fall.
+         */
+        private fun kindsByFamily(name: String): List<BlockMaterial>? = when {
+            name == M.SALT_WATER || name == M.SODA_WATER -> listOf(BlockMaterial.LIQUID)
+            name == M.OBSIDIAN || name == M.LAVA_GLOW -> listOf(ST, S)
+            name.startsWith("geo:") -> if (name in LOOSE) listOf(S, ST) else listOf(ST, S)
+            name in THATCHED -> null
+            name in WOODEN -> listOf(W, ST)
+            name.startsWith("arch:") -> listOf(ST, S)
+            else -> null
+        }
+
+        private fun isStructural(name: String) = name in STRUCTURAL || name.startsWith("arch:")
 
         /** What buildings and roads are made of: never a block that falls. */
         val STRUCTURAL = setOf(

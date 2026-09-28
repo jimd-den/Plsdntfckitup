@@ -83,6 +83,9 @@ object Fields {
      * grass, dirt and rock: a pack's red earth, its turf, its granite.
      */
     val STRATA = FieldKey<Strata>("strata")
+
+    /** Which geological province a column is in, when the land was built from them (`geology` on [TerrainStage]). */
+    val GEOLOGY = FieldKey<com.stratum.engine.microvoxel.geo.GeoField>("geology")
 }
 
 /** The layers of ground at a column, as material ids. */
@@ -116,6 +119,8 @@ class Columns(
     /** What lies under the top: soil, then rock. */
     val subs: ShortArray = ShortArray(0),
     val fills: ShortArray = ShortArray(0),
+    /** Province, floor, folds and water per column, when the land was built from geology. */
+    val geo: GeoColumns? = null,
 ) {
     fun height(lx: Int, ly: Int) = heights[ly * MicroChunk.SIZE + lx]
     fun top(lx: Int, ly: Int) = tops[ly * MicroChunk.SIZE + lx]
@@ -153,6 +158,12 @@ object TerrainStage : MicroStageFactory, Describable {
     override fun describe() = StageInfo(
         ID, "Land", "Hills, valleys, lakes and the ground's own soils.",
         listOf(
+            StageParam.Choice(
+                "geology", "Landscape",
+                "Africa: every kind of country, placed by climate and tectonics. Or one province everywhere. Classic: generic hills.",
+                listOf(GeoTerrain.AFRICA) + com.stratum.engine.microvoxel.geo.Provinces.all(0L).map { it.id } + GeoTerrain.CLASSIC,
+                GeoTerrain.CLASSIC,
+            ),
             StageParam.Number("height", "Hilliness", "How tall the land rises and how deep it falls.", 0.05f, 1f, 1f),
             StageParam.Number("mountains", "Mountains", "How much of the land is ridged peaks.", 0f, 2f, 1f),
             StageParam.Number("scale", "Breadth", "How wide hills and valleys are; bigger is broader.", 0.3f, 2f, 1f),
@@ -166,6 +177,8 @@ object TerrainStage : MicroStageFactory, Describable {
 
     override fun create(setup: StageSetup): MicroStage {
         val o = setup.options
+        val geology = o.string("geology", GeoTerrain.CLASSIC)
+        if (geology != GeoTerrain.CLASSIC) return GeoTerrain.create(setup, geology)
         val sea = o.int("seaLevel", 96)
         val scale = 1f / o.float("scale", 1f)
         val vertical = o.float("height", 1f)

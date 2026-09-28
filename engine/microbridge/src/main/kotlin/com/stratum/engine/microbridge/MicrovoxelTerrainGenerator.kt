@@ -364,7 +364,9 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
          */
         val presets: Map<String, List<StageSpec>> = mapOf(
             ANCIENT to listOf(
-                StageSpec(TerrainStage.ID, mapOf("height" to "0.26", "mountains" to "0.3", "scale" to "0.75", "spawnRise" to "12")),
+                // Africa's own geology, the home region in the Guinean forest hills the built-in pack comes from.
+                StageSpec(TerrainStage.ID, mapOf("geology" to "africa", "home" to com.stratum.engine.microvoxel.geo.Provinces.FOREST_HILLS, "spawnRise" to "12")),
+                StageSpec(com.stratum.engine.microvoxel.gen.GeoFeaturesStage.ID),
                 StageSpec(SettlementsStage.ID, mapOf("style" to SettlementsStage.EARTHEN)),
                 StageSpec(com.stratum.engine.microvoxel.gen.GroundcoverStage.ID, mapOf("density" to "1.1", "tall" to "0.25")),
                 StageSpec(com.stratum.engine.microvoxel.gen.TreesStage.ID, mapOf("style" to "tropical", "density" to "0.85")),
@@ -413,7 +415,8 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
          * again does not plant them before the land.
          */
         val ORDER = listOf(
-            TerrainStage.ID, com.stratum.engine.microvoxel.gen.CavesStage.ID, CityPlanStage.ID, SettlementsStage.ID,
+            TerrainStage.ID, com.stratum.engine.microvoxel.gen.CavesStage.ID, com.stratum.engine.microvoxel.gen.GeoFeaturesStage.ID,
+            CityPlanStage.ID, SettlementsStage.ID,
             com.stratum.engine.microvoxel.gen.RoadsStage.ID, com.stratum.engine.microvoxel.gen.BuildingsStage.ID,
             com.stratum.engine.microvoxel.gen.GroundcoverStage.ID, com.stratum.engine.microvoxel.gen.TreesStage.ID,
         )

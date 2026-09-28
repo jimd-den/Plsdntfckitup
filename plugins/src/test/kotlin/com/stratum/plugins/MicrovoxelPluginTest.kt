@@ -23,7 +23,7 @@ class MicrovoxelPluginTest {
 
         assertEquals(TerrainRecipe.MICROVOXEL, content.terrain.generatorId)
         assertEquals(
-            listOf("micro:terrain", "micro:settlements", "micro:groundcover", "micro:trees"),
+            listOf("micro:terrain", "micro:features", "micro:settlements", "micro:groundcover", "micro:trees"),
             content.terrain.passes.map { it.id },
         )
         assertEquals("earthen", content.terrain.passes.single { it.id == "micro:settlements" }.options["style"])

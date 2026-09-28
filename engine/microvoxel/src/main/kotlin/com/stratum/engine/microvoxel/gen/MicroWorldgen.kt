@@ -29,6 +29,8 @@ object MicroWorldgen {
      * through, not skylines. A bridge fills in `seaLevel` from the world config.
      */
     const val ARPG = "micro:arpg"
+    /** Africa's geological provinces, their features and their trees; no cities. */
+    const val AFRICA = "micro:africa"
 
     val stages: StageRegistry = StageRegistry()
         .register(TerrainStage.ID, TerrainStage)
@@ -38,6 +40,7 @@ object MicroWorldgen {
         .register(BuildingsStage.ID, BuildingsStage)
         .register(GroundcoverStage.ID, GroundcoverStage)
         .register(TreesStage.ID, TreesStage)
+        .register(GeoFeaturesStage.ID, GeoFeaturesStage)
 
     private fun s(id: String, vararg o: Pair<String, String>) = StageSpec(id, mapOf(*o))
 
@@ -52,6 +55,9 @@ object MicroWorldgen {
             s(RoadsStage.ID), s(BuildingsStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID, "density" to "0.8"),
         ),
         CAVERNS to listOf(s(TerrainStage.ID), s(CavesStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID)),
+        AFRICA to listOf(
+            s(TerrainStage.ID, "geology" to "africa"), s(GeoFeaturesStage.ID), s(GroundcoverStage.ID), s(TreesStage.ID, "style" to "tropical"),
+        ),
         ARPG to listOf(
             s(TerrainStage.ID, "height" to "0.28", "mountains" to "0.35", "scale" to "0.7", "maxHeight" to "168", "minHeight" to "8"),
             // Two floors at most: from the isometric camera a taller house hides the street the hero is fighting in.
@@ -66,13 +72,18 @@ object MicroWorldgen {
      * write a `terrain.passes` list without reading Kotlin.
      */
     val catalogue: Map<String, String> = linkedMapOf(
-        TerrainStage.ID to "The ground: continents, eroded hills, ridged mountains, sea, in each region's own soils. Options: seaLevel, scale, height, mountains (0..2), terrace (plateau steps), snowLine, maxHeight, minHeight (microvoxels; 4 per block).",
+        TerrainStage.ID to "The ground. Options: geology (africa: twenty African geological provinces -- laterite plateaus, granite inselbergs, rainforest basin, " +
+            "Guinean forest hills, Sahel floodplain, rift valley, basalt traps, volcanic necks, sandstone escarpment, erg, reg and hamada, salt pans, Kalahari, " +
+            "Namib, Karoo mesas, Drakensberg, Atlas folds, tsingy, coral coast, delta -- placed by climate and tectonics with their real rocks; a province id for " +
+            "that province everywhere; classic: generic hills), home (province id at the origin), seaLevel, scale, height, mountains (0..2, classic), " +
+            "terrace (classic), maxHeight, minHeight (microvoxels; 4 per block).",
+        GeoFeaturesStage.ID to "With geology: termite mounds, balancing-rock tors and sandstone arches where the provinces have them. Options: density (0..2), termites, tors, arches (true/false).",
         CavesStage.ID to "Tunnels under the surface. Options: threshold (0..1, lower = more cave), minDepth.",
         CityPlanStage.ID to "Towns on an endless grid of regions, flattening the land under them. Options: density (0..1), regionSize, styles (terrace,villa,tower), maxFloors.",
         RoadsStage.ID to "Draws the town's roads, kerbs, markings and lamps. Options: lampSpacing.",
         BuildingsStage.ID to "Raises each town lot's building in its style. No options.",
         GroundcoverStage.ID to "Grass tufts, flowers, shrubs and pebbles on whatever the ground is. Options: density (0..2), tall (0..1, elephant grass).",
-        TreesStage.ID to "Trees by climate. Options: style (temperate: oak and fir; tropical: iroko, oil palm, baobab), cell (spacing), density (0..2).",
+        TreesStage.ID to "Trees by climate, or with geology each province's own (iroko, oil palm, baobab, acacia, date palm, candelabra euphorbia, mangrove). Options: style (temperate: oak and fir; tropical: iroko, oil palm, baobab), cell (spacing), density (0..2).",
     )
 
     fun build(seed: Long, specs: List<StageSpec>, palette: MaterialPalette = MaterialPalette.standard()): MicroGenerator =

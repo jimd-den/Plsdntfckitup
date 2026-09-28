@@ -26,15 +26,27 @@ class InfiniteTerrainTest {
     }
 
     @Test
-    fun `far lands are as varied and as seamless as the land at home`() {
+    fun `far lands are whole, seamless at chunk borders, and made the same however they are asked for`() {
         for ((x, y) in listOf(0 to 0, 100_000 to -70_000, 1_000_000 to 1_000_000, -2_000_000 to 3_000_000)) {
             val span = Chunk.SIZE * 2
             val s = surfaces(x - Chunk.SIZE, y - Chunk.SIZE, span)
             assertTrue(s.all { it in 1 until Chunk.HEIGHT }, "a hole in the world near $x,$y")
-            // Neighbouring columns differ by a step or two, chunk borders included: no seams, no noise breaking down.
-            var worst = 0
-            for (j in 0 until span) for (i in 1 until span) worst = maxOf(worst, kotlin.math.abs(s[j * span + i] - s[j * span + i - 1]))
-            assertTrue(worst <= 8, "a cliff of $worst between neighbouring columns near $x,$y")
+            // Cliffs are real (escarpments, inselbergs), so steepness is no test of a seam. A seam is a
+            // step at a chunk border that the land on either side of it does not explain.
+            var inside = 0; var border = 0
+            for (j in 0 until span) for (i in 1 until span) {
+                val step = kotlin.math.abs(s[j * span + i] - s[j * span + i - 1])
+                val nearBorder = (x - Chunk.SIZE + i) % Chunk.SIZE == 0
+                if (nearBorder) border = maxOf(border, step) else inside = maxOf(inside, step)
+            }
+            assertTrue(border <= inside + 2, "a seam of $border at a chunk border near $x,$y (steepest inside: $inside)")
+            // A chunk made alone, by a fresh generator, is the chunk the streamed world made.
+            val fresh = WorldSession(content, config).hotTerrain!!
+            val pos = com.stratum.core.domain.world.ChunkPos.containing(x, y)
+            val alone = fresh.generate(pos, content.registry)
+            val world = StreamingWorld(content.registry, hot, config).also { it.focusOn(BlockPos(x, y, 0)) }
+            for (lz in 0 until Chunk.HEIGHT step 5) for (ly in 0 until Chunk.SIZE step 3) for (lx in 0 until Chunk.SIZE step 3)
+                assertTrue(alone.blockAt(lx, ly, lz) == world.chunkAt(pos)!!.blockAt(lx, ly, lz), "chunk $pos differs at $lx,$ly,$lz")
         }
     }
 

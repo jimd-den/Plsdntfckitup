@@ -1,10 +1,10 @@
 {
   "id": "microvoxel.realms",
   "name": "Microvoxel Realms",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Stratum",
   "license": "CC-BY-4.0",
-  "description": "Generates the world in quarter-block microvoxels: an ancient West African land of red laterite and grove turf, iroko, oil palm and baobab, and the built-in pack's towns - the home town first - as walled compounds of mud and thatch with uli-painted walls and round huts. Plays on the built-in pack's blocks, creatures and towns.",
+  "description": "Generates the world in quarter-block microvoxels from Africa's real geology: twenty provinces - laterite plateaus, granite inselbergs, the Congo basin, Guinean forest hills, the Sahel, the Rift with its soda lakes and volcanoes, Ethiopian basalt ambas, sandstone escarpments, sand seas, salt pans, the Kalahari and Namib, Karoo mesas, the Drakensberg, the Atlas folds, tsingy, coral coast and delta - with termite mounds, tors and arches, and the built-in pack's towns built in the building traditions of the land they stand in. Plays on the built-in pack's blocks, creatures and towns.",
   "api": 1,
   "dependencies": [
     {
