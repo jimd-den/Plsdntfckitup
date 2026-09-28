@@ -4,24 +4,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.stratum.core.designsystem.component.ActionEmphasis
-import com.stratum.core.designsystem.component.SectionLabel
-import com.stratum.core.designsystem.component.StratumAction
 import com.stratum.core.designsystem.component.StratumChip
-import com.stratum.core.designsystem.component.StratumPanel
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.combat.CombatRules
@@ -106,55 +96,10 @@ internal fun summaryOf(rules: WorldRules): String =
         (if (rules.sandbox) " · sandbox" else "") +
         (if (rules.combat == CombatRules.UNBOUND) " · caps lifted" else "")
 
-/**
- * How the next world plays: a preset in one tap, or every dial for the
- * player who wants it. The pack's own suggestion is where it starts.
- */
+/** One dial as a row of steps, for fine-tuning a new world's rules. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun WorldSetupCard(
-    rules: WorldRules,
-    suggested: WorldRules,
-    onRulesChange: (WorldRules) -> Unit,
-    modifier: Modifier = Modifier,
-    startExpanded: Boolean = false,
-) {
-    val colors = StratumTheme.colors
-    var expanded by remember { mutableStateOf(startExpanded) }
-    val preset = presetOf(rules)
-    StratumPanel(modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Your world")
-            Spacer(Modifier.weight(1f))
-            StratumAction(label = if (expanded) "Done" else "Customise", onClick = { expanded = !expanded }, emphasis = ActionEmphasis.QUIET)
-        }
-        Text(
-            (preset?.description ?: "Custom rules.") + if (rules == suggested && preset == null) " Suggested by your packs." else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.inkMuted,
-        )
-        Spacer(Modifier.height(Space.small))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.small), verticalArrangement = Arrangement.spacedBy(Space.small)) {
-            RulesPresets.all.forEach { option ->
-                StratumChip(label = option.name, selected = option == preset, onClick = { onRulesChange(option.rules) })
-            }
-            if (suggested != WorldRules() && presetOf(suggested) == null) {
-                StratumChip(label = "Pack's own", selected = rules == suggested, onClick = { onRulesChange(suggested) })
-            }
-        }
-        if (expanded) {
-            Spacer(Modifier.height(Space.medium))
-            WorldDials.all.forEach { dial -> DialRow(dial, rules, onRulesChange) }
-        } else {
-            Spacer(Modifier.height(Space.small))
-            Text(summaryOf(rules), style = MaterialTheme.typography.labelSmall, color = colors.accent)
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun <T> DialRow(dial: Dial<T>, rules: WorldRules, onRulesChange: (WorldRules) -> Unit) {
+internal fun <T> DialRow(dial: Dial<T>, rules: WorldRules, onRulesChange: (WorldRules) -> Unit) {
     val colors = StratumTheme.colors
     val selected = dial.selected(rules)
     Column(Modifier.fillMaxWidth()) {
