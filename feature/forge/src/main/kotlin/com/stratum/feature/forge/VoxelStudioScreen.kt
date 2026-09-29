@@ -61,8 +61,8 @@ import com.stratum.engine.model.MicroModelRenderer
 
 /**
  * The model studio: a layer grid to draw on, a turning preview of the whole
- * model, and three ways to start -- a blank box, a building rolled from the
- * world's own generator, or a picture (an image model's output, a photo, a
+ * model, and four ways to start -- an Igbo mask with live dials, a blank box,
+ * a building rolled from the world's own generator, or a picture (an image model's output, a photo, a
  * sketch) turned into voxels. What is kept here can be placed from the play
  * screen's build tray, at a quarter block, in full detail.
  */
@@ -105,6 +105,11 @@ fun VoxelStudioScreen(
                 }
             }
             state.message?.let { Text(it, color = colors.accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { viewModel.dismissMessage() }) }
+        }
+
+        if (state.mask != null) {
+            Spacer(Modifier.height(Space.medium))
+            MaskDialsPanel(state, viewModel)
         }
 
         Spacer(Modifier.height(Space.medium))
@@ -156,6 +161,8 @@ fun VoxelStudioScreen(
         Spacer(Modifier.height(Space.medium))
         StratumPanel(Modifier.fillMaxWidth()) {
             SectionLabel("Start from")
+            MaskStartSection(state, viewModel)
+            Spacer(Modifier.height(Space.small))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
                 StratumChip("Blank 16³", selected = false, onClick = { viewModel.newModel(16, 16, 16) })
                 StratumChip("Blank 32³", selected = false, onClick = { viewModel.newModel(32, 32, 32) })
@@ -196,7 +203,7 @@ fun VoxelStudioScreen(
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.small)) {
                 state.library.forEach { m ->
                     Column(Modifier.width(96.dp).clickable { viewModel.open(m) }) {
-                        Preview(m, 0, m.hashCode(), 96)
+                        Preview(m, VoxelStudioViewModel.previewTurn(m), m.hashCode(), 96)
                         Text(m.name, color = if (m.id == model.id) colors.accent else colors.ink, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                         Text("Delete", color = colors.danger, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { viewModel.delete(m.id) })
                     }

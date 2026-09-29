@@ -103,13 +103,92 @@ a paint reads as the nearest sturdy stone block.
 - **Shape tools:** turn, flip, trim to content, ×2 and ½ scale, weather
   (colour noise for stone and earth that is not a flat fill), hollow, and
   grow the box.
-- **Three starts:** a blank box, a building rolled from the world's own
-  generator (any tradition, or one named), or a picture.
+- **Four starts:** an Igbo mask (see below), a blank box, a building rolled
+  from the world's own generator (any tradition, or one named), or a picture.
 - Keep it; it appears in the play screen's build tray. Undo holds 60 steps.
 
 Models are data (`MicroModel`: sizes, a palette of `#RRGGBB` or material
 names, and cells). They are stored one JSON file each, with run-length coded
 cells (`MicroModelCodec`), under `files/micro-models`.
+
+## Igbo masks
+
+A new player's model library is not empty: it holds ten Igbo masks, and the
+studio's first start is *An Igbo mask*. The masks are standing reliefs, 32 to
+72 microvoxels tall (8 to 18 blocks), facing -Y with a flat back, so they hang
+on a wall or stand on their stepped plinth.
+
+![The preset masks](screenshots/masks/presets-sheet.png)
+
+**The look.** The masks are designed like a 1920s fashion plate. Each uses
+bold flat colour fields, elegant curves, a strong silhouette, and a
+restrained palette with a single jewel accent. Every part is a smooth
+analytic shape: an ellipse, a capsule, a ring, or a Bezier tube for horns and
+tusks. The shapes are measured by signed distance and sampled once per voxel
+column, so outlines land on the grid as clean curves and crisp steps. There
+is no noise anywhere. Pattern appears only where it is drawn on purpose, in
+uli lines, zigzags, stripes, rings and dots. Each voxel column is a single
+colour, so the side of a raised brow shows the brow's own colour. The back
+voxel is bare wood.
+
+**The traditions** (`MaskTradition`). A roll leans toward its tradition's
+habits, and every dial stays free:
+
+| Tradition | What it brings |
+| --- | --- |
+| Agbogho Mmuo | the maiden spirit: whitened face, slit eyes, crested combs, uli linework |
+| Mgbedike | fierce and dark: horns, bared teeth, tubular eyes, heavy brow |
+| Okoroshi | the white Oma and black Ojo spirits: black and white with one accent |
+| Ogbodo Enyi | the elephant spirit: fan ears and tusks |
+| Ijele | the king of masks: a towering tiered crown |
+| Ikenga | sweeping ram horns and the ichi cuts of titled men |
+| Mbari | the painted-clay colours of the Mbari houses: sunbursts, discs, round eyes |
+
+**The dials** (`MaskGenome`) cover the following:
+
+- face shape: oval, heart, long, round or square jaw
+- width
+- brow
+- eyes: almond slits, closed crescents, round or tubular
+- nose: long straight, broad or arched
+- mouth: closed smile, bared teeth or pursed
+- ichi (0–5) and cheek marks (0–3)
+- crest: combs, tiers, horns, plumes, disc or none, plus its height and count
+- ears: small or elephant
+- tusks
+- beard: striped or pointed
+- colour scheme
+- symmetry: off moves the uli and marks to one side
+- ornament density, relief depth, feature height
+- size
+
+The eleven colour schemes (`MaskPalettes`) include *Kaolin & vermilion*,
+*Indigo & ochre*, *Jade & coral*, *Plum & saffron*, *Onyx & gold* and *Mbari*.
+Each has seven slots: face, line, crest, second, jewel, ivory and back wood.
+
+**In the studio**, you can pick a preset chip, or pick a tradition and tap
+🎲 **Randomize**. **Another like this** nudges a few dials of the current
+mask. While the model is a generated mask, a **Mask dials** panel sits under
+the preview, and every chip and slider carves the mask again live. Chips are
+undo steps; slider drags are not. Hand-editing a single voxel turns the mask
+into an ordinary model and hides the dials, because turning a dial would
+erase the edit.
+
+**Under the hood.** `IgboMaskGenerator.generate(genome)` is pure and
+deterministic: the same genome always carves the same mask, cell for cell.
+The genome is kept in the model's tags as one line of text (`MaskCodec`),
+so a kept mask reopens with its dials. `MaskGenome.random(seed, tradition)`
+and `mutate(seed, amount)` are deterministic in their seed. The starter
+masks are written once, into an empty library only, and a marker file
+(`MicroModelStore.seedOnce`) records that this happened. Deleted masks
+therefore stay deleted.
+
+Twelve random rolls:
+
+![Random masks](screenshots/masks/random-sheet.png)
+
+To refresh these pictures, set `STRATUM_MASK_SHOTS` to
+`docs/screenshots/masks` and run `:engine:model:cleanTest :engine:model:test`.
 
 ## Pictures into voxels
 
