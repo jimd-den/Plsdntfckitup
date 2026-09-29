@@ -468,6 +468,12 @@ object MicroScenePreview {
             val fast = com.stratum.engine.scene.MicroDetailMesher(generator)
             sb.appendLine("Meshing one 16x16x48 chunk from microvoxels: full detail %.1f ms (%.1f ms reading blocks one by one), half-block %.1f ms"
                 .format(time(fast, 1), time(com.stratum.engine.scene.MicroDetailMesher(slow), 1), time(fast, 2)))
+            // The same, scattering surfels as HIGH and ULTRA do; they are made on the meshing threads, never per frame.
+            val looks = listOf(QualityTier.HIGH, QualityTier.ULTRA).map { com.stratum.engine.scene.quality.DioramaLook.of(it) }
+            val scatter = looks.map { com.stratum.engine.scene.MicroDetailMesher(generator, scatterSurfels = true, surfelDensity = it.surfelDensity) }
+            val perChunk = scatter.map { m -> chunks.map { m.mesh(world, it)?.surfels?.count ?: 0 }.average() }
+            sb.appendLine("With surfels scattered: HIGH %.1f ms, ULTRA %.1f ms a chunk; %,.0f and %,.0f surfels a chunk (%.0f and %.0f KB)"
+                .format(time(scatter[0], 1), time(scatter[1], 1), perChunk[0], perChunk[1], perChunk[0] * 12 / 1024, perChunk[1] * 12 / 1024))
             sb.appendLine()
         }
         sb.appendLine("tier    renderer  detail  look     first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB   surfels drawn   surfel MB")

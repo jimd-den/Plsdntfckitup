@@ -1,0 +1,30 @@
+Microvoxel ARPG benchmark (seed 20260928, this JVM, 4 cores)
+
+Generation per 16x16x48 block chunk: microvoxel 3.8 ms (microvoxels + block conversion) vs the pack's default generator 2.1 ms
+
+Meshing one 16x16x48 chunk from microvoxels: full detail 9.4 ms (10.3 ms reading blocks one by one), half-block 4.9 ms
+
+tier    renderer  detail  look     first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB   surfels drawn   surfel MB
+LOW     blocks    -       on          12.4 ms      13.69 /  206.0 ms             193 ms           10,850        1.5               0        0.0
+LOW     near      8 blk   on          13.7 ms       5.28 /   22.8 ms              11 ms           22,252        3.1               0        0.0
+LOW     all       8+32    on          14.4 ms       1.75 /    6.5 ms              59 ms           27,716        3.9               0        0.0
+LOW     all       8+32    off         13.4 ms       1.97 /    6.8 ms              68 ms           27,716        3.9               0        0.0
+MEDIUM  blocks    -       on          17.8 ms       8.26 /   43.8 ms              30 ms           14,974        2.1               0        0.0
+MEDIUM  near      20 blk  on          25.6 ms       4.75 /   12.7 ms              38 ms           44,278        6.2               0        0.0
+MEDIUM  all       20+44   on          20.0 ms       4.47 /   42.8 ms             155 ms           45,446        6.4               0        0.0
+MEDIUM  all       20+44   off         18.8 ms       5.13 /   30.3 ms             127 ms           45,446        6.4               0        0.0
+HIGH    blocks    -       on          22.6 ms       9.79 /  114.2 ms             198 ms           14,974        2.1               0        0.0
+HIGH    near      32 blk  on          23.8 ms       4.85 /   15.0 ms             117 ms           61,010        8.5           4,161        0.8
+HIGH    all       32+56   on          24.2 ms       4.92 /   35.5 ms             757 ms           59,444        8.3           4,161        0.8
+HIGH    all       32+56   off         23.7 ms       4.53 /   25.0 ms            1124 ms           59,444        8.3               0        0.0
+ULTRA   blocks    -       on          27.0 ms       8.75 /   40.6 ms              37 ms           14,974        2.1               0        0.0
+ULTRA   near      48 blk  on          24.7 ms       5.17 /   26.3 ms             531 ms           64,492        9.0           8,309        2.9
+ULTRA   all       48+72   on          23.8 ms       5.16 /   27.1 ms             475 ms           64,492        9.0           8,309        2.9
+ULTRA   all       48+72   off         24.0 ms       5.31 /   17.0 ms             453 ms           64,492        9.0               0        0.0
+
+first frame = every chunk in view meshed at once (entering a world, behind a loading moment).
+walk = one block per frame diagonally for 96 blocks; the mesh cache paces off-screen chunks.
+near = microvoxels only within the detail ring, blocks beyond; all = true microvoxels to the view's edge, half-block past the ring.
+detail is meshed on background threads; catch-up = time after stopping until every chunk in view shows it.
+look = the diorama finish (DioramaLook) of the tier, or off; surfels are scattered while meshing and thinned per frame to the tier's budget.
+Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.

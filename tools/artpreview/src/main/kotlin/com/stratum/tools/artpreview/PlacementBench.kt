@@ -106,7 +106,8 @@ object PlacementBench {
 
         fun world(): StreamingWorld = StreamingWorld(content.registry, generator, config).also { it.focusOn(BlockPos(home.first, home.second, 0)) }
 
-        fun builder() = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.MEDIUM), microTerrain = generator)
+        // MEDIUM, the phone default; BENCH_TIER=HIGH shows the edit with surfels and the full diorama finish.
+        fun builder() = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.valueOf(System.getenv("BENCH_TIER") ?: "MEDIUM")), microTerrain = generator)
 
         fun camera(world: StreamingWorld, distance: Float = 34f): SceneCamera {
             val (x, y) = home

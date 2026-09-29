@@ -190,7 +190,7 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
         FOLIAGE(top = 0.3f, side = 0.22f, radius = 0.07f, radiusSpread = 0.02f, lift = 0.035f, stack = 1, tone = 0.2f, tilt = 0.5f),
         PEBBLE(top = 0.22f, side = 0.1f, radius = 0.058f, radiusSpread = 0.025f, lift = 0.02f, stack = 1, tone = 0.22f, tilt = 0.7f),
         GRIT(top = 0.3f, side = 0.08f, radius = 0.042f, radiusSpread = 0.012f, lift = 0.008f, stack = 1, tone = 0.12f, tilt = 0.3f),
-        STRAW(top = 0.36f, side = 0.3f, radius = 0.05f, radiusSpread = 0.012f, lift = 0.02f, stack = 1, tone = 0.2f, tilt = 0.45f),
+        STRAW(top = 0.36f, side = 0.3f, radius = 0.05f, radiusSpread = 0.012f, lift = 0.02f, stack = 1, tone = 0.12f, tilt = 0.2f),
         WEAR(top = 0.07f, side = 0.05f, radius = 0.045f, radiusSpread = 0.012f, lift = 0.006f, stack = 1, tone = 0.1f, tilt = 0.2f),
         NONE(0f, 0f, 0f, 0f, 0f, 0, 0f, 0f),
     }
@@ -341,6 +341,8 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
                 r *= PEBBLE_BLEACH; g *= PEBBLE_BLEACH; b *= PEBBLE_BLEACH
             }
             Kind.GRIT -> { r *= GRIT_BLEACH; g *= GRIT_BLEACH; b *= GRIT_BLEACH }
+            // Loose straws catch the light on a thatch; dark ones read as holes.
+            Kind.STRAW -> { r *= STRAW_BLEACH; g *= STRAW_BLEACH; b *= STRAW_BLEACH * 0.95f }
             else -> Unit
         }
         // A whisper of warm or cool, so neighbours differ in hue as well as value.
@@ -381,6 +383,7 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
         const val PATCH_MAX = 2f
         const val PEBBLE_BLEACH = 1.1f
         const val GRIT_BLEACH = 1.06f
+        const val STRAW_BLEACH = 1.12f
 
         private val NORMALS = floatArrayOf(1f, 0f, 0f, -1f, 0f, 0f, 0f, 1f, 0f, 0f, -1f, 0f, 0f, 0f, 1f, 0f, 0f, -1f)
 
