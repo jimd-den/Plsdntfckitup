@@ -72,11 +72,12 @@ object MicroWorldgen {
      * write a `terrain.passes` list without reading Kotlin.
      */
     val catalogue: Map<String, String> = linkedMapOf(
-        TerrainStage.ID to "The ground. Options: geology (africa: twenty African geological provinces -- laterite plateaus, granite inselbergs, rainforest basin, " +
+        TerrainStage.ID to "The ground. Options: geology (africa: twenty-four African geological provinces -- laterite plateaus, granite inselbergs, rainforest basin, " +
             "Guinean forest hills, Sahel floodplain, rift valley, basalt traps, volcanic necks, sandstone escarpment, erg, reg and hamada, salt pans, Kalahari, " +
-            "Namib, Karoo mesas, Drakensberg, Atlas folds, tsingy, coral coast, delta -- placed by climate and tectonics with their real rocks; a province id for " +
-            "that province everywhere; classic: generic hills), home (province id at the origin), seaLevel, scale, height, mountains (0..2, classic), " +
-            "terrace (classic), maxHeight, minHeight (microvoxels; 4 per block).",
+            "Namib, Karoo mesas, Drakensberg, Atlas folds, tsingy, coral coast, delta, canyon country, dune cordon and lagoon, montane plateau, basement shield -- " +
+            "placed by climate and tectonics with their real rocks; a province id for that province everywhere; classic: generic hills), home (province id at the " +
+            "origin), seaLevel, scale, height, mountains (0..2, classic), terrace (classic), maxHeight, minHeight (microvoxels; 4 per block); with a geology, " +
+            "the simulated processes' dials, each 0..2: erosion (valleys and fans), rivers (0 none), dunes, scree, rockDetail (dykes, veins, ore, nodules).",
         GeoFeaturesStage.ID to "With geology: termite mounds, balancing-rock tors and sandstone arches where the provinces have them. Options: density (0..2), termites, tors, arches (true/false).",
         CavesStage.ID to "Tunnels under the surface. Options: threshold (0..1, lower = more cave), minDepth.",
         CityPlanStage.ID to "Towns on an endless grid of regions, flattening the land under them. Options: density (0..1), regionSize, styles (terrace,villa,tower), maxFloors.",

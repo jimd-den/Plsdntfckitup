@@ -259,17 +259,17 @@ object Landforms {
     }
 
     /** The Kalahari: red sand plains with long, low, grassed fossil dunes and small calcrete pans. */
-    fun kalahari(seed: Long) = Landform { x, y, grain, n ->
+    fun kalahari(seed: Long, dunes: Float = 1f) = Landform { x, y, grain, n ->
         val u = Shape.across(x, y, grain)
-        val dunes = (0.5f + 0.5f * sin(u / 95f * 6.2832f + n.fbm(x * 0.002f, y * 0.002f, 2) * 2f)).pow(2f) * 9f
-        var h = 4f + n.fbm(x * 0.004f, y * 0.004f, 3) * 4f + dunes
+        val ridges = (0.5f + 0.5f * sin(u / 95f * 6.2832f + n.fbm(x * 0.002f, y * 0.002f, 2) * 2f)).pow(2f) * 9f * dunes
+        var h = 4f + n.fbm(x * 0.004f, y * 0.004f, 3) * 4f + ridges
         h -= 6f * Shape.smooth(0.32f, 0.4f, n.fbm(x * 0.005f + 17f, y * 0.005f, 2))
         h
     }
 
     /** The Namib: the world's tallest dunes, red with iron, beside gravel plains -- Sossusvlei. */
-    fun namib(seed: Long): Landform {
-        val dunes = erg(seed, amplitude = 64f, wavelength = 220f)
+    fun namib(seed: Long, dunesScale: Float = 1f): Landform {
+        val dunes = erg(seed, amplitude = 64f * dunesScale, wavelength = 220f)
         return Landform { x, y, grain, n ->
             val sea = Shape.smooth(-0.1f, 0.15f, n.fbm(x * 0.0009f + 80f, y * 0.0009f, 2))
             3f + n.fbm(x * 0.01f, y * 0.01f, 2) * 2f + sea * (dunes.relief(x, y, grain, n) - 2f)
@@ -363,5 +363,73 @@ object Landforms {
             if (t < 0.15f) body - (0.15f - t) * 40f else body
         }
         max(hills, max(hills * 0.4f + neck, hills * 0.5f + cone))
+    }
+
+    /**
+     * Canyon country: a high, flat, stony plateau cut by one deep, winding
+     * canyon, its walls stepped where hard beds hold up benches -- an outer
+     * canyon, a bench, and an inner gorge with the river on its floor --
+     * and shorter side canyons feeding it. The Fish River Canyon (Namibia),
+     * the Blyde River Canyon (South Africa), the Tekezé gorge (Ethiopia).
+     */
+    fun canyon(seed: Long) = Landform { x, y, _, n ->
+        val plateau = 46f + n.fbm(x * 0.004f, y * 0.004f, 3) * 5f
+        // The main canyon follows a warped contour, so it meanders in tight loops as incised rivers do.
+        val (wx, wy) = n.warp(x, y, 150f, 0.0026f)
+        val g = abs(n.fbm(wx * 0.0011f + 13f, wy * 0.0011f - 7f, 3))
+        val outer = 1f - Shape.smooth(0.028f, 0.075f, g)
+        val inner = 1f - Shape.smooth(0.006f, 0.02f, g)
+        // Side canyons: shallower, narrower, and only near the main one.
+        val side = abs(n.fbm(wx * 0.004f - 3f, wy * 0.004f + 21f, 2))
+        val feeder = (1f - Shape.smooth(0.012f, 0.04f, side)) * (1f - Shape.smooth(0.07f, 0.2f, g))
+        val cut = max(outer * 24f + inner * 20f, feeder * 18f)
+        Shape.steps((plateau - cut).coerceAtLeast(3f), 6f, 0.35f)
+    }
+
+    /**
+     * A coastal dune cordon: a barrier of tall, forested sand ridges parallel
+     * to the shore, a long lagoon trapped behind it, and older, lower ridges
+     * inland. The Maputaland and Wild Coast cordons (Mozambique, South
+     * Africa) and the lagoons of Lagos (Nigeria), Ébrié (Côte d'Ivoire) and
+     * Keta (Ghana).
+     */
+    fun duneCordon(seed: Long, dunes: Float = 1f) = Landform { x, y, grain, n ->
+        val u = Shape.across(x, y, grain) + n.fbm(Shape.along(x, y, grain) * 0.0015f, 3f, 2) * 180f
+        val period = 1500f
+        val p = u / period - floor(u / period)
+        val ridges = (0.5f + 0.5f * cos(u / 38f * 6.2832f + n.fbm(x * 0.006f, y * 0.006f, 2) * 2.5f)).pow(1.6f)
+        val cordon = Shape.smooth(0.02f, 0.08f, p) * (1f - Shape.smooth(0.22f, 0.3f, p))
+        val lagoon = Shape.smooth(0.3f, 0.36f, p) * (1f - Shape.smooth(0.5f, 0.58f, p))
+        val inland = Shape.smooth(0.56f, 0.7f, p)
+        2f + cordon * (8f + (14f + 10f * n.fbm(x * 0.003f, y * 0.003f, 2)) * ridges * dunes) -
+            lagoon * 9f + inland * (5f + ridges * 4f * dunes + n.fbm(x * 0.008f, y * 0.008f, 2) * 3f)
+    }
+
+    /**
+     * A montane plateau: high, cool, rolling grassland with granite knolls,
+     * forest in the valleys and a stream in every fold -- the Nyika plateau
+     * (Malawi), the Jos Plateau (Nigeria), the Bamenda highlands (Cameroon),
+     * the Aberdares (Kenya).
+     */
+    fun montanePlateau(seed: Long) = Landform { x, y, _, n ->
+        val rolling = 16f + n.erodedFbm(x * 0.0045f, y * 0.0045f, 5, 1.1f) * 30f + n.fbm(x * 0.018f, y * 0.018f, 2) * 2.5f
+        val knoll = Shape.features(seed, x, y, 360f, 0.35f, 1101) { t, size, _ -> (14f + 16f * size) * (1f - t * t).pow(0.6f) }
+        max(rolling, rolling * 0.6f + knoll)
+    }
+
+    /**
+     * A basement shield: the worn-flat roots of the oldest crust, low and
+     * rolling, crossed by long straight ridges of quartzite and banded iron
+     * where greenstone belts are folded in. The Zimbabwe craton, the
+     * Barberton belt (South Africa), the Man shield (Liberia, Guinea, Côte
+     * d'Ivoire) with the iron ridges of the Nimba.
+     */
+    fun shield(seed: Long) = Landform { x, y, grain, n ->
+        val plain = 5f + n.erodedFbm(x * 0.005f, y * 0.005f, 4, 0.8f) * 12f
+        val v = Shape.along(x, y, grain)
+        val u = Shape.across(x, y, grain) + n.fbm(v * 0.001f, 1f, 2) * 220f
+        val belt = Shape.smooth(0.0f, 0.25f, n.fbm(x * 0.0009f + 70f, y * 0.0009f - 40f, 2))
+        val ridge = max(0f, cos(u / 150f * 6.2832f)).pow(8f) * (18f + 12f * n.fbm(v * 0.003f, 4f, 2))
+        plain + belt * ridge
     }
 }

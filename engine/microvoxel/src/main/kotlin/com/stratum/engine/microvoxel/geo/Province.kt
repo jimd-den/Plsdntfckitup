@@ -107,6 +107,13 @@ data class Niche(
  * [places] names real places that look like this, which is both the
  * reference the landform was built against and a promise to players who
  * know them.
+ *
+ * The land itself is [processes]: an ordered list of [Step]s naming
+ * processes in [GeoProcesses] -- a landform first, then whatever works over
+ * it (barchans, sinkholes, faults), the province's share of the simulated
+ * processes (erosion, rivers, scree), and what cuts its rock (dykes, veins,
+ * cross-bedding). A pack makes a new kind of country by listing steps, and
+ * a new kind of geology by registering a process.
  */
 data class Province(
     val id: String,
@@ -116,7 +123,7 @@ data class Province(
     val niche: Niche,
     /** Microvoxels above the regional level the province's floor sits at. */
     val base: Float,
-    val landform: Landform,
+    val processes: List<Step>,
     val strata: Strata,
     val surface: Surface,
     /** How much grows here, 0 (salt, dune, lava) to 1 (rainforest). Scales every vegetation stage. */
@@ -132,9 +139,47 @@ data class Province(
     }
 }
 
-/** A province with its names turned into palette ids, once per world. */
-class ResolvedProvince(val province: Province, private val palette: MaterialPalette) {
+/** A province with its names turned into palette ids and its steps into processes, once per world. */
+class ResolvedProvince(
+    val province: Province,
+    private val palette: MaterialPalette,
+    seed: Long = 0L,
+    dials: GeoDials = GeoDials(),
+) {
     private fun id(name: String) = palette.id(name)
+
+    private val processes: List<GeoProcess> = ProcessContext(seed, palette, dials).let { c -> province.processes.map { GeoProcesses.create(it, c) } }
+
+    private val reliefs: Array<ReliefProcess> = processes.filterIsInstance<ReliefProcess>().toTypedArray()
+
+    /** What cuts this province's rock, in order. */
+    val rocks: Array<RockProcess> = processes.filterIsInstance<RockProcess>().toTypedArray()
+
+    private fun share(sim: String) = processes.filterIsInstance<SimShare>().lastOrNull { it.sim == sim }?.options
+
+    /** How readily running water cuts this land (0 for none: sand, salt, lava). */
+    val erosion: Float = share(Sims.EROSION)?.float("strength", 1f) ?: 0f
+
+    /** How much of what the water carries it drops as fans where its slope eases. */
+    val deposit: Float = share(Sims.EROSION)?.float("deposit", 1f) ?: 0f
+
+    /** How much water the land sheds into its streams, per lattice node. */
+    val rain: Float = share(Sims.RIVERS)?.float("rain", 1f) ?: 0f
+
+    /** Streams here run only after rain: dry wadis of gravel. */
+    val dry: Boolean = rain < (share(Sims.RIVERS)?.float("wet", 0.35f) ?: 0.35f)
+
+    /** How much rubble gathers at the foot of this province's cliffs. */
+    val scree: Float = share(Sims.SCREE)?.float("amount", 1f) ?: 0f
+
+    init { require(reliefs.isNotEmpty()) { "Province ${province.id} has no landform among its steps" } }
+
+    /** The landform's relief at a point: every relief step in order, each over the last. */
+    fun relief(x: Float, y: Float, grain: Float, n: com.stratum.engine.microvoxel.gen.Noise): Float {
+        var r = 0f
+        for (p in reliefs) r = p.relief(x, y, grain, r, n)
+        return r
+    }
 
     val ground = id(province.surface.ground)
     val slope = id(province.surface.slope)
