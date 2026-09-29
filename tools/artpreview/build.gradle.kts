@@ -143,3 +143,21 @@ tasks.register<JavaExec>("placementBench") {
     rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
   )
 }
+
+/**
+ * Mask spirits through the scene pipeline -- turntables, motion strips and an
+ * in-world fight -- into docs/screenshots/mask-spirits:
+ *   ./gradlew :tools:artpreview:maskSpiritPreview
+ */
+tasks.register<JavaExec>("maskSpiritPreview") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.MaskSpiritPreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  maxHeapSize = "1500m"
+  args = listOf(
+    (project.findProperty("out") as String?) ?: "docs/screenshots/mask-spirits",
+    (project.findProperty("only") as String?) ?: "all",
+  )
+}

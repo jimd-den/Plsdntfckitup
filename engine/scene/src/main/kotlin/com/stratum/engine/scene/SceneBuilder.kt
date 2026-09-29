@@ -213,6 +213,9 @@ class SceneBuilder(
     private val glows = MeshBuilder(MaterialKind.GLOW)
     private val actorMesh = MeshBuilder(MaterialKind.OPAQUE)
 
+    /** Draws floating mask spirits: their smooth bodies, auras, trails and shields. */
+    private val spiritStage = SpiritStage()
+
     /** Arrays for the per-frame batches; the backend returns them through [SceneFrame.release]. */
     private val recycler = MeshRecycler()
 
@@ -251,6 +254,8 @@ class SceneBuilder(
         effects: List<ActiveEffect> = emptyList(),
         /** Projectiles in flight, pulsing ground and wind-ups; see [CombatMark]. */
         marks: List<CombatMark> = emptyList(),
+        /** Floating mask spirits, posed by whoever animates them; see [SpiritStage]. */
+        spirits: List<SpiritInstance> = emptyList(),
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
@@ -337,6 +342,7 @@ class SceneBuilder(
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
         marks.forEach { mark(it, camera, flashes, time.elapsedSeconds) }
+        if (spirits.isNotEmpty()) spiritStage.draw(spirits, camera, actorMesh, cutout, glows, flashes)
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
             ?.takeIf { lighting.heroLight > 0f }

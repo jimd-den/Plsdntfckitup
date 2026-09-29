@@ -126,8 +126,17 @@ object IgboMaskGenerator {
     /** A stable id for a genome: the same dials give the same id, so keeping it twice overwrites rather than duplicates. */
     fun defaultId(genome: MaskGenome): String = "mask-" + (MaskCodec.encode(genome.normalised()).hashCode().toLong() and 0xFFFFFFFFL).toString(36)
 
-    /** The height (in face units from the back board) and slot of one front-view point. */
-    internal class Cell { var h = 0f; var slot = 0 }
+    /**
+     * The height (in face units from the back board) and slot of one
+     * front-view point, and the glow channel it lights with when the mask is
+     * a spirit: 0 none, then [GLOW_EYES], [GLOW_LINES], [GLOW_CREST] (the
+     * scene's `GlowChannel` numbering). The voxel model ignores [glow].
+     */
+    internal class Cell { var h = 0f; var slot = 0; var glow = 0 }
+
+    internal const val GLOW_EYES = 1
+    internal const val GLOW_LINES = 2
+    internal const val GLOW_CREST = 3
 
     /**
      * The mask's front view as a function of a point. Built once per genome
@@ -136,7 +145,16 @@ object IgboMaskGenerator {
      * Points are in face units: u right, v up, the face spanning v -1..1.
      * [pixel] is one voxel in face units, the floor for every line's width.
      */
-    internal class Design(private val g: MaskGenome, private val p: MaskPalette, private val pixel: Float) {
+    internal class Design(
+        private val g: MaskGenome,
+        private val p: MaskPalette,
+        private val pixel: Float,
+        /**
+         * True for a spirit: the mask floats free, so it has no neck and no
+         * plinth to stand on.
+         */
+        private val floating: Boolean = false,
+    ) {
 
         // ---- Proportions -------------------------------------------------
         /** Half the face's width at its widest. */
@@ -178,13 +196,14 @@ object IgboMaskGenerator {
         /** Horns: a cubic Bezier from the temple, out, up and curling back in -- a lyre. */
         private val horn = Tube(
             floatArrayOf(w * 0.5f, 0.7f, w * 1.45f + 0.2f, 0.66f, w * 1.3f + 0.3f, 1.15f + 0.45f * ch, w * 0.85f + 0.12f, 1.3f + 0.7f * ch),
-            r0 = 0.17f, r1 = 0.055f,
+            // A spirit's horns are bolder: at its mesh's size a slender horn frays.
+            r0 = if (floating) 0.2f else 0.17f, r1 = if (floating) 0.1f else 0.055f,
         )
 
         /** Tusks: from the corners of the mouth, down and sweeping out and up. */
         private val tusk = Tube(
             floatArrayOf(0.14f, my + 0.02f, 0.3f, my - 0.5f, 0.62f, my - 0.55f, 0.8f, my - 0.18f),
-            r0 = 0.11f, r1 = 0.045f,
+            r0 = if (floating) 0.13f else 0.11f, r1 = if (floating) 0.07f else 0.045f,
         )
 
         /** The face's own outline, top to bottom: half its width at height v. */
@@ -223,7 +242,7 @@ object IgboMaskGenerator {
         }
 
         fun sample(u: Float, v: Float, c: Cell) {
-            c.h = 0f; c.slot = 0
+            c.h = 0f; c.slot = 0; c.glow = 0
             // Everything bilateral is drawn at |u|; only the deliberately
             // one-sided ornaments look at the sign.
             val x = abs(u)
@@ -246,7 +265,7 @@ object IgboMaskGenerator {
             if (g.crest == CrestForm.HORNS) horns(x, v, c)
 
             // ---- Neck and plinth: a stepped Deco base the mask stands on --
-            plinth(x, v, c)
+            if (!floating) plinth(x, v, c)
 
             // ---- The face -------------------------------------------------
             val hw = halfWidth(v)
@@ -276,19 +295,22 @@ object IgboMaskGenerator {
         // ---- Composition verbs ------------------------------------------
 
         /** Covers the point outright, whatever was there. */
-        private fun set(c: Cell, h: Float, slot: Int) { c.h = h; c.slot = slot }
+        private fun set(c: Cell, h: Float, slot: Int) { c.h = h; c.slot = slot; c.glow = 0 }
 
         /** Stands on top if it is higher than what is there. */
-        private fun raise(c: Cell, h: Float, slot: Int) { if (h > c.h) { c.h = h; c.slot = slot } }
+        private fun raise(c: Cell, h: Float, slot: Int) { if (h > c.h) { c.h = h; c.slot = slot; c.glow = 0 } }
 
         /** Adds height over what is there (something must be), in its own colour. */
-        private fun lift(c: Cell, dh: Float, slot: Int) { if (c.h > 0f) { c.h += dh; c.slot = slot } }
+        private fun lift(c: Cell, dh: Float, slot: Int) { if (c.h > 0f) { c.h += dh; c.slot = slot; c.glow = 0 } }
 
         /** Repaints what is there without changing its height. */
-        private fun paint(c: Cell, slot: Int) { if (c.h > 0f) c.slot = slot }
+        private fun paint(c: Cell, slot: Int) { if (c.h > 0f) { c.slot = slot; c.glow = 0 } }
 
         /** Cuts down into what is there, never through the board. */
-        private fun carve(c: Cell, dh: Float, slot: Int) { if (c.h > 0f) { c.h = max(0.06f, c.h - dh); c.slot = slot } }
+        private fun carve(c: Cell, dh: Float, slot: Int) { if (c.h > 0f) { c.h = max(0.06f, c.h - dh); c.slot = slot; c.glow = 0 } }
+
+        /** Marks what was just drawn as lighting with [channel] when the mask is a spirit. */
+        private fun shine(c: Cell, channel: Int) { if (c.h > 0f) c.glow = channel }
 
         // ---- Crests -----------------------------------------------------
 
@@ -315,7 +337,7 @@ object IgboMaskGenerator {
                 if (d < 0f) {
                     raise(c, 0.2f * k + 0.08f * min(1f, -d / 0.06f), CREST)
                     val inner = d + 2.2f * line
-                    if (inner < 0f && inner > -line * 1.05f) paint(c, ACCENT)
+                    if (inner < 0f && inner > -line * 1.05f) { paint(c, ACCENT); shine(c, GLOW_CREST) }
                 }
             }
         }
@@ -342,7 +364,7 @@ object IgboMaskGenerator {
                 val period = 0.18f
                 val tri = abs(((x / period) % 1f) - 0.5f) * 2f
                 val zig = v0 + th * 0.5f + (tri - 0.5f) * th * 0.36f
-                if (abs(v - zig) < line * 0.75f && x < hwTier - line * 1.5f) paint(c, if (band == CREST) ACCENT else lineOnCrest)
+                if (abs(v - zig) < line * 0.75f && x < hwTier - line * 1.5f) { paint(c, if (band == CREST) ACCENT else lineOnCrest); shine(c, GLOW_CREST) }
                 // A crisp ledge line at the top of each tier.
                 if (v1 - v < line * 1.1f) paint(c, INK.takeIf { p.ink != p.colours()[band - 1] } ?: ACCENT)
             }
@@ -351,6 +373,7 @@ object IgboMaskGenerator {
             val d = len(x, v - (topV + r * 0.8f)) - r
             if (d < 0f) {
                 raise(c, 0.28f * k, ACCENT)
+                shine(c, GLOW_CREST)
                 if (d > -line * 1.2f) paint(c, CREST)
             }
         }
@@ -369,7 +392,7 @@ object IgboMaskGenerator {
             val nBands = if (g.ornament < 0.3f) 1 else if (g.ornament < 0.65f) 2 else 4
             for (b in 0 until nBands) {
                 val t = bands[if (nBands == 1) 1 else if (nBands == 2) b * 2 else b]
-                if (abs(hit.t - t) < 0.022f + pixel * 0.35f) paint(c, beardStripe)
+                if (abs(hit.t - t) < 0.022f + pixel * 0.35f) { paint(c, beardStripe); shine(c, GLOW_CREST) }
             }
         }
 
@@ -397,7 +420,7 @@ object IgboMaskGenerator {
                 }
                 // The jewel at the tip.
                 val tx = ox + dx * (r0 + l + 0.02f); val ty = oy + dy * (r0 + l + 0.02f)
-                if (len(x - tx, v - ty) < 0.075f + 0.02f * ch) raise(c, 0.26f * k, ACCENT)
+                if (len(x - tx, v - ty) < 0.075f + 0.02f * ch) { raise(c, 0.26f * k, ACCENT); shine(c, GLOW_CREST) }
             }
         }
 
@@ -410,15 +433,15 @@ object IgboMaskGenerator {
             raise(c, 0.12f * k + 0.04f, CREST)
             val band = 0.16f
             if (d < r - band) paint(c, discField)
-            if (abs(d - (r - band - 0.06f)) < line * 0.55f) paint(c, ACCENT)
-            if (g.ornament > 0.35f) {
+            if (abs(d - (r - band - 0.06f)) < line * 0.55f) { paint(c, ACCENT); shine(c, GLOW_CREST) }
+            if (g.ornament > 0.35f && !floating) {
                 // Dots in the outer band, evenly round, drawn on the right and mirrored.
                 val n = 24
                 val a = atan2(v - cy, x)
                 val stepA = (2 * PI / n).toFloat()
                 val nearest = (floor(a / stepA + 0.5f)) * stepA
                 val px = cos(nearest) * (r - band / 2); val py = cy + sin(nearest) * (r - band / 2)
-                if (len(x - px, v - py) < max(0.035f, pixel * 0.8f)) paint(c, if (p.ivory != p.crest) IVORY else ACCENT)
+                if (len(x - px, v - py) < max(0.035f, pixel * 0.8f)) { paint(c, if (p.ivory != p.crest) IVORY else ACCENT); shine(c, GLOW_CREST) }
             }
         }
 
@@ -485,12 +508,14 @@ object IgboMaskGenerator {
             val lx = (x - ex) * cos(tilt) + (v - ey) * sin(tilt)
             val ly = -(x - ex) * sin(tilt) + (v - ey) * cos(tilt)
             val halfLen = 0.17f * (w / 0.66f).coerceIn(0.8f, 1.2f)
+            // A pupil a spirit's mesh can hold, and that lights up as a jewel.
+            val pupil = if (floating) 0.065f + pixel * 0.1f else 0.045f + pixel * 0.3f
             when (form) {
                 EyeForm.ALMOND -> {
                     val lid = almond(lx, ly, halfLen, 0.085f)
                     if (lid < 0f) {
                         lift(c, 0.05f * k, FACE)
-                        if (almond(lx, ly + 0.004f, halfLen * 0.86f, max(0.022f, line * 0.62f)) < 0f) carve(c, 0.04f * k, INK)
+                        if (almond(lx, ly + 0.004f, halfLen * 0.86f, max(0.022f, line * 0.62f)) < 0f) { carve(c, 0.04f * k, INK); shine(c, GLOW_EYES) }
                     }
                 }
                 EyeForm.CRESCENT -> {
@@ -498,7 +523,7 @@ object IgboMaskGenerator {
                     if (lid < 0f) lift(c, 0.05f * k, FACE)
                     // A line sagging to a closed curve.
                     val d = arc(lx, ly, 0f, 0.13f, 0.16f, line * 0.6f, (PI * 1.2).toFloat(), (PI * 1.8).toFloat())
-                    if (d < 0f) paint(c, INK)
+                    if (d < 0f) { paint(c, INK); shine(c, GLOW_EYES) }
                 }
                 EyeForm.ROUND -> {
                     val d = len(lx, ly)
@@ -506,7 +531,7 @@ object IgboMaskGenerator {
                     if (d < r) {
                         lift(c, 0.06f * k, if (p.ivory != p.face) IVORY else SECOND)
                         if (d > r - line * 1.1f) paint(c, INK)
-                        if (d < 0.045f + pixel * 0.3f) { carve(c, 0.02f, INK) }
+                        if (d < pupil) { carve(c, 0.02f, INK); shine(c, GLOW_EYES) }
                     }
                 }
                 EyeForm.TUBULAR -> {
@@ -515,7 +540,7 @@ object IgboMaskGenerator {
                     if (d < r) {
                         lift(c, 0.2f * k, FACE)
                         if (d > r - line * 1.1f) paint(c, lipColour)
-                        if (d < 0.045f + pixel * 0.3f) carve(c, 0.26f * k, INK)
+                        if (d < pupil) { carve(c, 0.26f * k, INK); shine(c, GLOW_EYES) }
                     }
                 }
             }
@@ -600,7 +625,7 @@ object IgboMaskGenerator {
             for (i in 0 until n) {
                 val cx = (i - (n - 1) / 2f) * spacing
                 // Symmetric by construction: the positions are mirrored about 0.
-                if (abs(u - cx) < line * 0.5f) carve(c, 0.025f, INK)
+                if (abs(u - cx) < line * 0.5f) { carve(c, 0.025f, INK); shine(c, GLOW_LINES) }
             }
         }
 
@@ -610,7 +635,7 @@ object IgboMaskGenerator {
             for (i in 0 until g.cheekMarks) {
                 val oy = cy - i * max(0.07f, pixel * 2.6f)
                 val d = capsule(x, v, cx - 0.06f, oy, cx + 0.07f, oy, line * 0.55f)
-                if (d < 0f) lift(c, 0.02f, cheekColour)
+                if (d < 0f) { lift(c, 0.02f, cheekColour); shine(c, GLOW_LINES) }
             }
         }
 
@@ -624,24 +649,26 @@ object IgboMaskGenerator {
             val o = g.ornament
             if (o > 0.15f && g.ichi == 0) {
                 // The forehead line, from the hairline to the bridge.
-                if (x < line * 0.5f && v > ey + 0.26f && v < 0.72f) paint(c, INK)
+                if (x < line * 0.5f && v > ey + 0.26f && v < 0.72f) { paint(c, INK); shine(c, GLOW_LINES) }
             }
             if (!thisSide) return
             if (o > 0.35f && fine) {
                 val tx = ex + 0.14f; val ty = ey + 0.36f
                 val d = len(x - tx, v - ty)
-                if (abs(d - 0.07f) < line * 0.5f || d < line * 0.6f) paint(c, INK)
+                if (abs(d - 0.07f) < line * 0.5f || d < line * 0.6f) { paint(c, INK); shine(c, GLOW_LINES) }
             }
-            if (o > 0.55f) {
+            // A spirit keeps only the bold strokes: its mesh is a few hundred
+            // facets across, and a fine tear line there reads as a smudge.
+            if (o > 0.55f && !floating) {
                 val d = arc(x, v, ex + 0.24f, ey - 0.12f, 0.2f, line * 0.5f, (PI * 0.95).toFloat(), (PI * 1.4).toFloat())
-                if (d < 0f) paint(c, INK)
+                if (d < 0f) { paint(c, INK); shine(c, GLOW_LINES) }
             }
             if (o > 0.75f && fine) {
                 for (i in 0 until 4) {
                     val dv = my + 0.12f - i * 0.1f
                     val hw = halfWidth(dv)
                     if (hw <= 0.1f) continue
-                    if (len(x - (hw - 0.09f), v - dv) < max(0.022f, line * 0.6f)) paint(c, INK)
+                    if (len(x - (hw - 0.09f), v - dv) < max(0.022f, line * 0.6f)) { paint(c, INK); shine(c, GLOW_LINES) }
                 }
             }
         }
@@ -650,7 +677,7 @@ object IgboMaskGenerator {
             val hit = tusk.nearest(x, v)
             if (hit.d >= 0f) return
             set(c, rim + bulge + 0.06f * k, IVORY)
-            if (hit.t < 0.1f && g.ornament > 0.3f) paint(c, ACCENT)
+            if (hit.t < 0.1f && g.ornament > 0.3f) { paint(c, ACCENT); shine(c, GLOW_CREST) }
         }
 
         /** A striped beard: flat vertical bands, like a Deco awning. */
