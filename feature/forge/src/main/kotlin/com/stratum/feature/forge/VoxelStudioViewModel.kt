@@ -64,6 +64,8 @@ data class VoxelStudioUiState(
     val mask: MaskGenome? = null,
     /** The masquerade tradition 🎲 Randomize rolls in; null for any. */
     val maskTradition: MaskTradition? = null,
+    /** The mask the hero wears in play, as a genome code; null for the default. */
+    val wornMask: String? = null,
     val message: String? = null,
     /** Bumped on every change, so the preview redraws. */
     val revision: Int = 0,
@@ -87,9 +89,13 @@ class VoxelStudioViewModel(
     val traditions: List<Pair<String, String>> = emptyList(),
     /** Told when a model is saved or deleted, so the play screen's list follows. */
     private val onLibraryChanged: () -> Unit = {},
+    /** Makes a mask the hero's own face in play, by genome code. */
+    private val onWearMask: (String) -> Unit = {},
+    /** The mask the hero wears now, as a genome code. */
+    wornMask: String? = null,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(VoxelStudioUiState(library = storage.all()))
+    private val _state = MutableStateFlow(VoxelStudioUiState(library = storage.all(), wornMask = wornMask))
     val state: StateFlow<VoxelStudioUiState> = _state.asStateFlow()
 
     private val undo = ArrayDeque<MicroModel>()
@@ -109,6 +115,17 @@ class VoxelStudioViewModel(
     fun setImageHeight(h: Int) = _state.update { it.copy(imageHeight = h.coerceIn(8, MicroModel.MAX_SIDE)) }
     fun setTradition(id: String?) = _state.update { it.copy(tradition = id) }
     fun dismissMessage() = _state.update { it.copy(message = null) }
+
+    /**
+     * Wears the mask being edited as the hero: the characters are masks, and
+     * this is the player's. In play the mask floats and glows as a spirit.
+     */
+    fun wearMask() {
+        val mask = _state.value.mask ?: return
+        val code = com.stratum.engine.model.mask.MaskCodec.encode(mask.normalised())
+        onWearMask(code)
+        _state.update { it.copy(wornMask = code, message = "You wear \"${mask.name}\" — your hero floats as this mask in play") }
+    }
 
     /** A tap on cell (x, y) of the current layer. */
     fun tapCell(x: Int, y: Int) {
@@ -335,10 +352,12 @@ class VoxelStudioViewModel(
             generateBuilding: (Long, String?) -> MicroModel,
             traditions: List<Pair<String, String>>,
             onLibraryChanged: () -> Unit,
+            onWearMask: (String) -> Unit = {},
+            wornMask: String? = null,
         ) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                VoxelStudioViewModel(storage, generateBuilding, traditions, onLibraryChanged) as T
+                VoxelStudioViewModel(storage, generateBuilding, traditions, onLibraryChanged, onWearMask, wornMask) as T
         }
     }
 }

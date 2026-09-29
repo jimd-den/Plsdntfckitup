@@ -139,6 +139,9 @@ private fun Session(
                 resume = resumed,
                 worlds = graph.worlds.library.repository,
                 slot = (launch as? WorldLaunch.New)?.identity,
+                heroMask = loadout.heroMask,
+                maskCharacters = loadout.maskCharacters,
+                saveMaskCharacters = app.game::chooseMaskCharacters,
             ),
         )
         ImmersiveMode()

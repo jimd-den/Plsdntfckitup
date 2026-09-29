@@ -10,6 +10,8 @@ dependencies {
   implementation(project(":engine:world"))
   implementation(project(":engine:render"))
   implementation(project(":engine:scene"))
+  // The characters are masks: the mask genomes, their smooth spirit meshes and the director that moves them.
+  implementation(project(":engine:model"))
   implementation(project(":core:designsystem"))
 
   implementation(libs.androidx.core.ktx)

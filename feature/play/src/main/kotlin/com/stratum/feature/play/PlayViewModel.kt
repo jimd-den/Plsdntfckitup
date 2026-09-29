@@ -139,7 +139,15 @@ class PlayViewModel(
     saveScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /** Ids for worlds this screen starts itself: a new run, or a tier opened. */
     private val newWorldId: () -> String = { java.util.UUID.randomUUID().toString() },
+    /** The mask the hero wears as a mask spirit, as a genome code; null for the first preset. */
+    private val heroMask: String? = null,
+    /** Characters drawn as floating mask spirits (true) or as their sprites (false). */
+    maskCharacters: Boolean = true,
+    /** Keeps the masks-or-sprites choice for next time. */
+    private val saveMaskCharacters: (Boolean) -> Unit = {},
 ) : ViewModel() {
+
+    private val initialMaskCharacters = maskCharacters
 
     private val initialQuality = quality
 
@@ -269,6 +277,15 @@ class PlayViewModel(
     fun chooseQuality(tier: QualityTier?) {
         _state.value = _state.value.copy(quality = tier)
         saveQuality(tier)
+    }
+
+    /**
+     * Draws the characters as floating mask spirits, or as their sprite art.
+     * Presentation only: nothing about the fight changes.
+     */
+    fun chooseMaskCharacters(on: Boolean) {
+        _state.value = _state.value.copy(maskCharacters = on)
+        saveMaskCharacters(on)
     }
 
     /**
@@ -775,6 +792,9 @@ class PlayViewModel(
             brush = { r, m -> changeBrush(r, m) }, turnModel = ::turnModel, placeModel = ::placeModel,
         ),
         quality = initialQuality,
+        maskCharacters = initialMaskCharacters,
+        heroMask = heroMask,
+        masks = MaskLooks.of(content),
         checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
@@ -1546,6 +1566,9 @@ class PlayViewModel(
             worlds: WorldSaveRepository? = null,
             /** The slot a new world saves into, from the world library; ignored when resuming. */
             slot: WorldIdentity? = null,
+            heroMask: String? = null,
+            maskCharacters: Boolean = true,
+            saveMaskCharacters: (Boolean) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
@@ -1555,6 +1578,7 @@ class PlayViewModel(
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
                 propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
+                heroMask = heroMask, maskCharacters = maskCharacters, saveMaskCharacters = saveMaskCharacters,
             ) as T
         }
     }
@@ -1630,6 +1654,12 @@ data class PlayUiState(
     val kitOverlays: List<File> = emptyList(),
     /** The graphics tier the player chose; null is the device's own. */
     val quality: QualityTier? = null,
+    /** Characters drawn as floating mask spirits; false draws their sprites. */
+    val maskCharacters: Boolean = true,
+    /** The hero's mask, a genome code; null wears the first preset. */
+    val heroMask: String? = null,
+    /** What the packs say about monsters' masks and motion. */
+    val masks: MaskLooks = MaskLooks(),
     /** Tabletop checks the loaded plugins offer. */
     val checks: List<SkillCheck> = emptyList(),
     /** Seconds until each check can be rolled again; 0 when ready. */

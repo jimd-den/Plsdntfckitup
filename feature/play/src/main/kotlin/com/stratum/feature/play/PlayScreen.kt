@@ -183,6 +183,7 @@ fun PlayScreen(
         onToggle3D = viewModel::toggle3D,
         onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
+        onChooseMasks = viewModel::chooseMaskCharacters,
         onOpenMenu = onOpenMenu,
         onCraft = viewModel::craft,
         menuOpen = menuOpen,
@@ -237,6 +238,7 @@ fun PlayScreenContent(
     onToggle3D: () -> Unit = {},
     onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
+    onChooseMasks: (Boolean) -> Unit = {},
     onOpenMenu: () -> Unit = {},
     onCraft: (String) -> Unit = {},
     /** The pause menu; hoisted so a test can show it and back can close it. */
@@ -302,6 +304,9 @@ fun PlayScreenContent(
                     projectiles = state.projectiles,
                     zones = state.zones,
                     telegraphs = state.telegraphs,
+                    maskCharacters = state.maskCharacters,
+                    heroMask = state.heroMask,
+                    masks = state.masks,
                 ),
                 modifier = Modifier.fillMaxSize(),
                 onTapBlock = onTapBlock,
@@ -393,6 +398,7 @@ fun PlayScreenContent(
                 onClose = onToggleStyle,
                 onForge = onForgeStyle,
                 onChooseQuality = onChooseQuality,
+                onChooseMasks = onChooseMasks,
             )
         }
 

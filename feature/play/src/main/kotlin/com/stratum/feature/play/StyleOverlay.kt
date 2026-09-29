@@ -54,6 +54,7 @@ fun StyleOverlay(
     onClose: () -> Unit,
     onForge: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
+    onChooseMasks: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = StratumTheme.colors
@@ -116,6 +117,16 @@ fun StyleOverlay(
 
             Spacer(Modifier.height(Space.medium))
             GraphicsChooser(chosen = state.quality, onChoose = onChooseQuality)
+
+            Spacer(Modifier.height(Space.medium))
+            // The characters are masks: floating, glowing mask spirits. The
+            // sprite art stays one tap away for anyone who prefers it.
+            Text(text = "Characters", style = MaterialTheme.typography.labelLarge, color = colors.ink)
+            Spacer(Modifier.height(Space.small))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                StratumChip(label = "Mask spirits", selected = state.maskCharacters, onClick = { onChooseMasks(true) })
+                StratumChip(label = "Sprites", selected = !state.maskCharacters, onClick = { onChooseMasks(false) })
+            }
 
             Spacer(Modifier.height(Space.medium))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {

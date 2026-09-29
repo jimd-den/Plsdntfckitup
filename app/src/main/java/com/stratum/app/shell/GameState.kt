@@ -129,6 +129,18 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         ai.playerPreferences.saveEquippedWeapon(id)
     }
 
+    /** Wears a mask as the hero, from the model studio's "Wear as your mask"; [code] is a mask genome code. */
+    fun wearMask(code: String?) {
+        loadoutState.update { it.copy(heroMask = code) }
+        ai.playerPreferences.saveHeroMask(code)
+    }
+
+    /** Characters as floating mask spirits (true) or their sprites (false). */
+    fun chooseMaskCharacters(on: Boolean) {
+        loadoutState.update { it.copy(maskCharacters = on) }
+        ai.playerPreferences.saveMaskCharacters(on)
+    }
+
     fun saveStyle(prompt: String) {
         graph.styles.save(prompt)
         style.value = prompt

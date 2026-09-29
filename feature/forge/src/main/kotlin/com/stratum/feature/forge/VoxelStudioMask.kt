@@ -81,6 +81,15 @@ internal fun MaskDialsPanel(state: VoxelStudioUiState, viewModel: VoxelStudioVie
     val colors = StratumTheme.colors
     StratumPanel(Modifier.fillMaxWidth()) {
         SectionLabel("Mask dials · ${mask.tradition.label}")
+        // The characters are masks: this one can be the hero's own.
+        val worn = state.wornMask == com.stratum.engine.model.mask.MaskCodec.encode(mask.normalised())
+        StratumAction(
+            label = if (worn) "✓ Worn as your mask" else "Wear as your mask",
+            onClick = viewModel::wearMask,
+            emphasis = if (worn) ActionEmphasis.SECONDARY else ActionEmphasis.PRIMARY,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(Space.small))
         Dial("Face") { FaceShape.entries.forEach { f -> StratumChip(f.label, mask.face == f, { viewModel.editMask { it.copy(face = f) } }) } }
         Dial("Eyes") { EyeForm.entries.forEach { e -> StratumChip(e.label, mask.eyes == e, { viewModel.editMask { it.copy(eyes = e) } }) } }
         Dial("Nose") { NoseForm.entries.forEach { n -> StratumChip(n.label, mask.nose == n, { viewModel.editMask { it.copy(nose = n) } }) } }

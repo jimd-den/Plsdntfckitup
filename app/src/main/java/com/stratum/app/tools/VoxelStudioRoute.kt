@@ -33,6 +33,8 @@ internal fun VoxelStudioRoute(app: AppViewModel, onBack: () -> Unit, modifier: M
             generateBuilding = { seed, tradition -> ModelFactory.building(seed, tradition = tradition).first },
             traditions = Traditions.ids.map { id -> id to id.split('_').joinToString(" ") { it.replaceFirstChar(Char::uppercase) } },
             onLibraryChanged = app.game::modelsChanged,
+            onWearMask = app.game::wearMask,
+            wornMask = app.game.loadout.value.heroMask,
         ),
     )
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->

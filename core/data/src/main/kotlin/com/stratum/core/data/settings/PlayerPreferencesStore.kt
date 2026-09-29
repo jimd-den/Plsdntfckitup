@@ -26,6 +26,8 @@ class PlayerPreferencesStore(context: Context) {
         heroClassId = prefs.getString(KEY_HERO_CLASS, null),
         heroSheetId = prefs.getString(KEY_HERO_SHEET, null),
         equippedWeaponId = prefs.getString(KEY_EQUIPPED_WEAPON, null),
+        heroMask = prefs.getString(KEY_HERO_MASK, null),
+        maskCharacters = prefs.getBoolean(KEY_MASK_CHARACTERS, true),
     )
 
     fun saveHeroClass(id: String?) {
@@ -43,11 +45,25 @@ class PlayerPreferencesStore(context: Context) {
         _loadout.value = _loadout.value.copy(equippedWeaponId = id)
     }
 
+    /** The mask the hero wears, as a genome code; null for the default. */
+    fun saveHeroMask(code: String?) {
+        prefs.edit { putString(KEY_HERO_MASK, code) }
+        _loadout.value = _loadout.value.copy(heroMask = code)
+    }
+
+    /** Characters as mask spirits (true) or sprites (false). */
+    fun saveMaskCharacters(on: Boolean) {
+        prefs.edit { putBoolean(KEY_MASK_CHARACTERS, on) }
+        _loadout.value = _loadout.value.copy(maskCharacters = on)
+    }
+
     fun save(loadout: PlayerLoadout) {
         prefs.edit {
             putString(KEY_HERO_CLASS, loadout.heroClassId)
             putString(KEY_HERO_SHEET, loadout.heroSheetId)
             putString(KEY_EQUIPPED_WEAPON, loadout.equippedWeaponId)
+            putString(KEY_HERO_MASK, loadout.heroMask)
+            putBoolean(KEY_MASK_CHARACTERS, loadout.maskCharacters)
         }
         _loadout.value = loadout
     }
@@ -57,5 +73,7 @@ class PlayerPreferencesStore(context: Context) {
         const val KEY_HERO_CLASS = "hero_class_id"
         const val KEY_HERO_SHEET = "hero_sheet_id"
         const val KEY_EQUIPPED_WEAPON = "equipped_weapon_id"
+        const val KEY_HERO_MASK = "hero_mask_genome"
+        const val KEY_MASK_CHARACTERS = "mask_characters"
     }
 }
