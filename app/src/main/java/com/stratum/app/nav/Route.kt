@@ -35,6 +35,7 @@ sealed interface Route {
         data object Poses : Create
         data object Weapons : Create
         data object Models : Create
+        data object Voxels : Create
         data object Mapper : Create
 
         /** The agent crew, opened on [preset] when the way in chose one. */

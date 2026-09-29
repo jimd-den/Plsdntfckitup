@@ -256,7 +256,18 @@ internal fun BuildTray(
                 )
             }
         }
+        BuildControls(state)
         BlockStrip(state, world, onSelectSlot, Modifier.fillMaxWidth())
+        // Models from the model studio, set in front of the player in full microvoxel detail.
+        if (state.build.canSculpt && state.build.models.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                item { StratumChip(label = "⟳ ${state.build.modelTurns * 90}°", selected = false, onClick = state.buildActions.turnModel) }
+                items(state.build.models.size) { index ->
+                    val model = state.build.models[index]
+                    StratumChip(label = "🧱 ${model.name} ${model.blocks}", selected = false, onClick = { state.buildActions.placeModel(model.id) })
+                }
+            }
+        }
         // Structures made in the model forge, raised whole in front of the player.
         if (state.blueprints.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
@@ -272,6 +283,46 @@ internal fun BuildTray(
         }
     }
 }
+
+/**
+ * Height, undo and redo, and what a tap does: dig, pick up a block to build
+ * with, or -- in a microvoxel world -- chisel the land or heap it up at a
+ * quarter block, with a brush that grows and shrinks.
+ */
+@Composable
+internal fun BuildControls(state: PlayUiState) {
+    val b = state.build
+    val a = state.buildActions
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+        item { StratumChip(label = "↶ Undo", selected = false, onClick = a.undo) }
+        item { StratumChip(label = "↷ Redo", selected = false, onClick = a.redo) }
+        if (state.buildTool.usesHeight) {
+            item { StratumChip(label = "−", selected = false, onClick = { a.height(-1) }) }
+            item { StratumChip(label = "↕ ${b.height}", selected = true, onClick = {}) }
+            item { StratumChip(label = "+", selected = false, onClick = { a.height(1) }) }
+        }
+        val taps = if (b.canSculpt) BuildTap.entries else listOf(BuildTap.DIG, BuildTap.PICK)
+        items(taps.size) { i ->
+            val tap = taps[i]
+            StratumChip(label = "${tap.glyph} ${tap.label}", selected = b.tap == tap, onClick = { a.tap(tap) })
+        }
+        if (b.canSculpt && (b.tap == BuildTap.CHISEL || b.tap == BuildTap.HEAP)) {
+            item { StratumChip(label = "◦", selected = false, onClick = { a.brush(-1, null) }) }
+            item { StratumChip(label = "Brush ${b.brushRadius}", selected = true, onClick = {}) }
+            item { StratumChip(label = "◯", selected = false, onClick = { a.brush(1, null) }) }
+            if (b.tap == BuildTap.HEAP) items(BRUSH_COLOURS.size) { i ->
+                val c = BRUSH_COLOURS[i]
+                StratumChip(
+                    label = if (c == b.brushMaterial) "●" else " ", selected = c == b.brushMaterial,
+                    onClick = { a.brush(0, c) }, swatch = Color(0xFF000000 or c.removePrefix("#").toLong(16)),
+                )
+            }
+        }
+    }
+}
+
+/** What the heaping brush lays: earths, stone, sand, clay, grass, snow. */
+private val BRUSH_COLOURS = listOf("#8A6A4A", "#A0583A", "#6E3A25", "#D8C58E", "#8A8A86", "#5B5A58", "#B98A5C", "#5E9B3A", "#F2F5FA", "#2F6FA0")
 
 /** The blocks the player can place, shown while building. */
 @Composable
@@ -298,6 +349,14 @@ internal fun BuildTool.glyph(): String = when (this) {
     BuildTool.WALLS -> "▥"
     BuildTool.ROOM -> "⌂"
     BuildTool.ERASE -> "✕"
+    BuildTool.BOX -> "■"
+    BuildTool.PILLAR -> "▮"
+    BuildTool.STAIRS -> "⟋"
+    BuildTool.ROOF -> "⌃"
+    BuildTool.DOME -> "◠"
+    BuildTool.RING -> "◯"
+    BuildTool.PAINT -> "🖌"
+    BuildTool.DIG -> "⛏"
 }
 
 /** A thin bar over the controls while a block is being dug. */

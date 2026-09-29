@@ -40,6 +40,9 @@ class AppGraph(context: Context, scope: CoroutineScope) {
     /** Where painted textures live. */
     val forgeDirectory = File(context.filesDir, "forge")
 
+    /** The model studio's microvoxel models. */
+    val microModels = com.stratum.core.data.micro.MicroModelStore(File(context.filesDir, "micro-models"))
+
     /** Saved worlds, one folder each under the app's files. */
     val worlds = SavedWorlds(WorldLibrary.inFiles(context.filesDir), scope)
 

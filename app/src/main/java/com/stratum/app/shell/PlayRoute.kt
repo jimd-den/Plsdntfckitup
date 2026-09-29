@@ -92,6 +92,7 @@ private fun Session(
     val characters by ai.characterRepository.characters.collectAsStateWithLifecycle()
     val propModels by app.game.propModels.collectAsStateWithLifecycle()
     val blueprints by app.game.blueprints.collectAsStateWithLifecycle()
+    val microModels by app.game.microModels.collectAsStateWithLifecycle()
     val stylePrompt by app.game.stylePrompt.collectAsStateWithLifecycle()
 
     // The world plays as the class it was made with; the look and weapon are
@@ -134,6 +135,7 @@ private fun Session(
                 saveStyle = app.game::saveStyle,
                 propModels = propModels,
                 blueprints = blueprints,
+                microModels = microModels,
                 resume = resumed,
                 worlds = graph.worlds.library.repository,
                 slot = (launch as? WorldLaunch.New)?.identity,

@@ -78,6 +78,12 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         .flowOn(Dispatchers.IO)
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    /** The model studio's models, for the play screen's build tray. */
+    val microModels: StateFlow<List<com.stratum.core.domain.micro.MicroModel>> = modelRevision
+        .map { graph.microModels.all() }
+        .flowOn(Dispatchers.IO)
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
     val blueprints: StateFlow<List<VoxelBlueprint>> = modelRevision
         .map { ai.models.blueprints() }
         .flowOn(Dispatchers.IO)

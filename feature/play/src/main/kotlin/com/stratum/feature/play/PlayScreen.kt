@@ -147,7 +147,7 @@ fun PlayScreen(
         state = state,
         world = viewModel.world,
         modifier = modifier,
-        onTapBlock = viewModel::beginMining,
+        onTapBlock = viewModel::tapBlock,
         onLongPressBlock = viewModel::place,
         onMoveInput = viewModel::setMoveInput,
         onDodge = viewModel::dodge,

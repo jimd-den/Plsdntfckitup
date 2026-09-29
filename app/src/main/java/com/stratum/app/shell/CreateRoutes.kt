@@ -57,6 +57,7 @@ internal fun CreateRoutes(app: AppViewModel, route: Route.Create, stack: BackSta
         Route.Create.Weapons -> WeaponForgeRoute(app, onBack = back, onOpenSettings = settings, modifier = modifier)
         Route.Create.Mapper -> SpriteMapperRoute(app, onBack = back, modifier = modifier)
         Route.Create.Models -> ModelForgeRoute(app, onBack = back, onOpenSettings = settings, modifier = modifier)
+        Route.Create.Voxels -> com.stratum.app.tools.VoxelStudioRoute(app, onBack = back, modifier = modifier)
         is Route.Create.Crew -> CrewRoute(
             app,
             route.preset,
@@ -103,6 +104,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
         meshReady = ai.settings.isModelProviderConfigured,
         paintedStyle = style.ifBlank { null },
         running = jobs.count { !it.status.settled },
+        microModelCount = app.game.microModels.collectAsStateWithLifecycle().value.size,
     )
     CreateHubScreen(
         status = status,
@@ -116,6 +118,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
             onLore = { stack.push(Route.Create.Lore) },
             onSprites = { stack.push(Route.Create.Sprites) },
             onModels = { stack.push(Route.Create.Models) },
+            onVoxels = { stack.push(Route.Create.Voxels) },
             onCrew = { stack.push(Route.Create.Crew()) },
             onMapper = { stack.push(Route.Create.Mapper) },
             onSettings = { stack.push(Route.Settings) },

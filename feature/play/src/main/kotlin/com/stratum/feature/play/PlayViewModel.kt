@@ -124,6 +124,8 @@ class PlayViewModel(
     private val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
     /** Structures made from generated models, which the build tray can raise. */
     private val blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+    /** The model studio's microvoxel models, which the build tray can place. */
+    private val microModels: List<com.stratum.core.domain.micro.MicroModel> = emptyList(),
     /** A saved world to resume, or null to make a new one from [config] and [hero]. */
     resume: WorldSave? = null,
     /** Where this world is kept, or null for a run with no save slot (the hero is still kept). */
@@ -754,6 +756,10 @@ class PlayViewModel(
         propModels = propModels,
         blueprints = blueprints.map { BlueprintChoice(it.id, it.name, it.filledCount) },
         onRaiseBlueprint = ::raiseBlueprint,
+        buildActions = BuildActions(
+            height = ::changeBuildHeight, undo = ::undoBuild, redo = ::redoBuild, tap = ::setBuildTap,
+            brush = { r, m -> changeBrush(r, m) }, turnModel = ::turnModel, placeModel = ::placeModel,
+        ),
         quality = initialQuality,
         checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
@@ -923,6 +929,83 @@ class PlayViewModel(
             BuildResult.NothingSelected -> publish(message = "Nothing selected to build with")
             BuildResult.NothingToBuild -> publish()
             is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
+            is BuildResult.Painted -> publish(message = if (result.short > 0) "Painted ${result.painted}, ${result.short} short" else "Painted ${result.painted}")
+        }
+    }
+
+    private val modelChoices: List<ModelChoice> = microModels.map { m ->
+        val (bx, by, bz) = m.blocks()
+        ModelChoice(m.id, m.name, m.filledCount, "$bx×$by×$bz")
+    }
+
+    fun changeBuildHeight(delta: Int) {
+        session.setBuildHeight(session.buildHeight + delta)
+        publish(message = "Height ${session.buildHeight}")
+    }
+
+    fun undoBuild() {
+        when (val r = session.undo()) {
+            is com.stratum.engine.world.UndoResult.Undone -> publish(message = "Undid ${r.what}")
+            else -> publish(message = "Nothing to undo")
+        }
+    }
+
+    fun redoBuild() {
+        when (val r = session.redo()) {
+            is com.stratum.engine.world.UndoResult.Redone -> publish(message = "Redid ${r.what}")
+            else -> publish(message = "Nothing to redo")
+        }
+    }
+
+    fun setBuildTap(tap: BuildTap) {
+        val usable = if ((tap == BuildTap.CHISEL || tap == BuildTap.HEAP) && !session.canSculpt) BuildTap.DIG else tap
+        _state.value = _state.value.copy(build = _state.value.build.copy(tap = usable))
+        publish(message = if (usable != tap) "Only a microvoxel world can be sculpted" else null)
+    }
+
+    fun changeBrush(radiusDelta: Int = 0, material: String? = null) {
+        val b = session.sculptBrush
+        session.setSculptBrush(b.copy(radius = b.radius + radiusDelta, material = material ?: b.material))
+        publish()
+    }
+
+    fun turnModel() {
+        _state.value = _state.value.copy(build = _state.value.build.copy(modelTurns = (_state.value.build.modelTurns + 1) % 4))
+        publish()
+    }
+
+    /** Sets a studio model on the ground in front of the player, in full microvoxel detail. */
+    fun placeModel(id: String) {
+        val model = microModels.firstOrNull { it.id == id } ?: return
+        when (val r = session.placeModel(model, _state.value.build.modelTurns)) {
+            is com.stratum.engine.world.SculptResult.Shaped -> publish(message = "Placed ${model.name} — undo takes it back")
+            com.stratum.engine.world.SculptResult.NotMicrovoxel -> publish(message = "Models stand in microvoxel worlds")
+            com.stratum.engine.world.SculptResult.NoRoom -> publish(message = "No room for ${model.name} here")
+        }
+    }
+
+    /**
+     * A tap on the world. Outside build mode, and with the dig tap in build
+     * mode, it digs; the build tray can make it pick a block, chisel the
+     * land at a quarter block, or heap material onto it.
+     */
+    fun tapBlock(target: BlockPos) {
+        val s = _state.value
+        if (!s.buildMode) return beginMining(target)
+        when (s.build.tap) {
+            BuildTap.DIG -> beginMining(target)
+            BuildTap.PICK -> {
+                val picked = session.pickBlock(target)
+                publish(message = picked?.let { "Holding ${displayName(it)}" } ?: "You have none of that to place")
+            }
+            BuildTap.CHISEL, BuildTap.HEAP -> {
+                miningJob?.cancel()
+                when (val r = session.sculpt(target, carve = s.build.tap == BuildTap.CHISEL)) {
+                    is com.stratum.engine.world.SculptResult.Shaped ->
+                        publish(message = r.gathered.entries.joinToString { "+${it.value} ${displayName(it.key)}" }.ifBlank { null })
+                    else -> publish(message = "Only a microvoxel world can be sculpted")
+                }
+            }
         }
     }
 
@@ -976,6 +1059,11 @@ class PlayViewModel(
             spriteFor = spriteResolver,
             buildPreview = snapshot.buildPreview,
             buildTool = snapshot.buildTool,
+            build = _state.value.build.copy(
+                height = session.buildHeight, canUndo = session.canUndo, canRedo = session.canRedo,
+                canSculpt = session.canSculpt, brushRadius = session.sculptBrush.radius, brushMaterial = session.sculptBrush.material,
+                models = modelChoices,
+            ),
             skills = snapshot.skills,
             activeBoons = snapshot.activeBoons,
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
@@ -1364,6 +1452,7 @@ class PlayViewModel(
             saveStyle: (String) -> Unit = {},
             propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
             blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+            microModels: List<com.stratum.core.domain.micro.MicroModel> = emptyList(),
             /** A saved world to resume. Its seed, rules, hero class and hero win over [config], [heroClassId] and [loadHero]. */
             resume: WorldSave? = null,
             /** Where worlds are kept; null plays without a world slot, as before world saving. */
@@ -1377,7 +1466,7 @@ class PlayViewModel(
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
                 quality = quality, saveQuality = saveQuality, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
-                propModels = propModels, blueprints = blueprints,
+                propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
             ) as T
         }
@@ -1430,6 +1519,8 @@ data class PlayUiState(
     val buildPreview: List<BlockPos> = emptyList(),
     val buildTool: BuildTool = BuildTool.SINGLE,
     val buildAffordable: Boolean = true,
+    /** Height, undo, the eyedropper, sculpting and placed models: the rest of the build tray. */
+    val build: BuildPanel = BuildPanel(),
     val skills: List<SkillDefinition> = emptyList(),
     /** Advances every tick so the canvas redraws while the fight is moving. */
     val frame: Int = 0,
@@ -1483,6 +1574,7 @@ data class PlayUiState(
     /** Blueprints the build tray offers to raise. */
     val blueprints: List<BlueprintChoice> = emptyList(),
     val onRaiseBlueprint: (String) -> Unit = {},
+    val buildActions: BuildActions = BuildActions(),
     /** Skills cost life rather than resource: a keystone or a piece of gear says so. */
     val lifePaysCosts: Boolean = false,
     /** The paper doll and the bag, compared against the whole character. */
@@ -1535,3 +1627,41 @@ private const val DEFAULT_RARITY_TINT = 0xFFB0BEC5L
 
 /** A blueprint as the build tray lists it. */
 data class BlueprintChoice(val id: String, val name: String, val blocks: Int)
+
+/** What a tap on the world does in build mode. */
+enum class BuildTap(val label: String, val glyph: String) {
+    DIG("Dig", "⛏"),
+    PICK("Pick block", "◉"),
+    CHISEL("Chisel", "◖"),
+    HEAP("Heap", "◗"),
+}
+
+/** What the build tray's extra controls call. */
+data class BuildActions(
+    val height: (Int) -> Unit = {},
+    val undo: () -> Unit = {},
+    val redo: () -> Unit = {},
+    val tap: (BuildTap) -> Unit = {},
+    /** Radius change, and a new material or null to keep it. */
+    val brush: (Int, String?) -> Unit = { _, _ -> },
+    val turnModel: () -> Unit = {},
+    val placeModel: (String) -> Unit = {},
+)
+
+/** The model studio's model, as the build tray lists it. */
+data class ModelChoice(val id: String, val name: String, val voxels: Int, val blocks: String)
+
+/** The build tray beyond shapes and blocks. */
+data class BuildPanel(
+    val height: Int = 3,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
+    val tap: BuildTap = BuildTap.DIG,
+    /** Whether the world has microvoxels to chisel and heap, and models to place. */
+    val canSculpt: Boolean = false,
+    val brushRadius: Int = 3,
+    val brushMaterial: String = "#8A6A4A",
+    val models: List<ModelChoice> = emptyList(),
+    /** Quarter turns a placed model is given. */
+    val modelTurns: Int = 0,
+)

@@ -107,6 +107,8 @@ internal data class WorldSchema(
     val chunkFile: String? = null,
     val realm: RealmSchema = RealmSchema(),
     val consumedMarkers: List<String> = emptyList(),
+    val microModels: List<com.stratum.core.data.micro.MicroModelSchema> = emptyList(),
+    val stamps: List<com.stratum.core.data.micro.MicroStampSchema> = emptyList(),
 ) {
     fun toDomain(chunks: List<SavedChunk>) = WorldSave(
         identity = WorldIdentity(id, name, createdAt, presetName, packIds, heroName),
@@ -121,6 +123,8 @@ internal data class WorldSchema(
         chunks = chunks,
         realm = realm.toDomain(),
         consumedMarkers = consumedMarkers.toSet(),
+        microModels = microModels.map { it.toDomain() },
+        stamps = stamps.map { it.toDomain() },
     )
 
     companion object {
@@ -129,6 +133,8 @@ internal data class WorldSchema(
             s.lastPlayedAt, s.playSeconds, ConfigSchema.of(s.config), s.difficulty.tier, s.difficulty.mods.map(WaystoneModSchema::of),
             HeroSchema.of(s.hero), PlayerSchema.of(s.player), s.clockSeconds, s.blockIds, chunkFile, RealmSchema.of(s.realm),
             s.consumedMarkers.sorted(),
+            s.microModels.map(com.stratum.core.data.micro.MicroModelSchema::of),
+            s.stamps.map(com.stratum.core.data.micro.MicroStampSchema::of),
         )
     }
 }
