@@ -2,7 +2,9 @@ package com.stratum.engine.scene
 
 import com.stratum.core.domain.art.SceneLighting
 import kotlin.math.exp
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -71,15 +73,22 @@ object ShadingModel {
         lights: List<PointLight>,
         lightGainColors: Array<FloatArray>,
         out: FloatArray,
+        /** [DioramaLook.occlusionDepth]: 0 shades exactly as meshed. */
+        occlusionDepth: Float = 0f,
     ) {
+        // Deeper occlusion: the ambient term takes the corner value to a
+        // higher power, and direct light gives up part of it too, so a crevice
+        // stays soft and dark even in full sun.
+        val skyAo = if (occlusionDepth > 0f) Math.pow(ao.toDouble(), 1.0 + occlusionDepth).toFloat() else ao
+        val sunAo = 1f - occlusionDepth * OCCLUSION_SUN_SHARE * (1f - ao)
         // Hemisphere ambient: faces up see the sky, faces down see the ground.
         val hemi = nz * 0.5f + 0.5f
-        var r = (t.ground[0] + (t.sky[0] - t.ground[0]) * hemi) * ao
-        var g = (t.ground[1] + (t.sky[1] - t.ground[1]) * hemi) * ao
-        var b = (t.ground[2] + (t.sky[2] - t.ground[2]) * hemi) * ao
+        var r = (t.ground[0] + (t.sky[0] - t.ground[0]) * hemi) * skyAo
+        var g = (t.ground[1] + (t.sky[1] - t.ground[1]) * hemi) * skyAo
+        var b = (t.ground[2] + (t.sky[2] - t.ground[2]) * hemi) * skyAo
 
         val ndl = max(0f, nx * t.sun[0] + ny * t.sun[1] + nz * t.sun[2])
-        val shadow = 1f - t.shadowStrength * (1f - lit)
+        val shadow = (1f - t.shadowStrength * (1f - lit)) * sunAo
         r += t.sunColor[0] * ndl * shadow
         g += t.sunColor[1] * ndl * shadow
         b += t.sunColor[2] * ndl * shadow
@@ -123,6 +132,97 @@ object ShadingModel {
         val byHeight = if (z < t.fogFloor) ((t.fogFloor - z) / HEIGHT_FOG_DEPTH).coerceIn(0f, 1f) * HEIGHT_FOG_MAX else 0f
         return max(byDistance, byHeight)
     }
+
+    /**
+     * The tone of one microvoxel: a multiplier near 1 from a hash of the
+     * voxel's own cell, with a whisper of warm or cool, into [rgb] as three
+     * multipliers. [DioramaLook.grain] sets the spread; 0 gives exactly 1.
+     *
+     * The cell is found by stepping a hair inside the surface, so every
+     * pixel of a voxel's face agrees on which voxel it is. The integer hash
+     * is the one in the shaders (`voxelHash`), bit for bit.
+     */
+    fun voxelGrain(grain: Float, wx: Float, wy: Float, wz: Float, nx: Float, ny: Float, nz: Float, rgb: FloatArray) {
+        val h = voxelHash(
+            kotlin.math.floor((wx - nx * INSIDE) * VOXELS_PER_BLOCK).toInt(),
+            kotlin.math.floor((wy - ny * INSIDE) * VOXELS_PER_BLOCK).toInt(),
+            kotlin.math.floor((wz - nz * INSIDE) * VOXELS_PER_BLOCK).toInt(),
+        )
+        val tone = 1f + ((h and 0xFFFF) / 65535f - 0.5f) * 2f * grain
+        val warm = (((h ushr 16) and 0xFFFF) / 65535f - 0.5f) * grain * GRAIN_WARMTH
+        rgb[0] = tone * (1f + warm); rgb[1] = tone; rgb[2] = tone * (1f - warm)
+    }
+
+    /** 32-bit integer hash of a voxel cell; twin of `voxelHash` in GLSL, which uses uint arithmetic. */
+    fun voxelHash(x: Int, y: Int, z: Int): Int {
+        var h = ((x + HASH_OFFSET) * 73856093) xor ((y + HASH_OFFSET) * 19349663) xor ((z + HASH_OFFSET) * 83492791)
+        h = h xor (h ushr 13)
+        h *= 1274126177
+        return h xor (h ushr 16)
+    }
+
+    /**
+     * How much of [DioramaLook.bevel] shows at a pixel: all of it while a
+     * microvoxel spans several pixels, none once it shrinks towards one,
+     * where the rounded edges would only shimmer. [pixelAngle] is the
+     * world size of one screen pixel at distance 1.
+     */
+    fun bevelFade(bevel: Float, distance: Float, pixelAngle: Float): Float {
+        if (bevel <= 0f) return 0f
+        val voxelsPerPixel = distance * pixelAngle * VOXELS_PER_BLOCK
+        return bevel * (1f - smoothstep(BEVEL_FADE_START, BEVEL_FADE_END, voxelsPerPixel))
+    }
+
+    /**
+     * Rounds a microvoxel's edges in the lighting: the normal [n] (unit,
+     * axis-aligned) is tipped outwards near each edge of the voxel's face,
+     * by [strength], in place. Faces that are not axis-aligned are left alone.
+     */
+    fun bevel(strength: Float, wx: Float, wy: Float, wz: Float, n: FloatArray) {
+        if (strength <= 0f) return
+        val ax = abs(n[0]); val ay = abs(n[1]); val az = abs(n[2])
+        if (max(ax, max(ay, az)) < AXIS_ALIGNED) return
+        if (ax < 0.5f) n[0] += edgeTilt(wx) * strength * BEVEL_TILT
+        if (ay < 0.5f) n[1] += edgeTilt(wy) * strength * BEVEL_TILT
+        if (az < 0.5f) n[2] += edgeTilt(wz) * strength * BEVEL_TILT
+        val l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2])
+        n[0] /= l; n[1] /= l; n[2] /= l
+    }
+
+    /** -1 at a voxel's low edge on this axis, +1 at its high edge, 0 across the middle. */
+    private fun edgeTilt(w: Float): Float {
+        val v = w * VOXELS_PER_BLOCK
+        val f = v - kotlin.math.floor(v)
+        return when {
+            f < BEVEL_WIDTH -> -(1f - f / BEVEL_WIDTH)
+            f > 1f - BEVEL_WIDTH -> 1f - (1f - f) / BEVEL_WIDTH
+            else -> 0f
+        }
+    }
+
+    /**
+     * Aerial haze: how much of the warm-or-cool haze colour a point takes,
+     * 0..[HAZE_MAX], with the colour (before tone mapping is undone) in
+     * [rgb]. Grows with distance past the focus and is thicker low down
+     * (exponential in height below and above the focus); warm looking
+     * towards the sun, cool looking away. The GLSL twin is `haze`.
+     */
+    fun haze(
+        t: Terms, distance: Float, focusDistance: Float, wz: Float, focusZ: Float,
+        viewX: Float, viewY: Float, rgb: FloatArray,
+    ): Float {
+        val beyond = max(0f, distance - focusDistance * HAZE_START)
+        val low = exp(-(wz - focusZ) * HAZE_FALLOFF).coerceIn(HAZE_LOW_MIN, HAZE_LOW_MAX)
+        val amount = min(HAZE_MAX, (1f - exp(-beyond * HAZE_DENSITY)) * low)
+        val sl = sqrt(t.sun[0] * t.sun[0] + t.sun[1] * t.sun[1]).coerceAtLeast(1e-4f)
+        val vl = sqrt(viewX * viewX + viewY * viewY).coerceAtLeast(1e-4f)
+        val towards = smoothstep(-0.6f, 1f, (viewX * t.sun[0] + viewY * t.sun[1]) / (sl * vl))
+        for (i in 0 until 3) rgb[i] = t.fog[i] * (HAZE_COOL[i] + (HAZE_WARM[i] - HAZE_COOL[i]) * towards)
+        return amount
+    }
+
+    /** Emissive after the night glow: [night] 0 at noon, 1 at midnight. */
+    fun nightEmissive(emissive: Float, nightGlow: Float, night: Float): Float = emissive * (1f + nightGlow * night)
 
     /**
      * Exposure, a soft filmic shoulder, saturation and vignette, in place.
@@ -244,4 +344,62 @@ object ShadingModel {
     const val TONE_GAIN = 1.25f
     const val HEIGHT_FOG_DEPTH = 6f
     const val HEIGHT_FOG_MAX = 0.55f
+
+    // The diorama finish; every one of these has a twin in SceneShaders.
+    const val VOXELS_PER_BLOCK = 4f
+    /** How far inside a surface the grain looks for its voxel, in blocks. */
+    const val INSIDE = 0.02f
+    const val GRAIN_WARMTH = 0.5f
+    /** Keeps hashed cells positive, since GLSL converts to uint. */
+    const val HASH_OFFSET = 1 shl 22
+    /** Share of a voxel's width, from each edge, that is rounded. */
+    const val BEVEL_WIDTH = 0.16f
+    const val BEVEL_TILT = 0.55f
+    const val BEVEL_FADE_START = 0.3f
+    const val BEVEL_FADE_END = 0.6f
+    const val AXIS_ALIGNED = 0.95f
+    /** How much of the occlusion direct sun obeys at full [DioramaLook.occlusionDepth]. */
+    const val OCCLUSION_SUN_SHARE = 0.5f
+    /** Haze starts a little in front of the focus, so the hero's own ground stays clear. */
+    const val HAZE_START = 0.9f
+    const val HAZE_DENSITY = 0.03f
+    const val HAZE_FALLOFF = 0.06f
+    const val HAZE_LOW_MIN = 0.4f
+    const val HAZE_LOW_MAX = 1.5f
+    const val HAZE_MAX = 0.5f
+    val HAZE_WARM = floatArrayOf(1.1f, 0.98f, 0.82f)
+    val HAZE_COOL = floatArrayOf(0.88f, 0.97f, 1.1f)
+
+    // The depth-reading finish: creases, screen occlusion and tilt-shift.
+    /** Relative inverse-depth curvature at which a crease is fully dark. */
+    const val EDGE_GAIN = 350f
+    /** Convex edges, the near side of a silhouette, lighten by this much at most. */
+    const val EDGE_LIGHT = 0.18f
+    /** Radius of the occlusion ring, in blocks at the pixel's depth. */
+    const val SCREEN_AO_RADIUS = 0.45f
+    /** Taps are clamped to this relative depth either side, so far silhouettes cast no halo. */
+    const val SCREEN_AO_CLAMP = 0.025f
+    const val SCREEN_AO_GAIN = 70f
+    /** Relative distance from the focus depth where the tilt-shift blur starts, and where it is full. */
+    const val TILT_NEAR = 0.1f
+    const val TILT_FAR = 0.5f
+    /** Eight directions round the occlusion ring, x then y. */
+    val RING = floatArrayOf(1f, 0f, 0.7071f, 0.7071f, 0f, 1f, -0.7071f, 0.7071f, -1f, 0f, -0.7071f, -0.7071f, 0f, -1f, 0.7071f, -0.7071f)
+    /** Twelve taps of a Vogel disc, radius 1, for the tilt-shift blur. */
+    val DISC = FloatArray(24).also { d ->
+        for (i in 0 until 12) {
+            val r = sqrt((i + 0.5f) / 12f); val a = i * 2.39996323f
+            d[i * 2] = r * kotlin.math.cos(a); d[i * 2 + 1] = r * kotlin.math.sin(a)
+        }
+    }
+
+    // Surfels.
+    /** A surfel's depth is pulled this many radii towards the eye, so it is never lost in its own face. */
+    const val SURFEL_PULL = 1.5f
+    /** Surfels flatter than this to the eye are drawn at this squash, not thinner. */
+    const val SURFEL_MIN_SQUASH = 0.3f
+    /** Darkening towards a surfel's rim: each disc reads as a tiny dome. */
+    const val SURFEL_DOME = 0.3f
+    /** Smallest drawn radius, in output pixels. */
+    const val SURFEL_MIN_PIXELS = 0.35f
 }

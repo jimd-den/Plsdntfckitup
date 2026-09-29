@@ -103,6 +103,14 @@ class SceneFrame(
     val residentTerrain: List<MeshBatch> = terrain,
     /** Where the world is cut open so the player is never hidden; null cuts nothing. Applies to [terrain] and [models], never to actors. */
     val reveal: Reveal? = null,
+    /** Which ingredients of the handcrafted finish to draw; see [DioramaLook]. */
+    val look: com.stratum.engine.scene.quality.DioramaLook = com.stratum.engine.scene.quality.DioramaLook.OFF,
+    /** 0 at noon, 1 at midnight, eased: how far lit windows and lamps are into their night glow. */
+    val night: Float = 0f,
+    /** Surfels near the focus, per chunk, as thinned for this frame; see [SurfelLod]. Drawn opaque, after the terrain. */
+    val surfels: List<SurfelDraw> = emptyList(),
+    /** Every chunk's surfels in the meshed square, drawn or not, for a backend to keep on the GPU like [residentTerrain]. */
+    val residentSurfels: List<SurfelBatch> = emptyList(),
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -154,7 +162,7 @@ class SceneBuilder(
 ) {
     private val chunks = ChunkMeshCache(
         TerrainMesher(scene, textures, biomeAt),
-        microTerrain?.let(::MicroDetailMesher),
+        microTerrain?.let { MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity) },
         settings.microDetailRadius,
         settings.microFarRadius,
     )
@@ -189,6 +197,8 @@ class SceneBuilder(
         val models: MeshBatch? = null,
         /** Each mesh's box, six floats apiece (min x, y, z, max x, y, z), for culling against the view. */
         val bounds: FloatArray = FloatArray(0),
+        /** Surfels of the detailed chunks; see [SurfelScatter]. */
+        val surfels: List<SurfelBatch> = emptyList(),
     )
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
@@ -370,7 +380,26 @@ class SceneBuilder(
             reveal = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
                 ?.takeIf { revealRadius > 0f }
                 ?.let { Reveal(it.x, it.y, it.z, revealRadius) },
+            look = settings.diorama,
+            night = nightOf(time),
+            surfels = if (settings.diorama.surfels) SurfelLod.select(
+                terrain.surfels, camera.target.x, camera.target.y, settings.diorama.surfelRadius, settings.diorama.surfelBudget,
+            ) { b -> volume.intersects(b.originX.toFloat(), b.originY.toFloat(), b.minZ, b.originX + Chunk.SIZE.toFloat(), b.originY + Chunk.SIZE.toFloat(), b.maxZ) }
+            else emptyList(),
+            residentSurfels = terrain.surfels,
         )
+    }
+
+    /**
+     * How far into the night it is, for the glow of windows and lamps: 0
+     * through the day, rising through dusk to 1 at midnight. The same
+     * noon-to-midnight triangle the art director darkens the sun by, eased
+     * so the windows only come on once the light has really gone.
+     */
+    private fun nightOf(time: WorldTime): Float {
+        val phase = ((time.dayFraction % 1f) + 1f) % 1f
+        val dark = (abs(phase - 0.5f) / 0.5f).coerceIn(0f, 1f)
+        return ShadingModel.smoothstep(NIGHT_GLOW_START, 1f, dark)
     }
 
     private fun terrainAround(
@@ -396,6 +425,7 @@ class SceneBuilder(
                 details = results.flatMap { it.details },
                 models = modelProps(props),
                 bounds = boundsOf(meshes),
+                surfels = results.mapNotNull { it.surfels },
             )
             // Styles of props still in the square are kept; the rest are let go.
             val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)
@@ -1132,6 +1162,8 @@ class SceneBuilder(
     companion object {
         /** Blocks meshed around the camera target in each direction. */
         const val REGION_STEP = 6
+        /** How dark (0 noon, 1 midnight) it must be before windows start to glow. */
+        const val NIGHT_GLOW_START = 0.45f
         /** How far past a chunk's edge its shadow may reach into view, in blocks. */
         const val TERRAIN_SHADOW_MARGIN = 8f
         /** Off-screen chunks meshed per frame; see [ChunkMeshCache]. */
