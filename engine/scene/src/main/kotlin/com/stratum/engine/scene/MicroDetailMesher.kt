@@ -59,38 +59,95 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
      * ring of a view that is microvoxels to its edge.
      */
     fun mesh(world: BlockSnapshot, pos: ChunkPos, factor: Int = 1): TerrainMesher.Result? {
-        require(factor == 1 || factor == 2 || factor == 4) { "level of detail $factor is 1, 2 or 4" }
+        requireFactor(factor)
         val w = work.get()
         w.out.clear()
-        var quads = 0
         val props = ArrayList<PropInstance>()
         val lights = ArrayList<PointLight>()
         val changed = changedBlocks(world, pos) ?: return null
-        val columns = Chunk.HEIGHT / blocksPerMicro
-        for (cz in 0 until columns) {
-            val mpos = MicroChunkPos(pos.x, pos.y, cz)
-            val generated = source.microChunk(mpos)
-            val mine = changed[cz]
-            if (generated.isEmpty() && mine.isEmpty()) continue
-            val grid = if (mine.isEmpty()) generated else patched(generated, mine, pos, cz, world, props, lights)
-            val neighbours = neighbours(world, mpos)
-            val mesh = if (factor == 1) w.mesher.mesh(grid, neighbours, ambientOcclusion = true)
-            else w.mesher.mesh(
-                com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
-                // Opacity beyond a coarse grid's edge, read at the middle of the coarse cell it would be.
-                NeighborOpacity { x, y, z -> neighbours.opaque(x * factor + factor / 2, y * factor + factor / 2, z * factor + factor / 2) },
-                ambientOcclusion = true,
-            )
-            emit(w, mesh.quads, mesh.count, mpos, factor)
-            quads += mesh.count
-            water(grid, mpos)
-            lamps(grid, mpos, lights)
+        var quads = 0
+        for (cz in 0 until layers) quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights)
+        lastQuads.set(quads)
+        return TerrainMesher.Result(finish(w), props, lights)
+    }
+
+    /**
+     * Micro-chunk layers a block chunk is stacked from, bottom first. Each is
+     * meshed, and remeshed, on its own by [meshLayers].
+     */
+    val layers: Int = Chunk.HEIGHT / blocksPerMicro
+
+    /** Blocks one layer is tall. */
+    val blocksPerLayer: Int get() = blocksPerMicro
+
+    /**
+     * The chunk as one mesh per layer, bottom first, remaking only the layers
+     * [only] marks and taking the rest from [previous].
+     *
+     * This is what makes an edit cheap enough to show on the frame it
+     * happens. A block laid on the ground changes one layer of the chunk --
+     * two when it sits on a layer boundary and the shading across it
+     * changes too -- and a layer is a third of the work of the whole chunk.
+     * The layers left alone keep their meshes, and a GPU backend that caches
+     * uploads by identity (the GLES renderer does) does not upload them again.
+     *
+     * Null, as from [mesh], when the chunk has changed too much for detail.
+     */
+    fun meshLayers(
+        world: BlockSnapshot,
+        pos: ChunkPos,
+        factor: Int = 1,
+        only: BooleanArray? = null,
+        previous: List<TerrainMesher.Result>? = null,
+    ): List<TerrainMesher.Result>? {
+        requireFactor(factor)
+        val w = work.get()
+        val changed = changedBlocks(world, pos) ?: return null
+        val reuse = only != null && previous != null && previous.size == layers
+        var quads = 0
+        val out = ArrayList<TerrainMesher.Result>(layers)
+        for (cz in 0 until layers) {
+            if (reuse && !only!![cz]) { out += previous!![cz]; continue }
+            w.out.clear()
+            val props = ArrayList<PropInstance>()
+            val lights = ArrayList<PointLight>()
+            quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights)
+            out += TerrainMesher.Result(finish(w), props, lights)
         }
         lastQuads.set(quads)
+        return out
+    }
+
+    private fun requireFactor(factor: Int) = require(factor == 1 || factor == 2 || factor == 4) { "level of detail $factor is 1, 2 or 4" }
+
+    private fun finish(w: Work): MeshBatch {
         val built = w.out.build()
         // A dense chunk grows the builder to many megabytes; do not keep that for every worker for ever.
         w.out.trimTo(MAX_KEPT_FLOATS)
-        return TerrainMesher.Result(built, props, lights)
+        return built
+    }
+
+    /** Emits one micro-chunk layer of a block chunk into the worker's builder; returns its quads. */
+    private fun emitLayer(
+        w: Work, world: BlockSnapshot, pos: ChunkPos, cz: Int, factor: Int, mine: IntArray,
+        props: MutableList<PropInstance>, lights: MutableList<PointLight>,
+    ): Int {
+        val mpos = MicroChunkPos(pos.x, pos.y, cz)
+        val generated = source.microChunk(mpos)
+        if (generated.isEmpty() && mine.isEmpty()) return 0
+        val grid = if (mine.isEmpty()) generated else patched(generated, mine, pos, cz, world, props, lights)
+        val neighbours = neighbours(world, mpos)
+        val mesh = if (factor == 1) w.mesher.mesh(grid, neighbours, ambientOcclusion = true)
+        else w.mesher.mesh(
+            com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
+            // Opacity beyond a coarse grid's edge, read at the middle of the coarse cell it would be.
+            NeighborOpacity { x, y, z -> neighbours.opaque(x * factor + factor / 2, y * factor + factor / 2, z * factor + factor / 2) },
+            ambientOcclusion = true,
+        )
+        emit(w, mesh.quads, mesh.count, mpos, factor)
+        water(grid, mpos)
+        lamps(grid, mpos, lights)
+        return mesh.count
     }
 
     /**
