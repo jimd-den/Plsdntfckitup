@@ -924,13 +924,21 @@ class PlayViewModel(
     }
 
     fun previewBuild(from: BlockPos, to: BlockPos) {
+        // The single-block tool with the place tap paints: blocks go down as the finger moves.
+        if (session.buildTool == BuildTool.SINGLE && _state.value.build.tap == BuildTap.PLACE) return paint(from, to)
         val preview = session.previewBuild(from, to)
         _state.value = _state.value.copy(buildAffordable = preview.affordable)
         publish()
     }
 
     fun commitBuild() {
-        when (val result = session.commitBuild()) {
+        stroke?.let { done ->
+            stroke = null
+            return publish(message = if (done.laid > 1) "Laid ${done.laid}" else null)
+        }
+        val result = session.commitBuild()
+        if (result is BuildResult.Built || result is BuildResult.Erased || result is BuildResult.Painted) tick()
+        when (result) {
             is BuildResult.Built ->
                 publish(
                     message = if (result.short > 0) {
@@ -964,14 +972,14 @@ class PlayViewModel(
 
     fun undoBuild() {
         when (val r = session.undo()) {
-            is com.stratum.engine.world.UndoResult.Undone -> publish(message = "Undid ${r.what}")
+            is com.stratum.engine.world.UndoResult.Undone -> { tick(); publish(message = "Undid ${r.what}") }
             else -> publish(message = "Nothing to undo")
         }
     }
 
     fun redoBuild() {
         when (val r = session.redo()) {
-            is com.stratum.engine.world.UndoResult.Redone -> publish(message = "Redid ${r.what}")
+            is com.stratum.engine.world.UndoResult.Redone -> { tick(); publish(message = "Redid ${r.what}") }
             else -> publish(message = "Nothing to redo")
         }
     }
@@ -1012,6 +1020,7 @@ class PlayViewModel(
         val s = _state.value
         if (!s.buildMode) return beginMining(target)
         when (s.build.tap) {
+            BuildTap.PLACE -> place(target)
             BuildTap.DIG -> beginMining(target)
             BuildTap.PICK -> {
                 val picked = session.pickBlock(target)
@@ -1040,9 +1049,66 @@ class PlayViewModel(
         // here and would otherwise keep calling mine() on the old target.
         miningJob?.cancel()
         when (val result = session.place(target)) {
-            is PlaceResult.Placed -> publish(message = "Placed ${result.block.displayName}")
+            is PlaceResult.Placed -> { tick(); publish(message = "Placed ${result.block.displayName}") }
             is PlaceResult.Rejected -> publish(message = placeRejectionMessage(result.reason))
         }
+    }
+
+    /** Counts a build that landed, for the screen's haptic tick; see [BuildPanel.ticks]. */
+    private fun tick() {
+        _state.value = _state.value.copy(build = _state.value.build.copy(ticks = _state.value.build.ticks + 1))
+    }
+
+    /**
+     * A stroke of the single-block tool: the finger laying blocks as it
+     * moves, one course high, at the level of the first block it laid.
+     *
+     * Tap-by-tap is how you place one block; a fence, a path or the first
+     * course of a wall is a stroke. The level is held because every block
+     * laid becomes the thing under the finger -- without it, a stroke piles a
+     * tower where it started. Cells the finger skips over between two
+     * events are filled in, so a quick swipe leaves no gaps.
+     */
+    private var stroke: Stroke? = null
+
+    private class Stroke(var lastX: Int, var lastY: Int, val z: Int, var laid: Int)
+
+    private fun paint(from: BlockPos, to: BlockPos) {
+        val world = session.world
+        val current = stroke
+        if (current == null) {
+            val cell = session.placementPreviewFor(from) ?: return
+            if (session.place(from) is PlaceResult.Placed) {
+                stroke = Stroke(cell.x, cell.y, cell.z, 1)
+                tick()
+            }
+            publish()
+            return
+        }
+        var laid = 0
+        for ((x, y) in cellsBetween(current.lastX, current.lastY, to.x, to.y).take(MAX_STROKE_STEP)) {
+            val cell = BlockPos(x, y, current.z)
+            val below = BlockPos(x, y, current.z - 1)
+            // Only onto something: a stroke across a dip leaves the dip rather than floating a block over it.
+            if (!world.blockAt(cell).isAir || world.blockAt(below).isAir) continue
+            if (session.place(below) is PlaceResult.Placed) laid++ else break
+        }
+        current.lastX = to.x; current.lastY = to.y
+        if (laid > 0) {
+            current.laid += laid
+            tick()
+            publish()
+        }
+    }
+
+    /** The cells a straight line from one column to another passes through, the first left out. */
+    private fun cellsBetween(x0: Int, y0: Int, x1: Int, y1: Int): List<Pair<Int, Int>> {
+        val steps = maxOf(kotlin.math.abs(x1 - x0), kotlin.math.abs(y1 - y0))
+        if (steps == 0) return emptyList()
+        return (1..steps).map { i ->
+            val t = i.toFloat() / steps
+            Math.round(x0 + (x1 - x0) * t) to Math.round(y0 + (y1 - y0) * t)
+        }.distinct()
     }
 
     fun dismissMessage() {
@@ -1453,6 +1519,8 @@ class PlayViewModel(
         /** Between a world's name and the tier a waystone or the tier list opened it at. */
         private const val TIER_SEPARATOR = ", tier "
         private const val SANDBOX_REFRESH_SECONDS = 0.25f
+        /** Most blocks one move of a painting finger lays: a wild swipe across the screen is not a wall. */
+        private const val MAX_STROKE_STEP = 16
 
         fun factory(
             content: AssembledContent,
@@ -1649,6 +1717,7 @@ data class BlueprintChoice(val id: String, val name: String, val blocks: Int)
 
 /** What a tap on the world does in build mode. */
 enum class BuildTap(val label: String, val glyph: String) {
+    PLACE("Place", "▣"),
     DIG("Dig", "⛏"),
     PICK("Pick block", "◉"),
     CHISEL("Chisel", "◖"),
@@ -1675,7 +1744,13 @@ data class BuildPanel(
     val height: Int = 3,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val tap: BuildTap = BuildTap.DIG,
+    /** What a tap does in build mode. Placing, by default: in a sandbox, a tap on the world should build. */
+    val tap: BuildTap = BuildTap.PLACE,
+    /**
+     * Bumped every time a build lands -- a block laid, a drag committed, an
+     * undo or a redo -- so the screen can answer each with a haptic tick.
+     */
+    val ticks: Int = 0,
     /** Whether the world has microvoxels to chisel and heap, and models to place. */
     val canSculpt: Boolean = false,
     val brushRadius: Int = 3,

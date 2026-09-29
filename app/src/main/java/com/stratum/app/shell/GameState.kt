@@ -78,9 +78,17 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         .flowOn(Dispatchers.IO)
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
-    /** The model studio's models, for the play screen's build tray. */
+    /**
+     * The model studio's models, for the play screen's build tray. A brand
+     * new library is first seeded with the preset Igbo masks, so the tray
+     * and the studio open on something beautiful to place rather than an
+     * empty shelf; the seeding happens once, so deleted masks stay deleted.
+     */
     val microModels: StateFlow<List<com.stratum.core.domain.micro.MicroModel>> = modelRevision
-        .map { graph.microModels.all() }
+        .map {
+            runCatching { graph.microModels.seedOnce(DEFAULT_MASKS_MARKER) { com.stratum.engine.model.mask.MaskGenome.presets.map(com.stratum.engine.model.mask.IgboMaskGenerator::generate) } }
+            graph.microModels.all()
+        }
         .flowOn(Dispatchers.IO)
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -143,3 +151,6 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         modelRevision.update { it + 1 }
     }
 }
+
+/** The marker a model library keeps once it has been given the starter masks. */
+internal const val DEFAULT_MASKS_MARKER = "seeded-igbo-masks-v1"

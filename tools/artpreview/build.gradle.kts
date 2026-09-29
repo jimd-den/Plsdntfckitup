@@ -123,3 +123,23 @@ tasks.register<JavaExec>("soak") {
   workingDir = rootProject.projectDir
   maxHeapSize = System.getenv("SOAK_HEAP") ?: "256m"
 }
+
+/**
+ * Lays and undoes 50 blocks in quick taps in a microvoxel world, in real time,
+ * and reports the frames around each edit, with pictures; see PlacementBench.
+ * The label names the run, so a before and an after chart side by side:
+ *   ./gradlew :tools:artpreview:placementBench -Pbench=after
+ */
+tasks.register<JavaExec>("placementBench") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.PlacementBench")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  maxHeapSize = "2g"
+  args = listOf(
+    "docs/screenshots/build-feel",
+    (project.findProperty("bench") as String?) ?: "after",
+    rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
+  )
+}
