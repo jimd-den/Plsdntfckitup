@@ -80,6 +80,11 @@ object MicroScenePreview {
             stamps(out, content, config, hot, director, textures, args.getOrNull(1)?.let(::File))
             return
         }
+        // `geology [province ids...]`: the wild land of each province, seen from a hillside away from towns.
+        if (args.getOrNull(3) == "geology") {
+            geology(out, content, config, hot, director, textures, args.drop(4))
+            return
+        }
         if (args.getOrNull(3) == "traditions") {
             traditions(out, content, config, hot, director, textures, args.drop(4))
             return
@@ -215,6 +220,69 @@ object MicroScenePreview {
             println("wrote $file")
         }
         hot.retune(base)
+    }
+
+    /** The provinces the geology shots show by default: rivers, dunes, erosion, scree, rifts and folds. */
+    private val GEOLOGY_SHOTS = listOf(
+        "africa", "forest_hills", "rainforest_basin", "erg", "namib", "karoo", "drakensberg",
+        "rift_valley", "atlas_folds", "sandstone_escarpment", "highland_traps", "tsingy",
+    )
+
+    /**
+     * The wild land of each province: the world retuned to that one geology,
+     * and a vantage away from towns where the land does the most within a
+     * stone's throw -- a valley side, a dune field, a scarp -- seen from the
+     * game's camera and from further out.
+     */
+    private fun geology(
+        out: File, content: AssembledContent, config: WorldConfig, hot: com.stratum.engine.microbridge.HotTerrain,
+        director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String>,
+    ) {
+        val base = hot.passes
+        for (id in only.ifEmpty { GEOLOGY_SHOTS }) {
+            val land = base.firstOrNull { it.id == "micro:terrain" } ?: com.stratum.engine.microvoxel.gen.StageSpec("micro:terrain")
+            hot.retune(MicrovoxelTerrainGenerator.withStage(base, land.copy(options = land.options + mapOf("geology" to id))))?.let { error("$id: $it") }
+            val v = varied(hot.current)
+            for ((suffix, distance) in listOf("" to 40f, "-far" to 90f)) {
+                val world = StreamingWorld(content.registry, hot, config)
+                world.focusOn(BlockPos(v.first, v.second, 0))
+                val ground = world.surfaceAt(v.first, v.second)
+                val camera = SceneCamera(target = Vec3(v.first + 0.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = distance)
+                val micro = SceneBuilder(director, textures, biomeAt = { x, y -> hot.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = hot)
+                val frame = settled(micro) { micro.build(world, camera, emptyList(), WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)) }
+                val img = SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
+                runCatching {
+                    val g = img.createGraphics()
+                    g.color = java.awt.Color(0, 0, 0, 150); g.fillRect(0, HEIGHT - 34, WIDTH, 34)
+                    g.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 18); g.color = java.awt.Color.WHITE
+                    g.drawString("$id  (${v.first}, ${v.second})", 14, HEIGHT - 11); g.dispose()
+                }
+                ImageIO.write(img, "png", File(out, "geo-$id$suffix.png"))
+                println("wrote geo-$id$suffix.png (vantage ${v.first},${v.second} ground $ground)")
+            }
+        }
+        hot.retune(base)
+    }
+
+    /** Open land away from towns, above the sea, where the ground rises and falls the most nearby. */
+    private fun varied(gen: MicrovoxelTerrainGenerator): Pair<Int, Int> {
+        val footprint = gen.micro.fields.get(Fields.FOOTPRINT)
+        val surface = gen.micro.fields.require(Fields.SURFACE)
+        val sea = gen.micro.fields.require(Fields.SEA_LEVEL)
+        var best = 200 to 200; var bestScore = -1f
+        for (d in 3..14) for (k in 0 until 8) {
+            val x = (d * 48 * kotlin.math.cos(k * 0.785 + d)).toInt(); val y = (d * 48 * kotlin.math.sin(k * 0.785 + d)).toInt()
+            val mx = x * 4; val my = y * 4
+            if ((footprint?.urban(mx, my) ?: 0f) > 0f) continue
+            val h = surface.heightAt(mx, my)
+            if (h < sea + 6) continue
+            var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+            for (j in -3..3) for (i in -3..3) { val q = surface.heightAt(mx + i * 24, my + j * 24); lo = minOf(lo, q); hi = maxOf(hi, q) }
+            // Some relief, but not a sheer wall: the most varied ground that still reads as land.
+            val score = minOf(hi - lo, 120f)
+            if (score > bestScore) { bestScore = score; best = x to y }
+        }
+        return best
     }
 
     /**
