@@ -50,6 +50,14 @@ data class DioramaLook(
      */
     val nightGlow: Float = 0f,
     /**
+     * How far night is graded towards moonlight (0 off, 1 full): the sun
+     * and sky dim and cool, fog and sky go deep blue, and lamps count for
+     * more. The style's own lighting only takes some sun away at night,
+     * which reads as an overcast afternoon; lit windows need a real dark to
+     * glow against. Free: it changes the frame's lighting terms, not the shading.
+     */
+    val nightGrade: Float = 0f,
+    /**
      * Darkening along depth creases and behind silhouettes, from the depth
      * buffer in the finishing pass (0 off). A soft ink line where forms meet
      * is most of what makes a small object read at a glance. Needs a depth
@@ -96,22 +104,22 @@ data class DioramaLook(
         val OFF = DioramaLook()
 
         /**
-         * What each tier buys. LOW keeps only the night glow, which is one
-         * multiply on a value already computed. MEDIUM adds what costs a few
+         * What each tier buys. LOW keeps only the night glow and grade: one
+         * multiply on a value already computed, and new lighting terms. MEDIUM adds what costs a few
          * arithmetic operations per pixel and nothing else: grain, deeper
          * occlusion and aerial haze. HIGH adds the bevels, the depth-reading
          * finish and surfels near the hero; ULTRA widens the surfel ring and
          * adds the tilt-shift.
          */
         fun of(tier: QualityTier): DioramaLook = when (tier) {
-            QualityTier.LOW -> DioramaLook(nightGlow = NIGHT_GLOW)
-            QualityTier.MEDIUM -> DioramaLook(grain = GRAIN, occlusionDepth = 0.5f, aerialHaze = true, nightGlow = NIGHT_GLOW)
+            QualityTier.LOW -> DioramaLook(nightGlow = NIGHT_GLOW, nightGrade = 1f)
+            QualityTier.MEDIUM -> DioramaLook(grain = GRAIN, occlusionDepth = 0.5f, aerialHaze = true, nightGlow = NIGHT_GLOW, nightGrade = 1f)
             QualityTier.HIGH -> DioramaLook(
-                grain = GRAIN, bevel = 0.55f, occlusionDepth = 0.6f, aerialHaze = true, nightGlow = NIGHT_GLOW,
+                grain = GRAIN, bevel = 0.55f, occlusionDepth = 0.6f, aerialHaze = true, nightGlow = NIGHT_GLOW, nightGrade = 1f,
                 edges = 0.55f, screenOcclusion = 0.6f, surfelRadius = 12, surfelBudget = 60_000,
             )
             QualityTier.ULTRA -> DioramaLook(
-                grain = GRAIN, bevel = 0.6f, occlusionDepth = 0.6f, aerialHaze = true, nightGlow = NIGHT_GLOW,
+                grain = GRAIN, bevel = 0.6f, occlusionDepth = 0.6f, aerialHaze = true, nightGlow = NIGHT_GLOW, nightGrade = 1f,
                 edges = 0.6f, screenOcclusion = 0.7f, tiltShift = 0.0045f,
                 surfelRadius = 18, surfelBudget = 150_000, surfelDensity = 1.3f,
             )

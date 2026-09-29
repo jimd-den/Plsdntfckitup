@@ -295,7 +295,7 @@ object MicroScenePreview {
             Shot("home", home, 34f, noon),
             Shot("wilds", wild, 34f, noon),
             Shot("building", building, 19f, noon, actors = false),
-            Shot("night", home, 30f, night),
+            Shot("night", glowNear(gen, home), 26f, night),
         )
         val high = RenderSettings.of(QualityTier.HIGH)
         val looks = listOf(
@@ -325,6 +325,40 @@ object MicroScenePreview {
             // A crop at twice the size from the middle, where the surfels and bevels live.
             ImageIO.write(sideBySide(zoom(images.getValue("before")), zoom(images.getValue("ultra")), "Before (2x crop)", "After (2x crop)"), "png", File(out, "diorama-${shot.name}-closeup.png"))
         }
+    }
+
+    /**
+     * The block column, near [home], with the most glowing voxels (lit
+     * windows, lamps) in the chunk around it: where the night shot looks.
+     * [home] when the town has none.
+     */
+    private fun glowNear(gen: MicrovoxelTerrainGenerator, home: Pair<Int, Int>, chunks: Int = 6): Pair<Int, Int> {
+        val size = com.stratum.engine.microvoxel.MicroChunk.SIZE
+        val layers = com.stratum.core.domain.world.Chunk.HEIGHT / (size / gen.microPerBlock)
+        val hx = Math.floorDiv(home.first, 16); val hy = Math.floorDiv(home.second, 16)
+        var best = home; var bestScore = 0f
+        for (cy in hy - chunks..hy + chunks) for (cx in hx - chunks..hx + chunks) {
+            var n = 0; var sx = 0L; var sy = 0L
+            for (cz in 0 until layers) {
+                val mpos = com.stratum.engine.microvoxel.MicroChunkPos(cx, cy, cz)
+                val grid = gen.microChunk(mpos)
+                if (grid.isEmpty()) continue
+                for (z in 0 until size) for (y in 0 until size) for (x in 0 until size) {
+                    val m = gen.palette[grid[x, y, z]]
+                    if (m.emission < 1f) continue
+                    // Lamps, braziers and lit windows light a street; a shrine glows only indoors.
+                    val k = if ("lamp" in m.name || "brazier" in m.name || "glass" in m.name) 3 else 1
+                    n += k; sx += (mpos.originX + x) * k.toLong(); sy += (mpos.originY + y) * k.toLong()
+                }
+            }
+            if (n == 0) continue
+            // Many glowing voxels, not too far from home.
+            val gx = (sx / n / gen.microPerBlock).toInt(); val gy = (sy / n / gen.microPerBlock).toInt()
+            val score = n / (1f + (kotlin.math.abs(gx - home.first) + kotlin.math.abs(gy - home.second)) / 48f)
+            if (score > bestScore) { bestScore = score; best = gx to gy }
+        }
+        println("night vantage $best (glow score ${"%.0f".format(bestScore)})")
+        return best
     }
 
     /** The middle half of an image, doubled, pixel for pixel. */

@@ -225,7 +225,8 @@ class SceneRasterizer(
             val squash = abs(n[0] * ex + n[1] * ey + n[2] * ez).coerceIn(ShadingModel.SURFEL_MIN_SQUASH, 1f)
 
             val ndl = max(0f, n[0] * s.terms.sun[0] + n[1] * s.terms.sun[1] + n[2] * s.terms.sun[2])
-            val lit = if (ndl > 0f) sunlit(s.frame, wx + n[0] * NORMAL_OFFSET, wy + n[1] * NORMAL_OFFSET, wz + n[2] * NORMAL_OFFSET, ndl, clip) else 0f
+            val so = ShadingModel.SURFEL_SHADOW_OFFSET
+            val lit = if (ndl > 0f) sunlit(s.frame, wx + n[0] * so, wy + n[1] * so, wz + n[2] * so, ndl, clip) else 0f
             ShadingModel.shade(
                 s.terms, Surfel.red(b, i), Surfel.green(b, i), Surfel.blue(b, i), n[0], n[1], n[2],
                 Surfel.occlusion(b, i), lit, wx, wy, wz, ex, ey, ez, 0f, false,
@@ -244,7 +245,7 @@ class SceneRasterizer(
                 if (q > 1f) continue
                 val o = py * w + px
                 if (cz >= depth[o]) continue
-                val dome = 1f - ShadingModel.SURFEL_DOME * q
+                val dome = 1f + ShadingModel.SURFEL_DOME * (0.5f - q)
                 val c = o * 3
                 color[c] = r0 * dome; color[c + 1] = g0 * dome; color[c + 2] = b0 * dome
                 // No depth write: the finish reads depth for creases, and a

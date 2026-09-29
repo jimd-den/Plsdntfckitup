@@ -404,7 +404,7 @@ internal object SceneShaders {
         }
         float sunlit(vec3 w, vec3 n, float ndl) {
             if (uShadowTaps == 0) return 1.0;
-            vec4 s = uShadowViewProj * vec4(w + n * 0.04, 1.0);
+            vec4 s = uShadowViewProj * vec4(w + n * ${f(ShadingModel.SURFEL_SHADOW_OFFSET)}, 1.0);
             vec3 p = s.xyz / s.w * 0.5 + 0.5;
             if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) return 1.0;
             float bias = 0.0015 + 0.004 * (1.0 - ndl);
@@ -490,7 +490,7 @@ internal object SceneShaders {
             float across = -u.x * vAxis.y + u.y * vAxis.x;
             float q = along * along + across * across;
             if (q > 1.0) discard;
-            fragColor = vec4(vColor * (1.0 - DOME * q), 1.0);
+            fragColor = vec4(vColor * (1.0 + DOME * (0.5 - q)), 1.0);
         }
     """
 

@@ -241,7 +241,9 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
                 }
                 val wx = mpos.originX + vx; val wy = mpos.originY + vy; val wz = mpos.originZ + vz
                 val h0 = hash(wx, wy, wz, face * 4 + cell, material.id.toInt())
-                if ((h0 and 0xFFFF) / 65536f >= chance) continue
+                // Patchy, not even: gravel gathers in drifts and lawns go bald in places,
+                // which is what makes a scatter look placed by hand rather than sprinkled.
+                if ((h0 and 0xFFFF) / 65536f >= chance * patch(wx, wy, wz)) continue
                 val h1 = mix(h0); val h2 = mix(h1); val h3 = mix(h2)
                 // Where in the face: the cell's centre, jittered within it.
                 val fu = ((cell and 1) + 0.5f + (unit(h1) - 0.5f) * 0.8f) * 0.5f
@@ -302,7 +304,8 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
             val at = starts[ranks[i].toInt() and 255]++
             System.arraycopy(raw, i * Surfel.INTS, out, at * Surfel.INTS, Surfel.INTS)
         }
-        return SurfelBatch(originX, originY, out, count, minZ, maxZ)
+        // Padded by a step: positions are quantised, and the bounds must hold what is drawn.
+        return SurfelBatch(originX, originY, out, count, minZ - Surfel.POSITION_STEP, maxZ + Surfel.POSITION_STEP)
     }
 
     private fun add(lx: Float, ly: Float, z: Float, rgb: Int, radius: Float, nx: Float, ny: Float, nz: Float, ao: Float, rank: Float) {
@@ -331,10 +334,13 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
                 r *= lift; g *= lift; b *= lift
             }
             Kind.PEBBLE -> {
-                // Stones sit nearer grey than the rock they lie on, some lighter, some darker.
+                // Stones a little greyer than the rock they lie on and sun-bleached on top, so
+                // they read as pale pebbles catching the light rather than dark holes.
                 val luma = 0.3f * r + 0.59f * g + 0.11f * b
-                r += (luma - r) * 0.35f; g += (luma - g) * 0.35f; b += (luma - b) * 0.35f
+                r += (luma - r) * 0.12f; g += (luma - g) * 0.12f; b += (luma - b) * 0.12f
+                r *= PEBBLE_BLEACH; g *= PEBBLE_BLEACH; b *= PEBBLE_BLEACH
             }
+            Kind.GRIT -> { r *= GRIT_BLEACH; g *= GRIT_BLEACH; b *= GRIT_BLEACH }
             else -> Unit
         }
         // A whisper of warm or cool, so neighbours differ in hue as well as value.
@@ -344,12 +350,37 @@ class SurfelScatter(private val palette: MaterialPalette, private val density: F
         return (ch(r) shl 16) or (ch(g) shl 8) or ch(b)
     }
 
+    /**
+     * 0..[PATCH_MAX] multiplier on the scatter chance: smooth value noise
+     * over [PATCH_CELL]-voxel cells, so density drifts across the ground.
+     */
+    private fun patch(wx: Int, wy: Int, wz: Int): Float {
+        val gx = Math.floorDiv(wx, PATCH_CELL); val gy = Math.floorDiv(wy, PATCH_CELL)
+        val fx = (wx - gx * PATCH_CELL + 0.5f) / PATCH_CELL; val fy = (wy - gy * PATCH_CELL + 0.5f) / PATCH_CELL
+        val gz = Math.floorDiv(wz, PATCH_CELL * 2)
+        fun corner(i: Int, j: Int) = unit(hash(gx + i, gy + j, gz, 99, 7))
+        val sx = fx * fx * (3f - 2f * fx); val sy = fy * fy * (3f - 2f * fy)
+        val top = corner(0, 0) + (corner(1, 0) - corner(0, 0)) * sx
+        val bottom = corner(0, 1) + (corner(1, 1) - corner(0, 1)) * sx
+        val n = top + (bottom - top) * sy
+        return ShadingModel.smoothstep(PATCH_LOW, PATCH_HIGH, n) * PATCH_MAX
+    }
+
     /** What a material grows, decided once per material from its name and properties. */
     fun kindOf(id: Short): Kind = kinds.getOrPut(id) { classify(palette[id]) }
 
     companion object {
         /** Surfels one chunk may hold: 384 KB, a third of what its mesh typically takes. */
         const val MAX_PER_CHUNK = 32_768
+
+        /** Drifts of density are about this many voxels (three blocks) across. */
+        const val PATCH_CELL = 12
+        const val PATCH_LOW = 0.15f
+        const val PATCH_HIGH = 0.85f
+        /** Densest drifts grow this many times the base chance; the mean stays near 1. */
+        const val PATCH_MAX = 2f
+        const val PEBBLE_BLEACH = 1.1f
+        const val GRIT_BLEACH = 1.06f
 
         private val NORMALS = floatArrayOf(1f, 0f, 0f, -1f, 0f, 0f, 0f, 1f, 0f, 0f, -1f, 0f, 0f, 0f, 1f, 0f, 0f, -1f)
 

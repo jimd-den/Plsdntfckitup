@@ -398,8 +398,18 @@ object ShadingModel {
     const val SURFEL_PULL = 1.5f
     /** Surfels flatter than this to the eye are drawn at this squash, not thinner. */
     const val SURFEL_MIN_SQUASH = 0.3f
-    /** Darkening towards a surfel's rim: each disc reads as a tiny dome. */
+    /**
+     * Light at a surfel's centre, dark at its rim, even on average: each disc
+     * reads as a tiny dome without the whole field of them going darker
+     * than the face it grows on. Brightness is `1 + DOME * (0.5 - q)`, q the squared radius.
+     */
     const val SURFEL_DOME = 0.3f
+    /**
+     * How far along its normal a surfel looks up the sun's shadow map. More
+     * than a face's offset: a surfel stands a hair proud of its face, and
+     * with a face's offset a third of them shadowed themselves into pepper.
+     */
+    const val SURFEL_SHADOW_OFFSET = 0.12f
     /** Smallest drawn radius, in output pixels. */
     const val SURFEL_MIN_PIXELS = 0.35f
 }
