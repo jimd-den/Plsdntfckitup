@@ -440,6 +440,18 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
                 "for every town; plain: the block buildings), homeStyle (auto or a tradition), density, sacredTree, homeRecipe, homeSize, homeLayout, homeWalls, homeVariant.",
         )
 
+        /**
+         * The stages a recipe runs before anything is tuned: its own `passes`,
+         * else its preset's -- what a described scene is laid over. Empty when
+         * the recipe is not a microvoxel one.
+         */
+        fun basePasses(recipe: com.stratum.core.domain.world.TerrainRecipe): List<StageSpec> {
+            if (recipe.generatorId != com.stratum.core.domain.world.TerrainRecipe.MICROVOXEL) return emptyList()
+            if (recipe.passes.isNotEmpty()) return recipe.passes.map { StageSpec(it.id, it.options) }
+            val preset = recipe.options["preset"] ?: ANCIENT
+            return presets[preset] ?: MicroWorldgen.presets[preset].orEmpty()
+        }
+
         /** Every stage the bridge can build: the engine's, plus the ones that need the packs. */
         private fun stagesFor(context: TerrainContext, blocks: BlockMaterials, biomeId: (Int, Int) -> String?): StageRegistry =
             MicroWorldgen.stages.copy().register(SettlementsStage.ID, SettlementsStage(context, blocks, biomeId))

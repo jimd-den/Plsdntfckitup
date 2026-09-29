@@ -23,6 +23,8 @@ sealed interface WorldLaunch {
         val heroClassId: String?,
         val rules: WorldRules,
         val seed: Long,
+        /** The land a described scene asked for, replacing the packs' stages; null keeps them. */
+        val terrainPasses: List<com.stratum.core.domain.world.PassSpec>? = null,
     ) : WorldLaunch {
         override val worldId: String get() = identity.id
     }

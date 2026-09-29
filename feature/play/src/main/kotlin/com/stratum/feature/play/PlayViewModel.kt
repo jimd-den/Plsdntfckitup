@@ -341,6 +341,20 @@ class PlayViewModel(
         reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, land.copy(options = land.options + options)))
     }
 
+    /**
+     * The whole scene from words, laid over the land as it stands: the
+     * province, the relief, the towns and their buildings, the growth. What
+     * the words say about danger waits for the next world; the rules of this
+     * one are the ones it was begun with.
+     */
+    fun describeScene(text: String) {
+        val hot = session.hotTerrain ?: return publish(message = "Only a microvoxel world can be reshaped")
+        val scene = com.stratum.engine.microbridge.ScenePrompt.read(text)
+        if (scene.isEmpty) return publish(message = "Nothing there names a land: try a place, a people, a climate or a mood")
+        reshape(scene.passes(hot.passes))
+        publish(message = scene.notes.take(3).joinToString(" · ") { it.substringAfter("→ ") })
+    }
+
     /** Switches a stage on (with its defaults) or off. */
     fun toggleTerrainStage(stageId: String, enabled: Boolean) {
         val hot = session.hotTerrain ?: return

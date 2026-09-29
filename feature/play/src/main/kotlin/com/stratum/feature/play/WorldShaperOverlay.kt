@@ -69,6 +69,8 @@ data class WorldShaperActions(
     val onToggleStage: (stageId: String, enabled: Boolean) -> Unit = { _, _ -> },
     val onResetStage: (stageId: String) -> Unit = {},
     val onLandShape: (Map<String, String>) -> Unit = {},
+    /** Reshapes the world from a description: land, towns, buildings, life. */
+    val onDescribe: (String) -> Unit = {},
 )
 
 /** A whole look in one tap: the land stage's options for it. */
@@ -101,6 +103,7 @@ fun WorldShaperOverlay(
     onLandShape: (Map<String, String>) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onDescribe: (String) -> Unit = {},
 ) {
     val colors = StratumTheme.colors
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -120,6 +123,19 @@ fun WorldShaperOverlay(
                 "Changes rebuild the land around you as you play. What you have built or dug stays as it is.",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.inkMuted,
+            )
+
+            // Words first: the whole scene at once, every stage it names.
+            var described by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+            Spacer(Modifier.height(Space.medium))
+            androidx.compose.material3.OutlinedTextField(
+                value = described, onValueChange = { described = it }, modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 3,
+                label = { Text("Describe a scene") },
+                placeholder = { Text("Kano's walled courtyards on a dry savanna, peaceful") },
+            )
+            StratumAction(
+                label = "Reshape from words", onClick = { if (!panel.busy && described.isNotBlank()) onDescribe(described) },
+                enabled = !panel.busy && described.isNotBlank(), modifier = Modifier.fillMaxWidth(),
             )
 
             // The one-tap shapes tune the generic hills; a geological landscape shapes itself (see its Landscape choice).

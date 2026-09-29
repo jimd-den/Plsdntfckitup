@@ -111,7 +111,7 @@ private fun Session(
     // How far the world streams is this device's choice, not the save's.
     val resumed = remember(resume) { resume?.let { it.copy(config = it.config.copy(simulationRadius = radius)) } }
     val config = remember(launch, resumed) {
-        resumed?.config ?: (launch as WorldLaunch.New).let { GameSetup.worldConfig(it.seed, radius, it.rules) }
+        resumed?.config ?: (launch as WorldLaunch.New).let { GameSetup.worldConfig(it.seed, radius, it.rules).copy(terrainPasses = it.terrainPasses) }
     }
     var seenHints by remember { mutableStateOf(graph.hints.seen()) }
 

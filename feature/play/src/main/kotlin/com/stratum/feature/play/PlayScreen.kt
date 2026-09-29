@@ -130,6 +130,7 @@ fun PlayScreen(
             onToggleStage = viewModel::toggleTerrainStage,
             onResetStage = viewModel::resetTerrainStage,
             onLandShape = viewModel::shapeLand,
+            onDescribe = viewModel::describeScene,
         )
     }
     val realmActions = remember(viewModel) {
@@ -440,6 +441,7 @@ fun PlayScreenContent(
                 onResetStage = shaperActions.onResetStage,
                 onLandShape = shaperActions.onLandShape,
                 onClose = shaperActions.onToggle,
+                onDescribe = shaperActions.onDescribe,
             )
         }
 
