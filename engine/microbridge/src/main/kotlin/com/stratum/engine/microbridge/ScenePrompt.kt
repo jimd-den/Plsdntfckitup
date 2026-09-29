@@ -43,6 +43,7 @@ data class SceneSpec(val values: Map<String, String>, val notes: List<String> = 
         set(TERRAIN, mapOf(
             "geology" to this["landscape"], "home" to this["home"]?.takeIf { (this["landscape"] ?: "africa") == "africa" },
             "height" to this["relief"], "mountains" to this["mountains"], "scale" to this["breadth"], "terrace" to this["plateaus"],
+            "erosion" to this["erosion"], "rivers" to this["rivers"], "dunes" to this["dunes"], "scree" to this["scree"], "rockDetail" to this["rockDetail"],
         ))
         this["features"]?.let { set(FEATURES, mapOf("density" to it)) }
         when (val caves = float("caves")) {
@@ -102,6 +103,11 @@ object ScenePrompt {
             Triple("mountains", "0..2", "how much of it is ridged peaks"),
             Triple("breadth", "0.3..2", "how wide hills and valleys are"),
             Triple("plateaus", "0..16", "terraces the land into shelves; 0 off"),
+            Triple("erosion", "0..2", "with a geology: how deeply running water cuts valleys, and the gravel fans it lays below them; 0 none"),
+            Triple("rivers", "0..2", "with a geology: how many streams run with water, with levees and floodplain silt; 0 none"),
+            Triple("dunes", "0..2", "with a geology: how tall the dunes stand and how many barchans roam the sand seas"),
+            Triple("scree", "0..2", "with a geology: how much rubble piles at the foot of cliffs"),
+            Triple("rockDetail", "0..2", "with a geology: how many dykes, quartz veins, ore lenses and nodules cut the rock"),
             Triple("vegetation", "0..2", "overall greenness: grass and trees together"),
             Triple("trees", "0..2", "tree density; 0 treeless"),
             Triple("grass", "0..2", "ground cover density"),
@@ -132,6 +138,7 @@ object ScenePrompt {
         Provinces.SAHEL_PLAIN, Provinces.SANDSTONE_ESCARPMENT, Provinces.RIFT, Provinces.TRAPS, Provinces.VOLCANIC_NECKS,
         Provinces.ERG, Provinces.REG_HAMADA, Provinces.SALT_PAN, Provinces.KALAHARI, Provinces.NAMIB, Provinces.KAROO,
         Provinces.DRAKENSBERG, Provinces.FOLD_BELT, Provinces.TSINGY, Provinces.CORAL_COAST,
+        Provinces.CANYON, Provinces.COASTAL_DUNES, Provinces.MONTANE, Provinces.SHIELD,
     )
 
     /** What a language model is told: describe the scene as one JSON object of these keys, and nothing else. */
@@ -177,6 +184,7 @@ object ScenePrompt {
             "mountains" -> num(0f, 2f)
             "breadth" -> num(0.3f, 2f)
             "plateaus" -> v.toFloatOrNull()?.toInt()?.coerceIn(0, 16)?.toString()
+            "erosion", "rivers", "dunes", "scree", "rockDetail" -> num(0f, 2f)
             "vegetation", "trees", "grass", "features" -> num(0f, 2f)
             "tallGrass", "caves", "invented", "ornament", "towers", "variety", "cities" -> num(0f, 1f)
             "forest" -> v.takeIf { it == "tropical" || it == "temperate" }
@@ -234,6 +242,10 @@ object ScenePrompt {
         rule("atlas", "morocco", "maghreb", note = "The Atlas folds") { province(Provinces.FOLD_BELT) },
         rule("tsingy", "madagascar", "karst", "limestone needles", note = "Tsingy karst") { province(Provinces.TSINGY) },
         rule("coast", "coastal", "beach", "reef", "island", "islands", "zanzibar", "swahili coast", note = "The coral coast") { province(Provinces.CORAL_COAST) },
+        rule("fish river", "canyon country", "canyonlands", note = "Canyon country: flat beds over an old basement") { province(Provinces.CANYON) },
+        rule("coastal dunes", "dune coast", "lagoon coast", "maputaland", "mozambique coast", note = "Coastal dune cordons and lagoons") { province(Provinces.COASTAL_DUNES) },
+        rule("montane", "moorland", "nyika", "bale mountains", "mountain grassland", note = "A cool montane plateau") { province(Provinces.MONTANE) },
+        rule("craton", "shield", "greenstone", "gold fields", "copperbelt", note = "The old basement shield") { province(Provinces.SHIELD) },
         // Peoples and places: how their towns are built.
         rule("djenne", "djenné", "timbuktu", "mud mosque", "mali", "mopti", "sudano", note = "Sudano-Sahelian mud architecture") { tradition("sudano_sahelian"); putIfAbsent("landscape", Provinces.SAHEL_PLAIN) },
         rule("kano", "hausa", "zaria", "katsina", note = "Hausa courtyard houses with zanko pinnacles") { tradition("hausa"); putIfAbsent("landscape", Provinces.SAHEL_PLAIN) },
@@ -260,6 +272,11 @@ object ScenePrompt {
         rule("mesa", "mesas", "tableland", "tablelands", "terraces", "terraced", note = "Stepped tablelands") { this["plateaus"] = "6" },
         rule("vast", "wide", "sweeping", "open", note = "Broad landforms") { this["breadth"] = "1.60" },
         rule("canyons", "gorges", "ravines", note = "Deep-cut relief") { this["relief"] = "1.00"; this["breadth"] = "0.60" },
+        rule("rivers", "river", "floodplain", "streams", "waterways", note = "Many rivers") { this["rivers"] = "1.60" },
+        rule("no rivers", "riverless", note = "No rivers") { this["rivers"] = "0" },
+        rule("eroded", "badlands", "gullies", "weathered", note = "Deeply eroded") { this["erosion"] = "1.70" },
+        rule("scree", "talus", "rubble", "rockfall", note = "Scree below the cliffs") { this["scree"] = "1.70" },
+        rule("ore", "mines", "mining", "veins", "prospecting", "dykes", note = "Veined, ore-bearing rock") { this["rockDetail"] = "1.80" },
         rule("caves", "caverns", "underground", "tunnels", note = "Riddled with caves") { this["caves"] = "0.60" },
         rule("boulders", "rock formations", "termite mounds", "arches", note = "Rock features") { this["features"] = "1.60" },
         // Life.
