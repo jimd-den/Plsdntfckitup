@@ -947,7 +947,12 @@ class PlayViewModel(
         }
     }
 
-    private val modelChoices: List<ModelChoice> = microModels.map { m ->
+    /**
+     * The studio's models as the tray lists them. A function, not a property:
+     * [publish] runs from `init`, before a property declared this far down
+     * would have been set, and read it as null.
+     */
+    private fun modelChoices(): List<ModelChoice> = microModels.map { m ->
         val (bx, by, bz) = m.blocks()
         ModelChoice(m.id, m.name, m.filledCount, "$bx×$by×$bz")
     }
@@ -1076,7 +1081,7 @@ class PlayViewModel(
             build = _state.value.build.copy(
                 height = session.buildHeight, canUndo = session.canUndo, canRedo = session.canRedo,
                 canSculpt = session.canSculpt, brushRadius = session.sculptBrush.radius, brushMaterial = session.sculptBrush.material,
-                models = modelChoices,
+                models = modelChoices(),
             ),
             skills = snapshot.skills,
             activeBoons = snapshot.activeBoons,

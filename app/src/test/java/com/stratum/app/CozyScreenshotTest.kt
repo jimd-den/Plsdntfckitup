@@ -70,6 +70,16 @@ class CozyScreenshotTest {
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/build_tray_sculpting.png")
     }
 
+    /** The play screen's view model publishes from `init`; with studio models to list it once crashed there, before the world loaded. */
+    @Test
+    fun play_starts_with_studio_models() {
+        val content = GameSetup.assemble()
+        val model = MicroModel("m", "Pillar", 4, 4, 8, listOf("#8A8A86"), IntArray(4 * 4 * 8) { 1 })
+        val factory = com.stratum.feature.play.PlayViewModel.factory(content, WorldConfig(seed = 5L, simulationRadius = 1), microModels = listOf(model))
+        val vm = factory.create(com.stratum.feature.play.PlayViewModel::class.java)
+        org.junit.Assert.assertEquals(listOf("Pillar"), vm.state.value.build.models.map { it.name })
+    }
+
     @Test
     fun model_studio() {
         val library = mutableListOf<MicroModel>()
