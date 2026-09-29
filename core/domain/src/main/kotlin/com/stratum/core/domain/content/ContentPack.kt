@@ -124,6 +124,12 @@ data class ContentPack(
     val traits: List<com.stratum.core.domain.combat.TraitDefinition> = emptyList(),
     /** Flasks the player carries, refilled by kills. */
     val flasks: List<com.stratum.core.domain.combat.FlaskDefinition> = emptyList(),
+    /**
+     * How characters move when drawn as mask spirits: named procedural
+     * motion profiles that override the built-in ones by id, or add new ones
+     * a monster can name. See [com.stratum.core.domain.motion.MotionProfile].
+     */
+    val motionProfiles: List<com.stratum.core.domain.motion.MotionProfile> = emptyList(),
 ) {
     val blockCount: Int get() = blocks.size
 

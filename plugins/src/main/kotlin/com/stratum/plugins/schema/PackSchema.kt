@@ -65,6 +65,8 @@ internal data class PackSchema(
     val statuses: List<StatusSchema> = emptyList(),
     val traits: List<TraitSchema> = emptyList(),
     val flasks: List<FlaskSchema> = emptyList(),
+    /** Mask spirits' motion: overrides of the built-in profiles, and new ones monsters can name. */
+    val motionProfiles: List<MotionProfileSchema> = emptyList(),
 ) {
     fun toDomain() = ContentPack(
         id = id, name = name, author = author, version = version, description = description, origin = PackOrigin.IMPORTED,
@@ -85,6 +87,7 @@ internal data class PackSchema(
         structureTemplates = structureTemplates.map { it.toDomain() },
         models = models.map { it.toDomain() },
         statuses = statuses.map { it.toDomain() }, traits = traits.map { it.toDomain() }, flasks = flasks.map { it.toDomain() },
+        motionProfiles = motionProfiles.map { it.toDomain() },
     )
 
     companion object {
@@ -106,6 +109,7 @@ internal data class PackSchema(
             p.structureTemplates.map(StructureTemplateSchema::of),
             models = p.models.map(ModelSchema::of),
             statuses = p.statuses.map(StatusSchema::of), traits = p.traits.map(TraitSchema::of), flasks = p.flasks.map(FlaskSchema::of),
+            motionProfiles = p.motionProfiles.map(MotionProfileSchema::of),
         )
     }
 }

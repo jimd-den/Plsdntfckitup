@@ -98,6 +98,7 @@ class ContentPackAssembler {
             statuses = merger.merge(ContentPack::statuses, com.stratum.core.domain.status.StatusDefinition::id),
             traits = merger.merge(ContentPack::traits, com.stratum.core.domain.combat.TraitDefinition::id),
             flasks = merger.merge(ContentPack::flasks, com.stratum.core.domain.combat.FlaskDefinition::id),
+            motionProfiles = merger.merge(ContentPack::motionProfiles, com.stratum.core.domain.motion.MotionProfile::id),
             suggestedRules = packs.lastOrNull { it.rules != null }?.rules ?: com.stratum.core.domain.world.WorldRules(),
             itemBases = merger.merge(ContentPack::itemBases, ItemBase::id),
             uniques = merger.merge(ContentPack::uniques, UniqueDefinition::id),
@@ -362,7 +363,12 @@ data class AssembledContent(
     val statuses: List<com.stratum.core.domain.status.StatusDefinition> = emptyList(),
     val traits: List<com.stratum.core.domain.combat.TraitDefinition> = emptyList(),
     val flasks: List<com.stratum.core.domain.combat.FlaskDefinition> = emptyList(),
+    /** Mask spirits' motion profiles the packs bring, later packs winning by id. */
+    val motionProfiles: List<com.stratum.core.domain.motion.MotionProfile> = emptyList(),
 ) {
+    /** The packs' motion profiles by id, for [com.stratum.core.domain.motion.MotionProfiles.resolve]. */
+    val motionOverrides: Map<String, com.stratum.core.domain.motion.MotionProfile> get() = motionProfiles.associateBy { it.id }
+
     /**
      * Everything items are made from: every base, short-form weapons
      * included, grown into ladders, with the affixes, uniques, sets and

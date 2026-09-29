@@ -250,12 +250,16 @@ internal data class EnemySchema(
     val role: String = SchemaValues.name(ENEMY.role),
     val skills: List<MonsterSkillSchema> = emptyList(),
     val phases: List<BossPhaseSchema> = emptyList(),
+    /** The mask it wears as a mask spirit: a genome code or a preset's name; null derives one. */
+    val mask: String? = null,
+    /** Its motion profile's id; null takes its mask tradition's. */
+    val motion: String? = null,
 ) {
     fun toDomain() = EnemyDefinition(
         id, name, description, SchemaValues.enum<EnemyRank>(rank, "enemy '$id' rank"), stats.toDomain(), damageType, moveSpeed,
         aggroRange, fleeBelowHealth, canFlee, experience, spawnBiomes, spawnWeight, bonusDropChance,
         SchemaValues.color(bodyColor, "enemy '$id' bodyColor"), spriteSet, faction, SchemaValues.enum<CombatRole>(role, "enemy '$id' role"),
-        skills.map { it.toDomain() }, phases.map { it.toDomain("enemy '$id'") },
+        skills.map { it.toDomain() }, phases.map { it.toDomain("enemy '$id'") }, mask = mask, motion = motion,
     )
 
     companion object {
@@ -263,6 +267,7 @@ internal data class EnemySchema(
             e.id, e.name, e.description, SchemaValues.name(e.rank), StatsSchema.of(e.baseStats), e.damageTypeId, e.moveSpeed, e.aggroRange,
             e.fleeBelowHealth, e.canFlee, e.experience, e.spawnBiomeIds, e.spawnWeight, e.bonusDropChance, SchemaValues.color(e.bodyColor), e.spriteSetId,
             e.factionId, SchemaValues.name(e.role), e.skills.map(MonsterSkillSchema::of), e.phases.map(BossPhaseSchema::of),
+            e.mask, e.motion,
         )
     }
 }
