@@ -103,6 +103,14 @@ class SceneFrame(
     val residentTerrain: List<MeshBatch> = terrain,
     /** Where the world is cut open so the player is never hidden; null cuts nothing. Applies to [terrain] and [models], never to actors. */
     val reveal: Reveal? = null,
+    /** Which ingredients of the handcrafted finish to draw; see [DioramaLook]. */
+    val look: com.stratum.engine.scene.quality.DioramaLook = com.stratum.engine.scene.quality.DioramaLook.OFF,
+    /** 0 at noon, 1 at midnight, eased: how far lit windows and lamps are into their night glow. */
+    val night: Float = 0f,
+    /** Surfels near the focus, per chunk, as thinned for this frame; see [SurfelLod]. Drawn opaque, after the terrain. */
+    val surfels: List<SurfelDraw> = emptyList(),
+    /** Every chunk's surfels in the meshed square, drawn or not, for a backend to keep on the GPU like [residentTerrain]. */
+    val residentSurfels: List<SurfelBatch> = emptyList(),
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -154,7 +162,7 @@ class SceneBuilder(
 ) {
     private val chunks = ChunkMeshCache(
         TerrainMesher(scene, textures, biomeAt),
-        microTerrain?.let(::MicroDetailMesher),
+        microTerrain?.let { MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity) },
         settings.microDetailRadius,
         settings.microFarRadius,
     )
@@ -189,7 +197,12 @@ class SceneBuilder(
         val models: MeshBatch? = null,
         /** Each mesh's box, six floats apiece (min x, y, z, max x, y, z), for culling against the view. */
         val bounds: FloatArray = FloatArray(0),
+        /** Surfels of the detailed chunks; see [SurfelScatter]. */
+        val surfels: List<SurfelBatch> = emptyList(),
     )
+
+    /** This frame's bloom gain from the night glow; 1 by day. */
+    private var nightSwell = 1f
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
     private var terrainGeneration = Long.MIN_VALUE
@@ -274,6 +287,8 @@ class SceneBuilder(
         // through as a black staircase; fog is total before the meshed edge,
         // and the sky leans towards the fog colour, so the boundary dissolves.
         val edge = camera.distance + radius * EDGE_FOG_SHARE
+        val night = nightOf(time)
+        nightSwell = 1f + settings.diorama.nightGlow * night * NIGHT_BLOOM_SWELL
         val lighting = styled.copy(
             fogFloor = camera.target.z - FOG_FLOOR_DEPTH,
             fogStart = minOf(styled.fogStart + camera.distance, edge - MIN_FOG_SPAN),
@@ -286,7 +301,7 @@ class SceneBuilder(
             val toEye = (camera.eye - camera.target).let { Vec3(it.x, it.y, 0f).normalized() }
             val fill = Vec3(toEye.x, toEye.y, FILL_LIFT).normalized()
             lit.copy(fillX = fill.x, fillY = fill.y, fillZ = fill.z)
-        }
+        }.let { lit -> moonlit(lit, night * settings.diorama.nightGrade) }
 
         cutout.clear(); decals.clear(); glows.clear(); actorMesh.clear()
         run {
@@ -318,7 +333,9 @@ class SceneBuilder(
             if (!volume.mayShow(light.x, light.y, light.z, BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength))) return@forEach
             // A light you can see the source of. Point lights colour the ground;
             // the bloom is what tells the eye where the fire actually is.
-            glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength), light.color, BLOOM_OPACITY)
+            // At night the bloom swells with the glow, so a lamp reads from across the square.
+            val swell = nightSwell
+            glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength) * swell, light.color, BLOOM_OPACITY * swell)
         }
         actors.forEach { actor(it, camera, eyeLevel) }
         pulses.update(world, cx, cy, worldRevision, time.elapsedSeconds)
@@ -370,7 +387,49 @@ class SceneBuilder(
             reveal = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
                 ?.takeIf { revealRadius > 0f }
                 ?.let { Reveal(it.x, it.y, it.z, revealRadius) },
+            look = settings.diorama,
+            night = night,
+            surfels = if (settings.diorama.surfels) SurfelLod.select(
+                terrain.surfels, camera.target.x, camera.target.y, settings.diorama.surfelRadius, settings.diorama.surfelBudget,
+            ) { b -> volume.intersects(b.originX.toFloat(), b.originY.toFloat(), b.minZ, b.originX + Chunk.SIZE.toFloat(), b.originY + Chunk.SIZE.toFloat(), b.maxZ) }
+            else emptyList(),
+            residentSurfels = terrain.surfels,
         )
+    }
+
+    /**
+     * How far into the night it is, for the glow of windows and lamps: 0
+     * through the day, rising through dusk to 1 at midnight. The same
+     * noon-to-midnight triangle the art director darkens the sun by, eased
+     * so the windows only come on once the light has really gone.
+     */
+    /**
+     * The night grade ([com.stratum.engine.scene.quality.DioramaLook.nightGrade]):
+     * sun and sky dimmed and cooled towards moonlight by [n], fog and sky
+     * deepened, lamps and the hero's light strengthened. [n] 0 returns
+     * [lit] itself.
+     */
+    private fun moonlit(lit: com.stratum.core.domain.art.SceneLighting, n: Float): com.stratum.core.domain.art.SceneLighting {
+        if (n <= 0f) return lit
+        return lit.copy(
+            sunIntensity = lit.sunIntensity * (1f - MOON_SUN_LOSS * n),
+            sunColor = Tint.mix(lit.sunColor, MOONLIGHT, MOON_TINT * n),
+            ambientIntensity = lit.ambientIntensity * (1f - MOON_AMBIENT_LOSS * n),
+            skyAmbient = Tint.mix(lit.skyAmbient, MOON_SKY, MOON_TINT * n),
+            groundAmbient = Tint.mix(lit.groundAmbient, MOON_GROUND, MOON_TINT * n * 0.6f),
+            fogColor = Tint.mix(lit.fogColor, MOON_FOG, MOON_TINT * n),
+            skyTop = Tint.mix(lit.skyTop, MOON_SKY_TOP, MOON_TINT * n),
+            skyBottom = Tint.mix(lit.skyBottom, MOON_FOG, MOON_TINT * n),
+            saturation = lit.saturation * (1f - MOON_DESATURATE * n),
+            pointLightGain = lit.pointLightGain * (1f + MOON_LAMP_GAIN * n),
+            heroLight = lit.heroLight * (1f + MOON_LAMP_GAIN * 0.5f * n),
+        )
+    }
+
+    private fun nightOf(time: WorldTime): Float {
+        val phase = ((time.dayFraction % 1f) + 1f) % 1f
+        val dark = (abs(phase - 0.5f) / 0.5f).coerceIn(0f, 1f)
+        return ShadingModel.smoothstep(NIGHT_GLOW_START, 1f, dark)
     }
 
     private fun terrainAround(
@@ -396,6 +455,7 @@ class SceneBuilder(
                 details = results.flatMap { it.details },
                 models = modelProps(props),
                 bounds = boundsOf(meshes),
+                surfels = results.mapNotNull { it.surfels },
             )
             // Styles of props still in the square are kept; the rest are let go.
             val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)
@@ -541,7 +601,7 @@ class SceneBuilder(
             silhouette(camera, baseX, baseY, baseZ, style, opacity)
         }
         if (Tint.alpha(style.glow) > 0) {
-            glow(camera, baseX, baseY, baseZ + style.scale * 0.8f, style.scale * 1.6f, style.glow, Tint.alpha(style.glow) / 255f)
+            glow(camera, baseX, baseY, baseZ + style.scale * 0.8f, style.scale * 1.6f * nightSwell, style.glow, Tint.alpha(style.glow) / 255f * nightSwell)
         }
     }
 
@@ -1132,6 +1192,21 @@ class SceneBuilder(
     companion object {
         /** Blocks meshed around the camera target in each direction. */
         const val REGION_STEP = 6
+        /** How dark (0 noon, 1 midnight) it must be before windows start to glow. */
+        const val NIGHT_GLOW_START = 0.45f
+        /** Bloom radius and opacity gained per unit of night glow at midnight. */
+        const val NIGHT_BLOOM_SWELL = 0.15f
+        // The night grade: moonlight a pale blue-white, the sky and fog deep blue.
+        const val MOONLIGHT = 0xFFA4B8F0L
+        const val MOON_SKY = 0xFF5068A8L
+        const val MOON_GROUND = 0xFF22263CL
+        const val MOON_FOG = 0xFF1B2340L
+        const val MOON_SKY_TOP = 0xFF0C1026L
+        const val MOON_TINT = 0.75f
+        const val MOON_SUN_LOSS = 0.6f
+        const val MOON_AMBIENT_LOSS = 0.35f
+        const val MOON_DESATURATE = 0.15f
+        const val MOON_LAMP_GAIN = 0.8f
         /** How far past a chunk's edge its shadow may reach into view, in blocks. */
         const val TERRAIN_SHADOW_MARGIN = 8f
         /** Off-screen chunks meshed per frame; see [ChunkMeshCache]. */

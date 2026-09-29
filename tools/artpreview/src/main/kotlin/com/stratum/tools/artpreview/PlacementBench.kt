@@ -58,6 +58,8 @@ object PlacementBench {
     private const val PLACE_EVERY = 4
     private const val PLACEMENTS = 50
     private const val WALL_LENGTH = 12
+    /** MEDIUM, the phone default; BENCH_TIER=HIGH shows the edit with surfels and the full diorama finish. */
+    private val BENCH_TIER = QualityTier.valueOf(System.getenv("BENCH_TIER") ?: "MEDIUM")
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -106,7 +108,7 @@ object PlacementBench {
 
         fun world(): StreamingWorld = StreamingWorld(content.registry, generator, config).also { it.focusOn(BlockPos(home.first, home.second, 0)) }
 
-        fun builder() = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.MEDIUM), microTerrain = generator)
+        fun builder() = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = RenderSettings.of(BENCH_TIER), microTerrain = generator)
 
         fun camera(world: StreamingWorld, distance: Float = 34f): SceneCamera {
             val (x, y) = home
@@ -321,7 +323,7 @@ object PlacementBench {
         val quiet = frames.filterNot { s -> (0..3).any { (s.frame - it) in edits } }
         val ms = around.map { it.ms }
         return buildString {
-            appendLine("Placement bench ($label): ${edits.size} edits (50 placed, then 50 undone), one every $PLACE_EVERY frames at 30 fps, MEDIUM tier, ${Runtime.getRuntime().availableProcessors()} cores")
+            appendLine("Placement bench ($label): ${edits.size} edits (50 placed, then 50 undone), one every $PLACE_EVERY frames at 30 fps, $BENCH_TIER tier, ${Runtime.getRuntime().availableProcessors()} cores")
             appendLine("  frames around edits: worst %.1f ms, p95 %.1f ms, mean %.2f ms (%d frames)".format(ms.maxOrNull() ?: 0.0, percentile(ms, 0.95), ms.average(), ms.size))
             appendLine("  quiet frames:        worst %.1f ms, p95 %.1f ms, mean %.2f ms".format(quiet.maxOfOrNull { it.ms } ?: 0.0, percentile(quiet.map { it.ms }, 0.95), quiet.map { it.ms }.average()))
             appendLine("  chunks block-meshed on the frame: ${frames.sumOf { it.meshed }}")

@@ -5,6 +5,9 @@ import com.stratum.engine.scene.Mat4
 import com.stratum.engine.scene.MeshBatch
 import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
+import com.stratum.engine.scene.Surfel
+import com.stratum.engine.scene.SurfelDraw
+import com.stratum.engine.scene.SurfelLod
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureLibrary
 import com.stratum.engine.scene.Vertex
@@ -57,10 +60,13 @@ class SceneRasterizer(
         val surface = Surface(terms, frame, eye.x, eye.y, eye.z, lightColors, shade)
         // The land and its models open up around the player; actors and the rest never do.
         frame.opaque.forEach { rasterize(it, viewProj, surface, if (it === frame.actors) null else frame.reveal) }
+        // Surfels after the opaque pass, as the GPU draws them: depth-tested against the land they lie on.
+        frame.surfels.forEach { surfels(it, viewProj, surface) }
         rasterize(frame.cutout, viewProj, surface)
         rasterize(frame.decals, viewProj, surface)
         rasterize(frame.glows, viewProj, surface)
 
+        if (frame.look.readsDepth) depthFinish(frame)
         return resolve(terms)
     }
 
@@ -146,13 +152,171 @@ class SceneRasterizer(
         return lit / 9f
     }
 
-    private class Surface(
+    private inner class Surface(
         val terms: ShadingModel.Terms,
         val frame: SceneFrame,
         val eyeX: Float, val eyeY: Float, val eyeZ: Float,
         val lightColors: Array<FloatArray>,
         val out: FloatArray,
-    )
+    ) {
+        val look = frame.look
+        val focus = frame.camera.target
+        /** World size of one output pixel at distance 1: what the bevel fade measures voxels against. */
+        val pixelAngle = (2.0 * kotlin.math.tan(Math.toRadians(frame.camera.fovY / 2.0)) / height).toFloat()
+        val grain = FloatArray(3)
+        val normal = FloatArray(3)
+        val haze = FloatArray(3)
+    }
+
+    /** Aerial haze, then the fog, over the lit colour in [Surface.out], in place; the GLSL twin ends LIT_FRAGMENT. */
+    private fun atmosphere(s: Surface, dist: Float, wx: Float, wy: Float, wz: Float) {
+        if (s.look.aerialHaze) {
+            val amount = ShadingModel.haze(s.terms, dist, s.frame.camera.distance, wz, s.focus.z, wx - s.eyeX, wy - s.eyeY, s.haze)
+            for (k in 0 until 3) s.out[k] += (untone(s.haze[k], s.terms.exposure) - s.out[k]) * amount
+        }
+        val f = ShadingModel.fog(s.terms, dist, wz)
+        for (k in 0 until 3) s.out[k] += (untoneFog(s.terms, k) - s.out[k]) * f
+    }
+
+    /**
+     * One chunk's surfels, as the GPU draws its point sprites: lit once at
+     * the centre, then splatted as a disc squashed by how the face turns
+     * from the eye, domed towards the rim, depth-tested at a centre pulled
+     * a little towards the eye, without writing depth. Twin of
+     * SURFEL_VERTEX and SURFEL_FRAGMENT.
+     */
+    private fun surfels(draw: SurfelDraw, viewProj: FloatArray, s: Surface) {
+        val b = draw.batch
+        val clip = FloatArray(4)
+        val tip = FloatArray(4)
+        val n = s.normal
+        val pixelsPerUnit = h * s.frame.camera.projection[5] / 2f
+        val minPixels = ShadingModel.SURFEL_MIN_PIXELS * supersample
+        val radiusLimit = s.look.surfelRadius.toFloat()
+        val reveal = s.frame.reveal
+        for (i in 0 until draw.count) {
+            val wx = Surfel.x(b, i); val wy = Surfel.y(b, i); val wz = Surfel.z(b, i)
+            val fx = wx - s.focus.x; val fy = wy - s.focus.y
+            val grow = SurfelLod.size(Surfel.rank(b, i), SurfelLod.share(sqrt(fx * fx + fy * fy), radiusLimit) * draw.keep)
+            if (grow <= 0f) continue
+            if (reveal != null && ShadingModel.revealCut(reveal, s.eyeX, s.eyeY, s.eyeZ, wx, wy, wz) > 0.5f) continue
+            val radius = Surfel.radius(b, i) * grow
+            Surfel.normal(b, i, n)
+            var ex = s.eyeX - wx; var ey = s.eyeY - wy; var ez = s.eyeZ - wz
+            val dist = sqrt(ex * ex + ey * ey + ez * ez)
+            ex /= dist; ey /= dist; ez /= dist
+            val pull = radius * ShadingModel.SURFEL_PULL
+            Mat4.transform(viewProj, wx + ex * pull, wy + ey * pull, wz + ez * pull, clip)
+            if (clip[3] < NEAR_W) continue
+            val iw = 1f / clip[3]
+            val cx = (clip[0] * iw * 0.5f + 0.5f) * w
+            val cy = (1f - (clip[1] * iw * 0.5f + 0.5f)) * h
+            val cz = clip[2] * iw
+            val rp = radius * pixelsPerUnit * iw
+            if (rp < minPixels) continue
+            if (cx + rp < 0f || cy + rp < 0f || cx - rp >= w || cy - rp >= h) continue
+            // Which way the disc is foreshortened on screen: along its normal's projection.
+            Mat4.transform(viewProj, wx, wy, wz, tip)
+            val bx = tip[0] / tip[3]; val by = tip[1] / tip[3]
+            Mat4.transform(viewProj, wx + n[0] * radius, wy + n[1] * radius, wz + n[2] * radius, tip)
+            var dx = (tip[0] / tip[3] - bx) * w; var dy = -(tip[1] / tip[3] - by) * h
+            val dl = sqrt(dx * dx + dy * dy)
+            if (dl < 1e-6f) { dx = 1f; dy = 0f } else { dx /= dl; dy /= dl }
+            val squash = abs(n[0] * ex + n[1] * ey + n[2] * ez).coerceIn(ShadingModel.SURFEL_MIN_SQUASH, 1f)
+
+            val ndl = max(0f, n[0] * s.terms.sun[0] + n[1] * s.terms.sun[1] + n[2] * s.terms.sun[2])
+            val so = ShadingModel.SURFEL_SHADOW_OFFSET
+            val lit = if (ndl > 0f) sunlit(s.frame, wx + n[0] * so, wy + n[1] * so, wz + n[2] * so, ndl, clip) else 0f
+            ShadingModel.shade(
+                s.terms, Surfel.red(b, i), Surfel.green(b, i), Surfel.blue(b, i), n[0], n[1], n[2],
+                Surfel.occlusion(b, i), lit, wx, wy, wz, ex, ey, ez, 0f, false,
+                s.frame.lights, s.lightColors, s.out, occlusionDepth = s.look.occlusionDepth,
+            )
+            atmosphere(s, dist, wx, wy, wz)
+            val r0 = s.out[0]; val g0 = s.out[1]; val b0 = s.out[2]
+
+            val minX = max(0, floor(cx - rp).toInt()); val maxX = min(w - 1, ceil(cx + rp).toInt())
+            val minY = max(0, floor(cy - rp).toInt()); val maxY = min(h - 1, ceil(cy + rp).toInt())
+            for (py in minY..maxY) for (px in minX..maxX) {
+                val ux = (px + 0.5f - cx) / rp; val uy = (py + 0.5f - cy) / rp
+                val along = (ux * dx + uy * dy) / squash
+                val across = -ux * dy + uy * dx
+                val q = along * along + across * across
+                if (q > 1f) continue
+                val o = py * w + px
+                if (cz >= depth[o]) continue
+                val dome = 1f + ShadingModel.SURFEL_DOME * (0.5f - q)
+                val c = o * 3
+                color[c] = r0 * dome; color[c + 1] = g0 * dome; color[c + 2] = b0 * dome
+                // No depth write: the finish reads depth for creases, and a
+                // field of tiny bumps in it would ink every surfel.
+            }
+        }
+    }
+
+    private var finished: FloatArray? = null
+
+    /**
+     * The depth-reading half of the finish, on the supersampled buffer
+     * before tone mapping: ink in the creases, occlusion between separate
+     * pieces, and the tilt-shift blur away from the focus. Offsets are in
+     * output pixels, as the GPU's are in its scene target's. Twin of the
+     * depth block in FINISH_FRAGMENT.
+     */
+    private fun depthFinish(frame: SceneFrame) {
+        val look = frame.look
+        val cam = frame.camera
+        val out = finished?.takeIf { it.size == color.size } ?: FloatArray(color.size).also { finished = it }
+        val near = cam.near; val far = cam.far
+        fun inverse(x: Int, y: Int): Float {
+            val d = depth[y.coerceIn(0, h - 1) * w + x.coerceIn(0, w - 1)]
+            if (d == Float.MAX_VALUE) return 0f
+            return (far + near - d * (far - near)) / (2f * near * far)
+        }
+        val step = supersample
+        val pixelsPerUnit = h * cam.projection[5] / 2f
+        val focusDepth = cam.distance
+        val ring = ShadingModel.RING
+        val disc = ShadingModel.DISC
+        for (y in 0 until h) for (x in 0 until w) {
+            val o = (y * w + x) * 3
+            val wc = inverse(x, y)
+            var amount = 1f
+            var k = 1f
+            if (wc > 0f) {
+                val lin = 1f / wc
+                amount = if (look.tiltShift > 0f) ShadingModel.smoothstep(ShadingModel.TILT_NEAR, ShadingModel.TILT_FAR, abs(lin - focusDepth) / focusDepth) else 0f
+                val lap = (inverse(x - step, y) + inverse(x + step, y) + inverse(x, y - step) + inverse(x, y + step)) * 0.25f - wc
+                val rel = lap / wc * ShadingModel.EDGE_GAIN
+                val crease = rel.coerceIn(0f, 1f)
+                val rim = (-rel).coerceIn(0f, 1f) * ShadingModel.EDGE_LIGHT
+                var occ = 0f
+                if (look.screenOcclusion > 0f) {
+                    val r = ShadingModel.SCREEN_AO_RADIUS * pixelsPerUnit * wc
+                    val lo = wc * (1f - ShadingModel.SCREEN_AO_CLAMP); val hi = wc * (1f + ShadingModel.SCREEN_AO_CLAMP)
+                    var sum = 0f
+                    for (t in 0 until 8) sum += inverse((x + ring[t * 2] * r).toInt(), (y + ring[t * 2 + 1] * r).toInt()).coerceIn(lo, hi)
+                    occ = ((sum / 8f - wc) / wc * ShadingModel.SCREEN_AO_GAIN).coerceIn(0f, 1f)
+                }
+                val shade = (1f - look.edges * crease) * (1f - look.screenOcclusion * occ) + look.edges * rim
+                k = 1f + (shade - 1f) * (1f - amount)
+            } else if (look.tiltShift <= 0f) amount = 0f
+            if (amount > 0f && look.tiltShift > 0f) {
+                val r = look.tiltShift * h * amount
+                var cr = 0f; var cg = 0f; var cb = 0f
+                for (t in 0 until 12) {
+                    val sx = (x + disc[t * 2] * r).toInt().coerceIn(0, w - 1)
+                    val sy = (y + disc[t * 2 + 1] * r).toInt().coerceIn(0, h - 1)
+                    val so = (sy * w + sx) * 3
+                    cr += color[so]; cg += color[so + 1]; cb += color[so + 2]
+                }
+                out[o] = cr / 12f * k; out[o + 1] = cg / 12f * k; out[o + 2] = cb / 12f * k
+            } else {
+                out[o] = color[o] * k; out[o + 1] = color[o + 1] * k; out[o + 2] = color[o + 2] * k
+            }
+        }
+        out.copyInto(color)
+    }
 
     /** Screen-space triangles with perspective-correct attributes. */
     private fun rasterize(batch: MeshBatch, viewProj: FloatArray, s: Surface, reveal: com.stratum.engine.scene.Reveal? = null) {
@@ -283,20 +447,32 @@ class SceneRasterizer(
                 var ex = s.eyeX - wx; var ey = s.eyeY - wy; var ez = s.eyeZ - wz
                 val dist = sqrt(ex * ex + ey * ey + ez * ez)
                 ex /= dist; ey /= dist; ez /= dist
+                // Flat-coloured opaque surfaces are the microvoxels: each tiny cube its own tone, its edges rounded.
+                if (kind == MaterialKind.OPAQUE && layer > -1.5f && layer < -0.5f) {
+                    if (s.look.grain > 0f) {
+                        ShadingModel.voxelGrain(s.look.grain, wx, wy, wz, nx, ny, nz, s.grain)
+                        ar *= s.grain[0]; ag *= s.grain[1]; ab *= s.grain[2]
+                    }
+                    val bevel = ShadingModel.bevelFade(s.look.bevel, dist, s.pixelAngle)
+                    if (bevel > 0f) {
+                        s.normal[0] = nx; s.normal[1] = ny; s.normal[2] = nz
+                        ShadingModel.bevel(bevel, wx, wy, wz, s.normal)
+                        nx = s.normal[0]; ny = s.normal[1]; nz = s.normal[2]
+                    }
+                }
                 val ndl = max(0f, nx * s.terms.sun[0] + ny * s.terms.sun[1] + nz * s.terms.sun[2])
                 val lit = if (ndl > 0f) sunlit(s.frame, wx + nx * NORMAL_OFFSET, wy + ny * NORMAL_OFFSET, wz + nz * NORMAL_OFFSET, ndl, clip) else 0f
 
                 ShadingModel.shade(
                     s.terms, ar, ag, ab, nx, ny, nz,
                     if (kind == MaterialKind.CUTOUT) 1f else p[Vertex.AO], lit, wx, wy, wz, ex, ey, ez,
-                    p[Vertex.EMISSIVE], layer <= Vertex.ACTOR + 0.5f,
+                    ShadingModel.nightEmissive(p[Vertex.EMISSIVE], s.look.nightGlow, s.frame.night), layer <= Vertex.ACTOR + 0.5f,
                     s.frame.lights, s.lightColors, s.out,
+                    occlusionDepth = if (kind == MaterialKind.OPAQUE) s.look.occlusionDepth else 0f,
                 )
-                val f = ShadingModel.fog(s.terms, dist, wz)
+                atmosphere(s, dist, wx, wy, wz)
                 val c = o * 3
-                color[c] = s.out[0] + (untoneFog(s.terms, 0) - s.out[0]) * f
-                color[c + 1] = s.out[1] + (untoneFog(s.terms, 1) - s.out[1]) * f
-                color[c + 2] = s.out[2] + (untoneFog(s.terms, 2) - s.out[2]) * f
+                color[c] = s.out[0]; color[c + 1] = s.out[1]; color[c + 2] = s.out[2]
                 if (writesDepth) depth[o] = d
             }
         }

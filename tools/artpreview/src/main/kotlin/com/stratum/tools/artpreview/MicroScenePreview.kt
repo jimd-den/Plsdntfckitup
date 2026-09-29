@@ -80,6 +80,13 @@ object MicroScenePreview {
             stamps(out, content, config, hot, director, textures, args.getOrNull(1)?.let(::File))
             return
         }
+        if (args.getOrNull(3) == "diorama") {
+            // `diorama [bench] [shots...]`: the before/after shots, optionally only some, and the benchmark.
+            val rest = args.drop(4)
+            diorama(out, content, config, generator, director, textures, rest.filter { it != "bench" })
+            if ("bench" in rest) File(out, "micro-benchmark.txt").writeText(benchmark(content, config, generator, director, textures, homeVantage(generator)).also(::println))
+            return
+        }
         if (args.getOrNull(3) == "traditions") {
             traditions(out, content, config, hot, director, textures, args.drop(4))
             return
@@ -264,6 +271,106 @@ object MicroScenePreview {
         shot("after")
     }
 
+    /**
+     * The handcrafted-diorama finish, before and after: the home street, the
+     * wilds, a building close up, and the town at night with its windows lit.
+     * "before" is HIGH with every [com.stratum.engine.scene.quality.DioramaLook]
+     * ingredient off -- the renderer as it was; "high" is the HIGH tier's
+     * look; "ultra" is HIGH's world with ULTRA's look (wider surfels and the
+     * tilt-shift), so the three differ in nothing but the finish.
+     */
+    private fun diorama(
+        out: File, content: AssembledContent, config: WorldConfig, gen: MicrovoxelTerrainGenerator,
+        director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String> = emptyList(),
+    ) {
+        val home = homeVantage(gen)
+        val wild = wildVantage(gen)
+        val building = (gen as? com.stratum.core.domain.settlement.SettlementAtlas)?.settlementsNear(0, 0, 0)?.firstOrNull()
+            ?.buildings?.minByOrNull { kotlin.math.abs(it.x + it.width / 2 - home.first) + kotlin.math.abs(it.y + it.depth / 2 - home.second) }
+            ?.let { (it.x + it.width / 2) to (it.y + it.depth / 2) } ?: home
+        val noon = WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)
+        val night = WorldTime(dayFraction = 0.02f, elapsedSeconds = 7f)
+        data class Shot(val name: String, val at: Pair<Int, Int>, val distance: Float, val time: WorldTime, val actors: Boolean = true)
+        val shots = listOf(
+            Shot("home", home, 34f, noon),
+            Shot("wilds", wild, 34f, noon),
+            Shot("building", building, 19f, noon, actors = false),
+            Shot("night", glowNear(gen, home), 26f, night),
+        )
+        val high = RenderSettings.of(QualityTier.HIGH)
+        val looks = listOf(
+            "before" to high.copy(diorama = com.stratum.engine.scene.quality.DioramaLook.OFF),
+            "high" to high,
+            "ultra" to high.copy(diorama = com.stratum.engine.scene.quality.DioramaLook.of(QualityTier.ULTRA)),
+        )
+        for (shot in shots.filter { only.isEmpty() || it.name in only }) {
+            val images = LinkedHashMap<String, BufferedImage>()
+            for ((lookName, settings) in looks) {
+                val world = StreamingWorld(content.registry, gen, config)
+                world.focusOn(BlockPos(shot.at.first, shot.at.second, 0))
+                val ground = world.surfaceAt(shot.at.first, shot.at.second)
+                val camera = SceneCamera(target = Vec3(shot.at.first + 0.5f, shot.at.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = shot.distance)
+                val actors = if (shot.actors) actorsAround(world, shot.at.first, shot.at.second) else emptyList()
+                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> gen.biomeAt(x, y) }, settings = settings, microTerrain = gen)
+                val frame = settled(builder) { builder.build(world, camera, actors, shot.time) }
+                val t = System.nanoTime()
+                val img = SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
+                val ms = (System.nanoTime() - t) / 1e6
+                images[lookName] = img
+                ImageIO.write(img, "png", File(out, "diorama-${shot.name}-$lookName.png"))
+                println("wrote diorama-${shot.name}-$lookName.png (${frame.surfels.sumOf { it.count }} surfels drawn, rasterised in ${"%.0f".format(ms)} ms)")
+            }
+            ImageIO.write(sideBySide(images.getValue("before"), images.getValue("ultra"), "Before: flat microvoxels", "After: the diorama finish (ULTRA)"), "png", File(out, "diorama-${shot.name}-before-vs-after.png"))
+            ImageIO.write(sideBySide(images.getValue("high"), images.getValue("ultra"), "HIGH tier", "ULTRA tier"), "png", File(out, "diorama-${shot.name}-high-vs-ultra.png"))
+            // A crop at twice the size from the middle, where the surfels and bevels live.
+            ImageIO.write(sideBySide(zoom(images.getValue("before")), zoom(images.getValue("ultra")), "Before (2x crop)", "After (2x crop)"), "png", File(out, "diorama-${shot.name}-closeup.png"))
+        }
+    }
+
+    /**
+     * The block column, near [home], with the most glowing voxels (lit
+     * windows, lamps) in the chunk around it: where the night shot looks.
+     * [home] when the town has none.
+     */
+    private fun glowNear(gen: MicrovoxelTerrainGenerator, home: Pair<Int, Int>, chunks: Int = 6): Pair<Int, Int> {
+        val size = com.stratum.engine.microvoxel.MicroChunk.SIZE
+        val layers = com.stratum.core.domain.world.Chunk.HEIGHT / (size / gen.microPerBlock)
+        val hx = Math.floorDiv(home.first, 16); val hy = Math.floorDiv(home.second, 16)
+        var best = home; var bestScore = 0f
+        for (cy in hy - chunks..hy + chunks) for (cx in hx - chunks..hx + chunks) {
+            var n = 0; var sx = 0L; var sy = 0L
+            for (cz in 0 until layers) {
+                val mpos = com.stratum.engine.microvoxel.MicroChunkPos(cx, cy, cz)
+                val grid = gen.microChunk(mpos)
+                if (grid.isEmpty()) continue
+                for (z in 0 until size) for (y in 0 until size) for (x in 0 until size) {
+                    val m = gen.palette[grid[x, y, z]]
+                    if (m.emission < 1f) continue
+                    // Lamps, braziers and lit windows light a street; a shrine glows only indoors.
+                    val k = if ("lamp" in m.name || "brazier" in m.name || "glass" in m.name) 3 else 1
+                    n += k; sx += (mpos.originX + x) * k.toLong(); sy += (mpos.originY + y) * k.toLong()
+                }
+            }
+            if (n == 0) continue
+            // Many glowing voxels, not too far from home.
+            val gx = (sx / n / gen.microPerBlock).toInt(); val gy = (sy / n / gen.microPerBlock).toInt()
+            val score = n / (1f + (kotlin.math.abs(gx - home.first) + kotlin.math.abs(gy - home.second)) / 48f)
+            if (score > bestScore) { bestScore = score; best = gx to gy }
+        }
+        println("night vantage $best (glow score ${"%.0f".format(bestScore)})")
+        return best
+    }
+
+    /** The middle half of an image, doubled, pixel for pixel. */
+    private fun zoom(img: BufferedImage): BufferedImage {
+        val z = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_RGB)
+        val g = z.createGraphics()
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+        g.drawImage(img, 0, 0, img.width, img.height, img.width / 4, img.height / 4, img.width * 3 / 4, img.height * 3 / 4, null)
+        g.dispose()
+        return z
+    }
+
     /** Parametric home towns, each from a different corner of the genome's space. */
     private val PARAMETRIC_LOOKS: List<Pair<String, Map<String, String>>> = listOf(
         "any" to emptyMap(),
@@ -361,15 +468,27 @@ object MicroScenePreview {
             val fast = com.stratum.engine.scene.MicroDetailMesher(generator)
             sb.appendLine("Meshing one 16x16x48 chunk from microvoxels: full detail %.1f ms (%.1f ms reading blocks one by one), half-block %.1f ms"
                 .format(time(fast, 1), time(com.stratum.engine.scene.MicroDetailMesher(slow), 1), time(fast, 2)))
+            // The same, scattering surfels as HIGH and ULTRA do; they are made on the meshing threads, never per frame.
+            val looks = listOf(QualityTier.HIGH, QualityTier.ULTRA).map { com.stratum.engine.scene.quality.DioramaLook.of(it) }
+            val scatter = looks.map { com.stratum.engine.scene.MicroDetailMesher(generator, scatterSurfels = true, surfelDensity = it.surfelDensity) }
+            val perChunk = scatter.map { m -> chunks.map { m.mesh(world, it)?.surfels?.count ?: 0 }.average() }
+            sb.appendLine("With surfels scattered: HIGH %.1f ms, ULTRA %.1f ms a chunk; %,.0f and %,.0f surfels a chunk (%.0f and %.0f KB)"
+                .format(time(scatter[0], 1), time(scatter[1], 1), perChunk[0], perChunk[1], perChunk[0] * 12 / 1024, perChunk[1] * 12 / 1024))
             sb.appendLine()
         }
-        sb.appendLine("tier    renderer  detail  first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB")
+        sb.appendLine("tier    renderer  detail  look     first frame   walk avg/max per frame   detail catch-up   terrain tris   vertex MB   surfels drawn   surfel MB")
         // Every configuration runs twice and reports the second, so JIT warm-up does not land on whichever ran first.
-        for (pass in 0..1) for (tier in listOf(QualityTier.LOW, QualityTier.MEDIUM, QualityTier.HIGH)) {
+        for (pass in 0..1) for (tier in QualityTier.values()) {
             val settings = RenderSettings.of(tier)
-            for (mode in 0..2) {
+            // Mode 3 is mode 2 with the diorama finish off: what the finish itself costs the CPU.
+            for (mode in 0..3) {
+                if (mode == 3 && settings.diorama == com.stratum.engine.scene.quality.DioramaLook.OFF) continue
                 val detail = mode > 0
-                val tierSettings = if (mode == 1) settings.copy(microFarRadius = 0) else settings
+                val tierSettings = when (mode) {
+                    1 -> settings.copy(microFarRadius = 0)
+                    3 -> settings.copy(diorama = com.stratum.engine.scene.quality.DioramaLook.OFF)
+                    else -> settings
+                }
                 val world = StreamingWorld(content.registry, generator, config)
                 world.focusOn(BlockPos(start.first, start.second, 0))
                 val builder = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = tierSettings, microTerrain = if (detail) generator else null)
@@ -393,11 +512,14 @@ object MicroScenePreview {
                 val catchUp = (System.nanoTime() - stop) / 1e6
                 val tris = settledFrame.terrain.sumOf { it.triangleCount.toLong() }
                 val bytes = settledFrame.terrain.sumOf { it.vertexFloats.toLong() * 4 + it.indexCount.toLong() * 4 }
+                val drawn = settledFrame.surfels.sumOf { it.count.toLong() }
+                val surfelBytes = settledFrame.residentSurfels.sumOf { it.bytes.toLong() }
                 if (pass == 1) sb.appendLine(
-                    "%-7s %-9s %-7s %8.1f ms   %8.2f / %6.1f ms        %8.0f ms      %,11d   %8.1f".format(
+                    "%-7s %-9s %-7s %-7s %8.1f ms   %8.2f / %6.1f ms        %8.0f ms      %,11d   %8.1f   %,13d   %8.1f".format(
                         tier.name, when (mode) { 0 -> "blocks"; 1 -> "near"; else -> "all" },
                         when (mode) { 0 -> "-"; 1 -> "${settings.microDetailRadius} blk"; else -> "${settings.microDetailRadius}+${settings.microFarRadius}" },
-                        first, total / 96, worst, catchUp, tris, bytes / 1e6,
+                        if (tierSettings.diorama == com.stratum.engine.scene.quality.DioramaLook.OFF) "off" else "on",
+                        first, total / 96, worst, catchUp, tris, bytes / 1e6, drawn, surfelBytes / 1e6,
                     ),
                 )
             }
@@ -407,6 +529,7 @@ object MicroScenePreview {
         sb.appendLine("walk = one block per frame diagonally for 96 blocks; the mesh cache paces off-screen chunks.")
         sb.appendLine("near = microvoxels only within the detail ring, blocks beyond; all = true microvoxels to the view's edge, half-block past the ring.")
         sb.appendLine("detail is meshed on background threads; catch-up = time after stopping until every chunk in view shows it.")
+        sb.appendLine("look = the diorama finish (DioramaLook) of the tier, or off; surfels are scattered while meshing and thinned per frame to the tier's budget.")
         sb.appendLine("Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.")
         return sb.toString()
     }
