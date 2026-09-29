@@ -1,5 +1,9 @@
 package com.stratum.feature.play.gl
 
+import com.stratum.engine.scene.ShadingModel
+import com.stratum.engine.scene.Surfel
+import com.stratum.engine.scene.SurfelLod
+
 /**
  * GLSL ES 3.00 ports of `ShadingModel` and the software rasteriser.
  *
@@ -11,6 +15,81 @@ package com.stratum.feature.play.gl
  * previews always show the full 3x3 filter the HIGH tier draws.
  */
 internal object SceneShaders {
+
+    private fun f(v: Float): String = v.toString()
+
+    /**
+     * The diorama finish's per-surface half (see `DioramaLook`): per-voxel
+     * grain, bevelled voxel edges, deeper occlusion and warm/cool aerial
+     * haze. Twins of `ShadingModel.voxelGrain`, `bevel`, `bevelFade` and
+     * `haze`; the numbers are read from ShadingModel itself, so they cannot drift.
+     */
+    private val DIORAMA = """
+        uniform float uGrain;
+        uniform float uBevel;
+        uniform float uOcclusionDepth;
+        uniform bool uHaze;
+        uniform float uGlowGain;
+        uniform vec3 uFocus;
+        uniform float uFocusDistance;
+        uniform float uPixelAngle;
+        const float VOXELS_PER_BLOCK = ${f(ShadingModel.VOXELS_PER_BLOCK)};
+        const float INSIDE = ${f(ShadingModel.INSIDE)};
+        const float GRAIN_WARMTH = ${f(ShadingModel.GRAIN_WARMTH)};
+        const uint HASH_OFFSET = ${ShadingModel.HASH_OFFSET}u;
+        const float BEVEL_WIDTH = ${f(ShadingModel.BEVEL_WIDTH)};
+        const float BEVEL_TILT = ${f(ShadingModel.BEVEL_TILT)};
+        const float BEVEL_FADE_START = ${f(ShadingModel.BEVEL_FADE_START)};
+        const float BEVEL_FADE_END = ${f(ShadingModel.BEVEL_FADE_END)};
+        const float AXIS_ALIGNED = ${f(ShadingModel.AXIS_ALIGNED)};
+        const float OCCLUSION_SUN_SHARE = ${f(ShadingModel.OCCLUSION_SUN_SHARE)};
+        const float HAZE_START = ${f(ShadingModel.HAZE_START)};
+        const float HAZE_DENSITY = ${f(ShadingModel.HAZE_DENSITY)};
+        const float HAZE_FALLOFF = ${f(ShadingModel.HAZE_FALLOFF)};
+        const float HAZE_LOW_MIN = ${f(ShadingModel.HAZE_LOW_MIN)};
+        const float HAZE_LOW_MAX = ${f(ShadingModel.HAZE_LOW_MAX)};
+        const float HAZE_MAX = ${f(ShadingModel.HAZE_MAX)};
+        const vec3 HAZE_WARM = vec3(${ShadingModel.HAZE_WARM.joinToString { f(it) }});
+        const vec3 HAZE_COOL = vec3(${ShadingModel.HAZE_COOL.joinToString { f(it) }});
+
+        // ShadingModel.voxelHash, in uint arithmetic: the same bits as Kotlin's wrapping Int.
+        uint voxelHash(ivec3 c) {
+            uvec3 u = uvec3(c) + uvec3(HASH_OFFSET);
+            uint h = (u.x * 73856093u) ^ (u.y * 19349663u) ^ (u.z * 83492791u);
+            h ^= h >> 13u;
+            h *= 1274126177u;
+            return h ^ (h >> 16u);
+        }
+        vec3 voxelGrain(vec3 w, vec3 n) {
+            uint h = voxelHash(ivec3(floor((w - n * INSIDE) * VOXELS_PER_BLOCK)));
+            float tone = 1.0 + (float(h & 65535u) / 65535.0 - 0.5) * 2.0 * uGrain;
+            float warm = (float((h >> 16u) & 65535u) / 65535.0 - 0.5) * uGrain * GRAIN_WARMTH;
+            return vec3(tone * (1.0 + warm), tone, tone * (1.0 - warm));
+        }
+        float edgeTilt(float w) {
+            float f = fract(w * VOXELS_PER_BLOCK);
+            if (f < BEVEL_WIDTH) return -(1.0 - f / BEVEL_WIDTH);
+            if (f > 1.0 - BEVEL_WIDTH) return 1.0 - (1.0 - f) / BEVEL_WIDTH;
+            return 0.0;
+        }
+        vec3 bevelled(vec3 n, vec3 w, float dist) {
+            if (uBevel <= 0.0) return n;
+            float strength = uBevel * (1.0 - smoothstep(BEVEL_FADE_START, BEVEL_FADE_END, dist * uPixelAngle * VOXELS_PER_BLOCK));
+            vec3 a = abs(n);
+            if (strength <= 0.0 || max(a.x, max(a.y, a.z)) < AXIS_ALIGNED) return n;
+            vec3 t = vec3(a.x < 0.5 ? edgeTilt(w.x) : 0.0, a.y < 0.5 ? edgeTilt(w.y) : 0.0, a.z < 0.5 ? edgeTilt(w.z) : 0.0);
+            return normalize(n + t * strength * BEVEL_TILT);
+        }
+        // Amount of haze in .a, its colour (before tone mapping is undone) in .rgb.
+        vec4 haze(vec3 w, float dist, vec3 eye, vec3 sun, vec3 fog) {
+            float beyond = max(0.0, dist - uFocusDistance * HAZE_START);
+            float low = clamp(exp(-(w.z - uFocus.z) * HAZE_FALLOFF), HAZE_LOW_MIN, HAZE_LOW_MAX);
+            float amount = min(HAZE_MAX, (1.0 - exp(-beyond * HAZE_DENSITY)) * low);
+            vec2 v = w.xy - eye.xy;
+            float towards = smoothstep(-0.6, 1.0, dot(v, sun.xy) / (max(length(sun.xy), 1e-4) * max(length(v), 1e-4)));
+            return vec4(fog * mix(HAZE_COOL, HAZE_WARM, towards), amount);
+        }
+    """
 
     private const val ATTRIBUTES = """
         layout(location = 0) in vec3 aPos;
@@ -92,6 +171,7 @@ internal object SceneShaders {
         uniform vec3 uLightColor[8];
         uniform float uLightRadius[8];
         out vec4 fragColor;
+        $DIORAMA
 
         const float EMISSIVE_GAIN = 1.6;
         const float TONE_GAIN = 1.25;
@@ -213,12 +293,21 @@ internal object SceneShaders {
             float dist = length(toEye);
             toEye /= dist;
             float ao = uCutout ? 1.0 : vAo;
+            // Flat-coloured opaque faces are the microvoxels: each tiny cube its own tone, its edges rounded.
+            if (!uCutout && vLayer > -1.5 && vLayer < -0.5) {
+                if (uGrain > 0.0) albedo *= voxelGrain(vWorld, n);
+                n = bevelled(n, vWorld, dist);
+            }
+            // Deeper occlusion (ShadingModel.shade): the sky term takes a power of it, direct sun a share.
+            float od = uCutout ? 0.0 : uOcclusionDepth;
+            float skyAo = od > 0.0 ? pow(ao, 1.0 + od) : ao;
+            float sunAo = 1.0 - od * OCCLUSION_SUN_SHARE * (1.0 - ao);
 
             float hemi = n.z * 0.5 + 0.5;
-            vec3 light = mix(uGround, uSky, hemi) * ao;
+            vec3 light = mix(uGround, uSky, hemi) * skyAo;
             float ndl = max(0.0, dot(n, uSun));
             float lit = ndl > 0.0 ? sunlit(ndl) : 0.0;
-            light += uSunColor * ndl * (1.0 - uShadowStrength * (1.0 - lit));
+            light += uSunColor * ndl * (1.0 - uShadowStrength * (1.0 - lit)) * sunAo;
             // Fill light from the camera's side; see ShadingModel.
             light += uSunColor * max(0.0, dot(n, uFill)) * uFillStrength;
             for (int i = 0; i < 8; i++) {
@@ -230,15 +319,178 @@ internal object SceneShaders {
                 float fall = 1.0 - len / uLightRadius[i];
                 light += uLightColor[i] * fall * fall * facing;
             }
-            vec3 color = light * albedo + albedo * vEmissive * EMISSIVE_GAIN;
+            vec3 color = light * albedo + albedo * vEmissive * (1.0 + uGlowGain) * EMISSIVE_GAIN;
             if (vLayer < -1.5) {
                 float edge = 1.0 - max(0.0, dot(n, toEye));
                 color += uRim * edge * edge;
+            }
+            if (uHaze) {
+                vec4 hz = haze(vWorld, dist, uEye, uSun, uFog);
+                color = mix(color, vec3(untone(hz.r), untone(hz.g), untone(hz.b)), hz.a);
             }
             float fog = smoothstep(uFogStart, uFogEnd, dist);
             if (vWorld.z < uFogFloor) fog = max(fog, clamp((uFogFloor - vWorld.z) / HEIGHT_FOG_DEPTH, 0.0, 1.0) * HEIGHT_FOG_MAX);
             vec3 fogPre = vec3(untone(uFog.r), untone(uFog.g), untone(uFog.b));
             fragColor = vec4(mix(color, fogPre, fog), 1.0);
+        }
+    """
+
+    /**
+     * Surfels as point sprites: twelve bytes a point ([com.stratum.engine.scene.Surfel]),
+     * decoded, faded by [com.stratum.engine.scene.SurfelLod], and lit once
+     * here in the vertex shader, so a surfel costs one vertex's lighting
+     * however many pixels it covers. Twin of `SceneRasterizer.surfels`.
+     */
+    val SURFEL_VERTEX = """#version 300 es
+        precision highp float;
+        layout(location = 0) in uvec3 aSurfel;
+        uniform mat4 uViewProj;
+        uniform mat4 uShadowViewProj;
+        uniform sampler2D uShadowMap;
+        uniform int uShadowTaps;
+        uniform vec2 uOrigin;
+        uniform float uKeep;
+        uniform float uSurfelRadius;
+        uniform float uPixelsPerUnit;
+        uniform float uMinPixels;
+        uniform vec2 uViewport;
+        uniform vec4 uReveal;
+        uniform vec3 uEye;
+        uniform vec3 uSun;
+        uniform vec3 uFill;
+        uniform float uFillStrength;
+        uniform vec3 uSunColor;
+        uniform vec3 uSky;
+        uniform vec3 uGround;
+        uniform vec3 uFog;
+        uniform float uFogStart;
+        uniform float uFogEnd;
+        uniform float uFogFloor;
+        uniform float uShadowStrength;
+        uniform float uExposure;
+        uniform int uLightCount;
+        uniform vec3 uLightPos[8];
+        uniform vec3 uLightColor[8];
+        uniform float uLightRadius[8];
+        $DIORAMA
+        flat out vec3 vColor;
+        flat out vec3 vAxis;
+
+        const float POSITION_STEP = ${f(Surfel.POSITION_STEP)};
+        const float XY_OFFSET = ${f(Surfel.XY_OFFSET)};
+        const float MAX_RADIUS = ${f(Surfel.MAX_RADIUS)};
+        const float NEAR_SHARE = ${f(SurfelLod.NEAR_SHARE)};
+        const float FADE = ${f(SurfelLod.FADE)};
+        const float PULL = ${f(ShadingModel.SURFEL_PULL)};
+        const float MIN_SQUASH = ${f(ShadingModel.SURFEL_MIN_SQUASH)};
+        const float TONE_GAIN = ${f(ShadingModel.TONE_GAIN)};
+        const float HEIGHT_FOG_DEPTH = ${f(ShadingModel.HEIGHT_FOG_DEPTH)};
+        const float HEIGHT_FOG_MAX = ${f(ShadingModel.HEIGHT_FOG_MAX)};
+        const float REVEAL_FEATHER = 0.9;
+        const float REVEAL_FLOOR = 0.3;
+        const float REVEAL_BODY = 1.0;
+        const float REVEAL_BEHIND = 0.6;
+
+        float untone(float v) { return -log(1.0 - clamp(v, 0.0, 0.999)) / (uExposure * TONE_GAIN); }
+        float revealCut(vec3 w) {
+            if (uReveal.w <= 0.0 || w.z <= uReveal.z + REVEAL_FLOOR) return 0.0;
+            vec3 toBody = vec3(uReveal.xy, uReveal.z + REVEAL_BODY) - uEye;
+            float len = max(length(toBody), 1e-4);
+            vec3 d = toBody / len;
+            vec3 v = w - uEye;
+            float t = dot(v, d);
+            if (t >= len - REVEAL_BEHIND) return 0.0;
+            return 1.0 - smoothstep(uReveal.w - REVEAL_FEATHER, uReveal.w, length(v - d * t));
+        }
+        float sunlit(vec3 w, vec3 n, float ndl) {
+            if (uShadowTaps == 0) return 1.0;
+            vec4 s = uShadowViewProj * vec4(w + n * 0.04, 1.0);
+            vec3 p = s.xyz / s.w * 0.5 + 0.5;
+            if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) return 1.0;
+            float bias = 0.0015 + 0.004 * (1.0 - ndl);
+            // One tap: a surfel is a few pixels across; the 3x3 filter would be lost on it.
+            return (p.z - bias <= textureLod(uShadowMap, p.xy, 0.0).r) ? 1.0 : 0.0;
+        }
+        void cull() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; vColor = vec3(0.0); vAxis = vec3(1.0, 0.0, 1.0); }
+
+        void main() {
+            uvec3 a = aSurfel;
+            vec3 w = vec3(
+                float(a.x & 1023u) * POSITION_STEP - XY_OFFSET + uOrigin.x,
+                float((a.x >> 10u) & 1023u) * POSITION_STEP - XY_OFFSET + uOrigin.y,
+                float(a.x >> 20u) * POSITION_STEP);
+            float rank = float(a.z >> 24u) / 255.0;
+            float share = 1.0 - smoothstep(uSurfelRadius * NEAR_SHARE, uSurfelRadius, length(w.xy - uFocus.xy));
+            float grow = clamp((share * uKeep - rank) / FADE, 0.0, 1.0);
+            if (grow <= 0.0 || revealCut(w) > 0.5) { cull(); return; }
+            float radius = float(a.y & 255u) / 255.0 * MAX_RADIUS * grow;
+            vec3 albedo = vec3(float((a.y >> 24u) & 255u), float((a.y >> 16u) & 255u), float((a.y >> 8u) & 255u)) / 255.0;
+            // Octahedral normal (Surfel.normal).
+            vec2 e = vec2(float(a.z & 255u), float((a.z >> 8u) & 255u)) / 255.0 * 2.0 - 1.0;
+            float ez = 1.0 - abs(e.x) - abs(e.y);
+            if (ez < 0.0) e = (1.0 - abs(e.yx)) * vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+            vec3 n = normalize(vec3(e, ez));
+            float ao = float((a.z >> 16u) & 255u) / 255.0;
+
+            vec3 toEye = uEye - w;
+            float dist = length(toEye);
+            toEye /= dist;
+            vec4 clip = uViewProj * vec4(w + toEye * radius * PULL, 1.0);
+            if (clip.w < 0.5) { cull(); return; }
+            float rp = radius * uPixelsPerUnit / clip.w;
+            if (rp < uMinPixels) { cull(); return; }
+            // Which way the disc is foreshortened on screen: along its normal's projection, y down as in the rasteriser.
+            vec4 b0 = uViewProj * vec4(w, 1.0);
+            vec4 b1 = uViewProj * vec4(w + n * radius, 1.0);
+            vec2 d = (b1.xy / b1.w - b0.xy / b0.w) * uViewport * vec2(1.0, -1.0);
+            float dl = length(d);
+            d = dl < 1e-6 ? vec2(1.0, 0.0) : d / dl;
+            vAxis = vec3(d, clamp(abs(dot(n, toEye)), MIN_SQUASH, 1.0));
+
+            // ShadingModel.shade, once per surfel.
+            float skyAo = uOcclusionDepth > 0.0 ? pow(ao, 1.0 + uOcclusionDepth) : ao;
+            float sunAo = 1.0 - uOcclusionDepth * OCCLUSION_SUN_SHARE * (1.0 - ao);
+            vec3 light = mix(uGround, uSky, n.z * 0.5 + 0.5) * skyAo;
+            float ndl = max(0.0, dot(n, uSun));
+            float lit = ndl > 0.0 ? sunlit(w, n, ndl) : 0.0;
+            light += uSunColor * ndl * (1.0 - uShadowStrength * (1.0 - lit)) * sunAo;
+            light += uSunColor * max(0.0, dot(n, uFill)) * uFillStrength;
+            for (int i = 0; i < 8; i++) {
+                if (i >= uLightCount) break;
+                vec3 ld = uLightPos[i] - w;
+                float len = length(ld);
+                if (len >= uLightRadius[i]) continue;
+                float facing = max(0.0, dot(n, ld / max(len, 1e-4))) * 0.7 + 0.3;
+                float fall = 1.0 - len / uLightRadius[i];
+                light += uLightColor[i] * fall * fall * facing;
+            }
+            vec3 color = light * albedo;
+            if (uHaze) {
+                vec4 hz = haze(w, dist, uEye, uSun, uFog);
+                color = mix(color, vec3(untone(hz.r), untone(hz.g), untone(hz.b)), hz.a);
+            }
+            float fog = smoothstep(uFogStart, uFogEnd, dist);
+            if (w.z < uFogFloor) fog = max(fog, clamp((uFogFloor - w.z) / HEIGHT_FOG_DEPTH, 0.0, 1.0) * HEIGHT_FOG_MAX);
+            vColor = mix(color, vec3(untone(uFog.r), untone(uFog.g), untone(uFog.b)), fog);
+            gl_Position = clip;
+            gl_PointSize = 2.0 * rp;
+        }
+    """
+
+    val SURFEL_FRAGMENT = """#version 300 es
+        precision highp float;
+        flat in vec3 vColor;
+        flat in vec3 vAxis;
+        out vec4 fragColor;
+        const float DOME = ${f(ShadingModel.SURFEL_DOME)};
+        void main() {
+            // A disc squashed along its normal's screen direction, domed towards the rim.
+            vec2 u = gl_PointCoord * 2.0 - 1.0;
+            float along = dot(u, vAxis.xy) / vAxis.z;
+            float across = -u.x * vAxis.y + u.y * vAxis.x;
+            float q = along * along + across * across;
+            if (q > 1.0) discard;
+            fragColor = vec4(vColor * (1.0 - DOME * q), 1.0);
         }
     """
 
@@ -343,16 +595,87 @@ internal object SceneShaders {
         }
     """
 
+    /**
+     * Tone mapping, grade and vignette; with a depth texture bound
+     * (`uDepthFinish`), first the depth-reading half of the diorama finish:
+     * ink in the creases, occlusion between separate pieces and the
+     * tilt-shift blur. Twin of `SceneRasterizer.depthFinish`.
+     */
     val FINISH_FRAGMENT = """#version 300 es
         precision highp float;
         in vec2 vUv;
         uniform sampler2D uScene;
+        uniform sampler2D uDepth;
+        uniform bool uDepthFinish;
+        uniform vec2 uTexel;
+        uniform float uNear;
+        uniform float uFar;
+        uniform float uEdges;
+        uniform float uScreenAo;
+        uniform float uTiltShift;
+        uniform float uFocusDepth;
+        uniform float uPixelsPerUnit;
         uniform float uExposure;
         uniform float uSaturation;
         uniform float uVignette;
         out vec4 fragColor;
+        const float EDGE_GAIN = ${f(ShadingModel.EDGE_GAIN)};
+        const float EDGE_LIGHT = ${f(ShadingModel.EDGE_LIGHT)};
+        const float SCREEN_AO_RADIUS = ${f(ShadingModel.SCREEN_AO_RADIUS)};
+        const float SCREEN_AO_CLAMP = ${f(ShadingModel.SCREEN_AO_CLAMP)};
+        const float SCREEN_AO_GAIN = ${f(ShadingModel.SCREEN_AO_GAIN)};
+        const float TILT_NEAR = ${f(ShadingModel.TILT_NEAR)};
+        const float TILT_FAR = ${f(ShadingModel.TILT_FAR)};
+        const vec2 RING[8] = vec2[8](${(0 until 8).joinToString { "vec2(${f(ShadingModel.RING[it * 2])}, ${f(ShadingModel.RING[it * 2 + 1])})" }});
+        const vec2 DISC[12] = vec2[12](${(0 until 12).joinToString { "vec2(${f(ShadingModel.DISC[it * 2])}, ${f(ShadingModel.DISC[it * 2 + 1])})" }});
+
+        // One over linear depth, 0 for the sky: what the rasteriser's `inverse` reads.
+        float inverseDepth(vec2 uv) {
+            float d = textureLod(uDepth, clamp(uv, 0.0, 1.0), 0.0).r;
+            if (d >= 1.0) return 0.0;
+            float ndc = d * 2.0 - 1.0;
+            return (uFar + uNear - ndc * (uFar - uNear)) / (2.0 * uNear * uFar);
+        }
+
+        vec3 finished() {
+            vec3 scene = texture(uScene, vUv).rgb;
+            if (!uDepthFinish) return scene;
+            float wc = inverseDepth(vUv);
+            float amount = 1.0;
+            float k = 1.0;
+            if (wc > 0.0) {
+                float lin = 1.0 / wc;
+                amount = uTiltShift > 0.0 ? smoothstep(TILT_NEAR, TILT_FAR, abs(lin - uFocusDepth) / uFocusDepth) : 0.0;
+                float lap = (inverseDepth(vUv - vec2(uTexel.x, 0.0)) + inverseDepth(vUv + vec2(uTexel.x, 0.0))
+                    + inverseDepth(vUv - vec2(0.0, uTexel.y)) + inverseDepth(vUv + vec2(0.0, uTexel.y))) * 0.25 - wc;
+                float rel = lap / wc * EDGE_GAIN;
+                float crease = clamp(rel, 0.0, 1.0);
+                float rim = clamp(-rel, 0.0, 1.0) * EDGE_LIGHT;
+                float occ = 0.0;
+                if (uScreenAo > 0.0) {
+                    float r = SCREEN_AO_RADIUS * uPixelsPerUnit * wc;
+                    float lo = wc * (1.0 - SCREEN_AO_CLAMP);
+                    float hi = wc * (1.0 + SCREEN_AO_CLAMP);
+                    float sum = 0.0;
+                    for (int t = 0; t < 8; t++) sum += clamp(inverseDepth(vUv + RING[t] * r * uTexel), lo, hi);
+                    occ = clamp((sum / 8.0 - wc) / wc * SCREEN_AO_GAIN, 0.0, 1.0);
+                }
+                float shade = (1.0 - uEdges * crease) * (1.0 - uScreenAo * occ) + uEdges * rim;
+                k = 1.0 + (shade - 1.0) * (1.0 - amount);
+            } else if (uTiltShift <= 0.0) {
+                amount = 0.0;
+            }
+            if (amount > 0.0 && uTiltShift > 0.0) {
+                float r = uTiltShift * amount / uTexel.y;
+                vec3 sum = vec3(0.0);
+                for (int t = 0; t < 12; t++) sum += texture(uScene, vUv + DISC[t] * r * uTexel).rgb;
+                return sum / 12.0 * k;
+            }
+            return scene * k;
+        }
+
         void main() {
-            vec3 c = 1.0 - exp(-texture(uScene, vUv).rgb * uExposure * 1.25);
+            vec3 c = 1.0 - exp(-finished() * uExposure * 1.25);
             float luma = dot(c, vec3(0.299, 0.587, 0.114));
             c = vec3(luma) + (c - vec3(luma)) * uSaturation;
             vec2 d = vUv - 0.5;
