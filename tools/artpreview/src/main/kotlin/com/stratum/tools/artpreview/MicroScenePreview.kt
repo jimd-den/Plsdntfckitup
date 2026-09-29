@@ -76,6 +76,10 @@ object MicroScenePreview {
             traditions(out, content, config, hot, director, textures, looks.map { it.first }, looks.associate { it.first to (mapOf("homeStyle" to ids) + it.second) })
             return
         }
+        if (args.getOrNull(3) == "stamps") {
+            stamps(out, content, config, hot, director, textures, args.getOrNull(1)?.let(::File))
+            return
+        }
         if (args.getOrNull(3) == "traditions") {
             traditions(out, content, config, hot, director, textures, args.drop(4))
             return
@@ -211,6 +215,53 @@ object MicroScenePreview {
             println("wrote $file")
         }
         hot.retune(base)
+    }
+
+    /**
+     * The cozy builder in the world: a model-studio building, a picture turned
+     * into a statue, a chiselled pit and a heaped mound, stamped beside the
+     * home street and drawn in full microvoxel detail, before and after.
+     */
+    private fun stamps(
+        out: File, content: AssembledContent, config: WorldConfig, hot: com.stratum.engine.microbridge.HotTerrain,
+        director: StyleSheetArtDirector, textures: TextureLibrary, forge: File?,
+    ) {
+        val v = homeVantage(hot.current)
+        fun shot(name: String) {
+            val world = StreamingWorld(content.registry, hot, config)
+            world.focusOn(BlockPos(v.first, v.second, 0))
+            val ground = world.surfaceAt(v.first, v.second)
+            val camera = SceneCamera(target = Vec3(v.first + 3.5f, v.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = 36f)
+            val micro = SceneBuilder(director, textures, biomeAt = { x, y -> hot.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = hot)
+            val frame = settled(micro) { micro.build(world, camera, actorsAround(world, v.first, v.second), WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)) }
+            ImageIO.write(SceneRasterizer(WIDTH, HEIGHT, textures).render(frame), "png", File(out, "stamps-$name.png"))
+            println("wrote stamps-$name.png")
+        }
+        shot("before")
+        val probe = StreamingWorld(content.registry, hot, config).also { it.focusOn(BlockPos(v.first, v.second, 0)) }
+        fun groundAt(x: Int, y: Int) = probe.surfaceAt(x, y)
+        val r = 4
+        // A Lamu house from the model studio's generator.
+        val (house, _) = com.stratum.engine.microbridge.ModelFactory.building(20260929L, tradition = "swahili", widthBlocks = 5, depthBlocks = 4)
+        val hx = v.first + 6; val hy = v.second - 8
+        hot.stamp(com.stratum.core.domain.micro.MicroStamp(house.id, hx * r, hy * r, (groundAt(hx + 3, hy + 3) + 1) * r - 4), house)
+        // The hero's own sprite, turned into a statue on a plinth.
+        val sprite = forge?.let { File(it, "hades/actor~igbo~dike_ozo.png") }?.takeIf { it.isFile }?.let { ImageIO.read(it) }
+        if (sprite != null) {
+            val px = IntArray(sprite.width * sprite.height).also { sprite.getRGB(0, 0, sprite.width, sprite.height, it, 0, sprite.width) }
+            val statue = com.stratum.engine.model.ImageVoxelizer.voxelize("statue", "Dike Ozo", com.stratum.engine.model.ArgbImage(sprite.width, sprite.height, px), com.stratum.engine.model.ImageVoxelizer.Options(height = 40))
+            val sx = v.first + 2; val sy = v.second + 3
+            val plinth = com.stratum.core.domain.micro.MicroBrushes.id("cube", 4, "arch:drystone")
+            val base = (groundAt(sx, sy) + 1) * r
+            hot.stamp(com.stratum.core.domain.micro.MicroStamp(plinth, sx * r - 2, sy * r - 2, base - 6))
+            hot.stamp(com.stratum.core.domain.micro.MicroStamp(statue.id, sx * r + 2 - statue.sizeX / 2, sy * r + 2 - statue.sizeY / 2, base + 3), statue)
+        }
+        // A chiselled pond and a heaped mound.
+        val cx = v.first + 9; val cy = v.second + 4
+        hot.stamp(com.stratum.core.domain.micro.MicroStamp(com.stratum.core.domain.micro.MicroBrushes.id("sphere", 9, "stone"), cx * r - 9, cy * r - 9, groundAt(cx, cy) * r - 7, carve = true))
+        val mx = v.first - 4; val my = v.second + 7
+        hot.stamp(com.stratum.core.domain.micro.MicroStamp(com.stratum.core.domain.micro.MicroBrushes.id("dome", 10, "#5E9B3A"), mx * r - 10, my * r - 10, groundAt(mx, my) * r - 8))
+        shot("after")
     }
 
     /** Parametric home towns, each from a different corner of the genome's space. */

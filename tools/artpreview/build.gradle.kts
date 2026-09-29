@@ -5,6 +5,7 @@ dependencies {
   implementation(project(":engine:world"))
   implementation(project(":engine:render"))
   implementation(project(":engine:scene"))
+  implementation(project(":engine:model"))
   implementation(project(":content:igbo"))
   implementation(project(":plugins"))
   implementation(project(":importer:common"))

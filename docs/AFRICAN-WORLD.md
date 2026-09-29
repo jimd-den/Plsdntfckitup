@@ -116,6 +116,22 @@ historic traditions, drawn at a quarter-block scale. They are not
 architectural reconstructions. Every tradition's `origin` text is shown in
 the World panel.
 
+### Invented towns, within each land's grammar
+
+About a third of regional towns (the `parametric` option of
+`micro:settlements`) are not drawn by their tradition's fixed painter. Each
+building is rolled from a genome inside that tradition's vernacular grammar
+(`Vernacular`): its plans, roof forms, storeys, wall relief, openings, ornament
+and exact materials.
+
+- A Hausa quarter gets new courtyard houses with zanko pinnacles and
+  zayyana relief, and never a gable roof.
+- A Swahili town gets new storeyed coral-stone houses.
+- Great Zimbabwe gets new round dry-stone enclosures and conical towers.
+
+The town keeps its tradition's compound wall and sacred heart. See
+[COZY-BUILDER.md](COZY-BUILDER.md#parametric-buildings-and-vernacular-towns).
+
 ## Changing it
 
 - **In game:** open **⛰ World**. *Landscape* picks all of Africa, or one

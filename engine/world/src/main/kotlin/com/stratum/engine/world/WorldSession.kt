@@ -100,6 +100,9 @@ class WorldSession private constructor(
 
     val world: World get() = streamingWorld
 
+    /** Models, sculpting and chiselling laid over this world's land, oldest first; empty on block worlds. */
+    val microStamps: List<com.stratum.core.domain.micro.MicroStamp> get() = parts.stampSurface?.stamps().orEmpty()
+
     /** The world with write access, for persistence and tests in this module; features see [world]. */
     internal val editableWorld: StreamingWorld get() = streamingWorld
 
