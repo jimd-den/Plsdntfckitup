@@ -66,7 +66,11 @@ internal class SessionParts(
     private val lootRoller = LootRoller.of(content)
     val ground = GroundItems()
     private val workbench = Workbench(content, ItemCrafter(lootRoller), config.rules.combat)
-    private val directorConfig = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1))
+    private val directorConfig = DirectorConfig(
+        maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1),
+        alertness = config.rules.enemyAlertness,
+        markerShare = config.rules.monsterDensity.coerceAtMost(1f),
+    )
     private val director = EnemyDirector(world, content.enemies, config = directorConfig, difficulty = difficulty, packs = content.enemyPacks)
     private val survivalRules = SurvivalSystem(content, config.rules.survival, world, roomScanner)
 
@@ -82,6 +86,7 @@ internal class SessionParts(
     val combat = CombatSystem(
         content, config.rules.combat, world, director, cues, flashes, impacts, random, profile,
         playerSkill = { id -> content.skill(id)?.let(gear::tuned) },
+        incomingDamage = config.rules.enemyDamage,
     )
     val encounters: EncounterSystem = EncounterSystem(
         state, content, config.seed, director, directorConfig, world, landscape, { x, y -> biomeSource?.biomeAt(x, y)?.id },

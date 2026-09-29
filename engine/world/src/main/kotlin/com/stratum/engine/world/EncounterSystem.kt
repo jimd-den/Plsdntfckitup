@@ -84,8 +84,12 @@ internal class EncounterSystem(
         population.wake(state.player.position, room).forEach { marker ->
             val dice = MarkerEncounters.diceFor(seed, marker)
             when (val encounter = markerEncounters.resolve(marker, dice)) {
-                is MarkerEncounter.Monster ->
-                    state.enemies = state.enemies + director.instantiate(encounter.definition, marker.centre, state.player.level, dice, rank = encounter.rank)
+                is MarkerEncounter.Monster -> {
+                    // A calmer world leaves some spawn points empty: the same ones every visit, by seed and marker.
+                    val kept = directorConfig.markerShare >= 1f ||
+                        kotlin.random.Random(seed xor marker.key.hashCode().toLong()).nextFloat() < directorConfig.markerShare
+                    if (kept) state.enemies = state.enemies + director.instantiate(encounter.definition, marker.centre, state.player.level, dice, rank = encounter.rank)
+                }
                 is MarkerEncounter.Chest -> drops.chestAt(marker.centre, state.player.level, dice, progression.earnings.lootFind)?.let(ground::drop)
                 null -> Unit
             }

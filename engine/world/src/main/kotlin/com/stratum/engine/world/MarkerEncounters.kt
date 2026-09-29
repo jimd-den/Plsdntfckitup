@@ -55,7 +55,22 @@ internal class MarkerEncounters(private val content: AssembledContent, private v
     private fun monsterFor(marker: WorldMarker, random: Random): EnemyDefinition? =
         MapEncounters.named(marker.refId, content.enemies)
             ?: dungeons[marker.sourceId]?.enemyIds.orEmpty().mapNotNull { MapEncounters.named(it, content.enemies) }.randomOrNull(random)
-            ?: local(marker).randomOrNull(random)
+            ?: weighted(local(marker).filterNot(::isBoss), random)
+
+    /**
+     * One of [candidates] by its spawn weight, as the director picks: a rare
+     * monster stays rare at a spawn point too. Picking uniformly made a
+     * region's one rare beast as common as its wolves.
+     */
+    private fun weighted(candidates: List<EnemyDefinition>, random: Random): EnemyDefinition? {
+        val total = candidates.sumOf { it.spawnWeight.coerceAtLeast(0) }
+        if (total <= 0) return candidates.randomOrNull(random)
+        var roll = random.nextInt(total)
+        return candidates.firstOrNull { roll -= it.spawnWeight.coerceAtLeast(0); roll < 0 }
+    }
+
+    /** Bosses wait at boss markers; an ordinary spawn point in the open never holds one. */
+    private fun isBoss(definition: EnemyDefinition): Boolean = definition.rank == EnemyRank.BOSS || definition.phases.isNotEmpty()
 
     private fun bossFor(marker: WorldMarker): EnemyDefinition? =
         MapEncounters.named(marker.refId, content.enemies)

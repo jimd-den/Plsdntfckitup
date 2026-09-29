@@ -36,6 +36,9 @@ class EnemyDirector(
 
     fun definition(id: String): EnemyDefinition? = byId[id]
 
+    /** How far a monster notices the player from, with the world's alertness applied. */
+    fun aggroRangeOf(definition: EnemyDefinition?): Float = (definition?.aggroRange ?: DEFAULT_AGGRO) * config.alertness
+
     /**
      * Tops the population back up around [focus].
      *
@@ -209,7 +212,7 @@ class EnemyDirector(
         if (!enemy.isAlive) return enemy
 
         val definition = byId[enemy.definitionId]
-        val aggroRange = definition?.aggroRange ?: DEFAULT_AGGRO
+        val aggroRange = (definition?.aggroRange ?: DEFAULT_AGGRO) * config.alertness
         val distance = enemy.position.horizontalDistanceTo(target)
         val cooled = (enemy.attackCooldown - deltaSeconds).coerceAtLeast(0f)
 
@@ -331,6 +334,10 @@ data class DirectorConfig(
     val scalingPerLevel: Float = 0.12f,
     /** Share of spawns that are a whole pack rather than one monster, when packs are defined. */
     val packChance: Float = 0.35f,
+    /** Scales every monster's aggro range: under 1, they notice the player later. See [WorldRules.enemyAlertness]. */
+    val alertness: Float = 1f,
+    /** Share of a generated world's monster spawn points that wake; the rest stay empty. */
+    val markerShare: Float = 1f,
 ) {
     init {
         require(safeRadius < spawnRadius) { "Spawn ring is inverted" }

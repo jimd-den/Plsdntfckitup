@@ -22,8 +22,12 @@ data class WorldRules(
     val townDensity: Float = 1f,
     /** Begin in a welcoming town rather than in the wilds. */
     val startInTown: Boolean = true,
-    /** Scales how many monsters roam at once. */
+    /** Scales how many monsters roam at once, and how many of a generated world's spawn points wake. */
     val monsterDensity: Float = 1f,
+    /** Share of a monster's damage that reaches the player: under 1 for a gentler world. */
+    val enemyDamage: Float = 1f,
+    /** Scales how far away monsters notice and chase the player. */
+    val enemyAlertness: Float = 1f,
     /** Whether hostile factions raid the player's outposts. */
     val raids: Boolean = true,
     /** Real minutes from one dawn to the next. */
@@ -50,7 +54,20 @@ data class WorldRules(
         require(dayLengthMinutes in MIN_DAY..MAX_DAY) { "a day of $dayLengthMinutes minutes is outside $MIN_DAY..$MAX_DAY" }
         require(lootMultiplier > 0f && experienceMultiplier > 0f) { "multipliers must be positive" }
         require(deathPenalty in 0f..1f) { "deathPenalty $deathPenalty is not a share" }
+        require(enemyDamage in 0.1f..3f) { "enemyDamage $enemyDamage is outside 0.1..3" }
+        require(enemyAlertness in 0.3f..2f) { "enemyAlertness $enemyAlertness is outside 0.3..2" }
     }
+
+    /**
+     * These rules with the monster dial at [density], and the rest of the
+     * pressure following it: a calm world (under 1) also has monsters that
+     * notice you later and hit softer; a swarming one keeps them as they are.
+     */
+    fun withMonsters(density: Float): WorldRules = copy(
+        monsterDensity = density,
+        enemyDamage = density.coerceIn(0.35f, 1f),
+        enemyAlertness = (0.4f + 0.6f * density).coerceIn(0.55f, 1f),
+    )
 
     companion object {
         const val MAX_DENSITY = 3f
@@ -67,7 +84,7 @@ object RulesPresets {
     val adventure = RulesPreset("adventure", "Adventure", "The default: fights, loot, towns, and needs that nudge rather than punish.", WorldRules())
     val story = RulesPreset(
         "story", "Story", "Fewer monsters, no survival, no raids. For exploring and reading.",
-        WorldRules(survival = SurvivalMode.OFF, monsterDensity = 0.6f, raids = false, experienceMultiplier = 1.3f, deathPenalty = 0f),
+        WorldRules(survival = SurvivalMode.OFF, raids = false, experienceMultiplier = 1.3f, deathPenalty = 0f).withMonsters(0.6f),
     )
     val survivor = RulesPreset(
         "survivor", "Survivor", "Harsh needs, long nights, fewer towns. Every meal is earned.",

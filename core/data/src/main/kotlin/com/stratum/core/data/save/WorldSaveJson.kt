@@ -175,18 +175,25 @@ internal data class RulesSchema(
     val deathPenalty: Float = DEFAULT_RULES.deathPenalty,
     val combat: CombatRulesSchema = CombatRulesSchema(),
     val sandbox: Boolean = false,
+    /** Absent in saves from before it: then it follows the monster dial, so an old calm world is calm. */
+    val enemyDamage: Float? = null,
+    val enemyAlertness: Float? = null,
 ) {
-    fun toDomain() = WorldRules(
-        survival = SurvivalMode.entries.firstOrNull { it.name == survival } ?: DEFAULT_RULES.survival,
-        townDensity = townDensity, startInTown = startInTown, monsterDensity = monsterDensity, raids = raids,
-        dayLengthMinutes = dayLengthMinutes, lootMultiplier = lootMultiplier, experienceMultiplier = experienceMultiplier,
-        deathPenalty = deathPenalty, combat = combat.toDomain(), sandbox = sandbox,
-    )
+    fun toDomain(): WorldRules {
+        val rules = WorldRules(
+            survival = SurvivalMode.entries.firstOrNull { it.name == survival } ?: DEFAULT_RULES.survival,
+            townDensity = townDensity, startInTown = startInTown, monsterDensity = monsterDensity, raids = raids,
+            dayLengthMinutes = dayLengthMinutes, lootMultiplier = lootMultiplier, experienceMultiplier = experienceMultiplier,
+            deathPenalty = deathPenalty, combat = combat.toDomain(), sandbox = sandbox,
+        )
+        val dialled = rules.withMonsters(monsterDensity)
+        return rules.copy(enemyDamage = enemyDamage ?: dialled.enemyDamage, enemyAlertness = enemyAlertness ?: dialled.enemyAlertness)
+    }
 
     companion object {
         fun of(r: WorldRules) = RulesSchema(
             r.survival.name, r.townDensity, r.startInTown, r.monsterDensity, r.raids, r.dayLengthMinutes, r.lootMultiplier,
-            r.experienceMultiplier, r.deathPenalty, CombatRulesSchema.of(r.combat), r.sandbox,
+            r.experienceMultiplier, r.deathPenalty, CombatRulesSchema.of(r.combat), r.sandbox, r.enemyDamage, r.enemyAlertness,
         )
     }
 }
