@@ -27,7 +27,8 @@ The generator (`engine/microvoxel/.../geo`) models this in three layers:
 
 1. **Provinces** (`Provinces.kt`). Each province is a kind of country. It has
    the following parts:
-   - A **landform**, a pure function giving relief at any column.
+   - A list of **processes** (`Processes.kt`): a landform first, then what
+     works over it. See [Geological processes](#geological-processes).
    - A **weathering profile** that follows the surface.
    - **Bedding**: bands of rock fixed to the province's floor, so both walls
      of a gorge show the same stripes. Bedding is folded where the province is
@@ -43,11 +44,13 @@ The generator (`engine/microvoxel/.../geo`) models this in three layers:
    blocks, so provinces form coherent zones rather than a patchwork. Borders
    wander, and the landforms of neighbouring provinces blend over 55 blocks.
    Everything is sampled once per block on a world-aligned lattice, so it
-   stays within a phone's budget (see `GeologyTest`).
+   stays within a phone's budget (see `GeologyTest` and `GeoBenchTest`).
+   The atlas also runs the **simulated** processes (`Drainage.kt`): water,
+   rivers and scree, which need a node's neighbours and not just a point.
 3. **Features** (`micro:features`) that a height field cannot make: termite
    mounds, balancing-rock tors and freestanding sandstone arches.
 
-### The twenty provinces
+### The twenty-four provinces
 
 | Province | Real places | What you see |
 |---|---|---|
@@ -71,6 +74,87 @@ The generator (`engine/microvoxel/.../geo`) models this in three layers:
 | Tsingy karst | Bemaraha, Ankarana | A limestone plateau dissolved into razor pinnacles |
 | Coral coast | Lamu, Mombasa, Zanzibar, Kilwa | Raised reef terraces and white coral beaches: the Swahili towns' stone |
 | Delta and mangrove | Niger delta, Rufiji, Okavango | Creeks and levees at the tide line, mangroves on the mud |
+| Canyon country | Fish River Canyon, Blyde River Canyon, the Tekezé gorge | A stony plateau cut by one looping canyon; flat Nama beds over tilted gneiss, a pebble bed on the unconformity |
+| Dune cordon and lagoon | Maputaland and Wild Coast cordons; the Lagos, Ébrié and Keta lagoons | Forested sand ridges along the shore, a long still lagoon behind them |
+| Montane plateau | Nyika, the Jos Plateau, the Bamenda highlands, the Aberdares | High rolling grassland, granite knolls, forest and a stream in every fold |
+| Basement shield | Zimbabwe craton and the Great Dyke, Barberton, the Man shield and Nimba, the Ashanti belt | Worn roots of the oldest crust: quartzite and iron ridges, black dykes, gold-bearing reefs |
+
+The four newest earn their place because nothing else made them. The canyon
+shows the whole stack of time in one wall. The cordon is the West and East
+African coast where it is not reef or delta. The montane plateau is the cool
+green high country the traps and the Drakensberg are too harsh for. The
+shield is where Africa's gold, iron and copper come from.
+
+## Geological processes
+
+A province is an ordered list of **steps**, each naming a process in the
+`GeoProcesses` registry with its settings as strings:
+
+```kotlin
+processes = listOf(
+    step("karoo"),                                    // the landform
+    step("erosion", "strength" to 0.7f),              // its share of the simulation
+    step("rivers", "rain" to 0.35f),
+    step("scree", "amount" to 1.1f),
+    step("dykes", "chance" to 0.8f, "width" to 4f),   // what cuts its rock
+    step("concretions", "material" to R.CALCRETE),
+)
+```
+
+A pack adds a kind of geology by calling `GeoProcesses.register("mypack:mesas", ...)`,
+and a kind of country by listing steps. There are three kinds of process.
+
+- **Relief** shapes the land, once per lattice node, over what the steps
+  before it made. There are 24 landforms (`mode` = replace, max, add or min,
+  and `weight`), and three modifiers:
+  - `barchans`: crescent dunes marching downwind over the reg and between
+    the seifs (Kharga, Lüderitz, Tarfaya).
+  - `sinkholes`: dolines in limestone (Bemaraha, the Mahafaly plateau, the
+    Middle Atlas).
+  - `faults`: blocks dropped and lifted along the grain, with sharp scarps
+    (the Kenyan and Ethiopian rift shoulders, the Fish River graben).
+- **Simulated** processes run over the whole land on a coarse lattice (one
+  node every 8 blocks), in tiles of 48 x 48 nodes with a 12-node apron. A
+  province only sets its rates. Within a tile:
+  1. A priority-flood (Barnes, Lehman and Mulla 2014) fills pits and gives
+     every node its receiver.
+  2. Flow accumulation gives each node its catchment.
+  3. Stream-power erosion cuts valleys, and sediment is dropped where the
+     slope eases, as **alluvial fans** and floodplain spreads.
+  4. Nodes whose catchment passes a threshold become **river** segments,
+     whose water level only falls downstream. Where they are carved in, they
+     get a channel with a gravel bed, **levees**, and dark **floodplain silt**
+     beside them. In dry provinces they are **wadis** of gravel with no water.
+
+  Neighbouring tiles cross-fade their erosion at the seams, and each river
+  segment belongs to exactly one tile. **Scree** is a bounded max-filter:
+  rubble lies against every cliff's foot at its angle of rest. Everything
+  is a pure function of world coordinates, so any chunk comes out the same
+  in any order (`GeoProcessTest`).
+- **Rock** processes rewrite one column's rock as it is laid down, below
+  the soil, with no noise per voxel:
+  - `dykes`: dolerite walls (the Karoo's, the Great Dyke).
+  - `veins`: quartz and gold reef (the Ashanti and Zimbabwe belts).
+  - `ore_lenses`: bauxite, malachite and banded iron.
+  - `concretions`: ironstone and calcrete nodules in mudrock.
+  - `cross_bedding`: the Clarens and Tassili fossil dunes.
+  - `unconformity`: flat beds over bevelled gneiss (the Fish River Canyon,
+    Sea Point).
+  - `columnar_joints`: in basalt (the Blue Nile gorge, the Drakensberg).
+
+  Fossil bands (fossil limestone, the Karoo's bone bed) are part of the
+  provinces' bedding.
+
+### Dials
+
+The terrain stage takes five dials, each 0..2 with 1 as shipped. They are
+in the World panel, and they are scene keys of the same names:
+
+- `erosion`
+- `rivers` (0 means none)
+- `dunes`
+- `scree`
+- `rockDetail`
 
 ## How towns are built
 
@@ -137,7 +221,7 @@ The town keeps its tradition's compound wall and sacred heart. See
 - **In game:** open **⛰ World**. *Landscape* picks all of Africa, or one
   province everywhere. *Towns & home → Building tradition* picks
   `regional` or one tradition. *Home tradition* sets the home town.
-- **In a pack:** set `micro:terrain` to `{"geology": "africa", "home": "forest_hills"}`
+- **In a pack:** set `micro:terrain` to `{"geology": "africa", "home": "forest_hills", "rivers": "1.5"}`
   and `micro:settlements` to `{"style": "regional", "homeStyle": "igbo"}`.
   See `MicrovoxelTerrainGenerator.catalogue` for every option.
 - **In code:** add a `Province` to the list, or a `Tradition` painter to
