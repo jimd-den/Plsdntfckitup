@@ -87,7 +87,10 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             lamps(grid, mpos, lights)
         }
         lastQuads.set(quads)
-        return TerrainMesher.Result(w.out.build(), props, lights)
+        val built = w.out.build()
+        // A dense chunk grows the builder to many megabytes; do not keep that for every worker for ever.
+        w.out.trimTo(MAX_KEPT_FLOATS)
+        return TerrainMesher.Result(built, props, lights)
     }
 
     /**
@@ -160,13 +163,19 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
         // The mesher asks thousands of times along each face, almost always of the same neighbour.
         var lastPos: MicroChunkPos? = null
         var last: MicroChunk? = null
+        // Likewise the generated blocks: one block chunk's worth, read whole, instead of a locked lookup per voxel.
+        var madeX = Int.MIN_VALUE; var madeY = Int.MIN_VALUE
+        var made: ShortArray? = null
         return NeighborOpacity { x, y, z ->
         val mx = mpos.originX + x; val my = mpos.originY + y; val mz = mpos.originZ + z
         if (mz < 0) return@NeighborOpacity true
         val bx = Math.floorDiv(mx, r); val by = Math.floorDiv(my, r); val bz = Math.floorDiv(mz, r)
         if (bz >= Chunk.HEIGHT) return@NeighborOpacity false
         val here = world.index(bx, by, bz)
-        if (here >= 0 && here != source.generatedBlock(bx, by, bz)) {
+        val cx = Math.floorDiv(bx, Chunk.SIZE); val cy = Math.floorDiv(by, Chunk.SIZE)
+        if (cx != madeX || cy != madeY) { made = source.generatedChunk(cx, cy); madeX = cx; madeY = cy }
+        val generated = made?.let { it[Chunk.indexOf(bx - cx * Chunk.SIZE, by - cy * Chunk.SIZE, bz)].toInt() } ?: source.generatedBlock(bx, by, bz)
+        if (here >= 0 && here != generated) {
             val b = world.type(here)
             return@NeighborOpacity b.isOpaque && b.shape == BlockShape.CUBE && b.glyph == null
         }
@@ -292,6 +301,9 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
     companion object {
         /** Past this share of its surface changed, a chunk is drawn from blocks, not microvoxels. */
         const val MAX_CHANGED_SHARE = 0.35f
+
+        /** Vertex floats a worker's builder keeps between meshes (1 MB); anything larger is given back. */
+        private const val MAX_KEPT_FLOATS = 1 shl 18
 
         /** Emission at which a voxel counts as a lamp and lights its surroundings. */
         const val LAMP_EMISSION = 2f

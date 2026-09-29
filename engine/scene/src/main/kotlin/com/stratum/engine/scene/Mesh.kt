@@ -213,6 +213,18 @@ class MeshBuilder(private val kind: MaterialKind) {
         triangle(a, c, d)
     }
 
+    /**
+     * Gives back memory after an unusually large mesh: buffers grown past
+     * [maxFloats] vertex floats shrink to that, so a builder a worker keeps
+     * does not hold the largest mesh it ever made. Empties the builder.
+     */
+    fun trimTo(maxFloats: Int) {
+        clear()
+        if (vertices.size > maxFloats) vertices = FloatArray(maxFloats)
+        val maxIndices = maxFloats / Vertex.STRIDE * 3 / 2
+        if (indices.size > maxIndices) indices = IntArray(maxIndices)
+    }
+
     /** An exact copy, for a batch that is kept, such as a chunk's terrain. */
     fun build(): MeshBatch = MeshBatch(kind, vertices.copyOf(vertexFloats), indices.copyOf(indexCount))
 

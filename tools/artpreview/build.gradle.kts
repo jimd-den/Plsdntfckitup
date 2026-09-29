@@ -7,6 +7,7 @@ dependencies {
   implementation(project(":engine:scene"))
   implementation(project(":content:igbo"))
   implementation(project(":plugins"))
+  implementation(project(":importer:common"))
 }
 
 /**
@@ -111,4 +112,13 @@ tasks.register<JavaExec>("packPlugin") {
   mainClass.set("com.stratum.tools.artpreview.PackPlugin")
   classpath = sourceSets["main"].runtimeClasspath
   workingDir = rootProject.projectDir
+}
+
+/** Plays the shipped world for a few minutes on a phone-sized heap; see Soak. */
+tasks.register<JavaExec>("soak") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.Soak")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  maxHeapSize = System.getenv("SOAK_HEAP") ?: "256m"
 }

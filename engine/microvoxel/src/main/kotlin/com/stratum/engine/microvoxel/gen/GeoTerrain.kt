@@ -61,7 +61,9 @@ internal object GeoTerrain {
         fields.publish(Fields.GEOLOGY, atlas)
 
         val mat = SurfaceMaterials(palette)
-        val cache = ColumnCache<Columns>()
+        // Columns are only read while a column's chunks are generated; the chunks themselves are cached
+        // downstream. Each costs ~120 KB, so a phone keeps a view's worth, not hundreds.
+        val cache = ColumnCache<Columns>(COLUMN_CACHE)
         val vertical = o.float("height", 1f)
         fields.publish(Fields.COLUMNS, ColumnSource { cx, cy ->
             cache.get(cx, cy) { columns(cx, cy, fields, atlas, resolved, mat, sea, vertical) }
@@ -70,6 +72,7 @@ internal object GeoTerrain {
     }
 
     const val AFRICA = "africa"
+    private const val COLUMN_CACHE = 72
     const val CLASSIC = "classic"
 
     private fun columns(
