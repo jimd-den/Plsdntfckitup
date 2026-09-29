@@ -130,6 +130,8 @@ class BlockPalette(
         private fun kindsByFamily(name: String): List<BlockMaterial>? = when {
             name == M.SALT_WATER || name == M.SODA_WATER -> listOf(BlockMaterial.LIQUID)
             name == M.OBSIDIAN || name == M.LAVA_GLOW -> listOf(ST, S)
+            // A player's painted model: sturdy, whatever its colour.
+            name.startsWith(com.stratum.engine.microvoxel.Paints.PREFIX) -> listOf(ST, S)
             name.startsWith("geo:") -> if (name in LOOSE) listOf(S, ST) else listOf(ST, S)
             name in THATCHED -> null
             name in WOODEN -> listOf(W, ST)
@@ -137,7 +139,7 @@ class BlockPalette(
             else -> null
         }
 
-        private fun isStructural(name: String) = name in STRUCTURAL || name.startsWith("arch:")
+        private fun isStructural(name: String) = name in STRUCTURAL || name.startsWith("arch:") || name.startsWith(com.stratum.engine.microvoxel.Paints.PREFIX)
 
         /** What buildings and roads are made of: never a block that falls. */
         val STRUCTURAL = setOf(

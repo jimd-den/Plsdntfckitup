@@ -36,6 +36,16 @@ class Chunk(
     var edgeRevision: Int = 0
         private set
 
+    /**
+     * Marks the chunk changed without changing a block: the microvoxels
+     * behind it changed (a statue stamped in), so its detail must be drawn
+     * again though every block reads the same.
+     */
+    fun touch() {
+        revision++
+        edgeRevision++
+    }
+
     fun blockAt(localX: Int, localY: Int, z: Int): Int {
         if (!isInBounds(localX, localY, z)) return BlockRegistry.AIR_INDEX
         return blocks[indexOf(localX, localY, z)].toInt()

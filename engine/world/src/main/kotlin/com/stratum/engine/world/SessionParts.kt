@@ -78,7 +78,10 @@ internal class SessionParts(
     val profile = PlayerProfile(content, table, survivalRules::modifiers, workbench::linkedTo)
     val survival = SurvivalFacade(state, content, survivalRules, profile::maxHealth)
     val gear = GearSystem(state, content, workbench, ground, lootRoller, cues, random, profile)
-    val building = BuildingSystem(state, world, content.registry, motion, survivalRules, roomScanner, cues, random, content::insert)
+    /** Models and carvings laid over the land, when it is made of microvoxels. */
+    val stampSurface: com.stratum.core.domain.micro.MicroStampSurface? = landscape as? com.stratum.core.domain.micro.MicroStampSurface
+
+    val building = BuildingSystem(state, world, content.registry, motion, survivalRules, roomScanner, cues, random, content::insert, microTerrain, stampSurface)
     val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert, profile)
     val politics = PoliticsSystem(state, content, generator as? SettlementAtlas, director, RealmSystem(content, config.rules.raids), cues, random)
 

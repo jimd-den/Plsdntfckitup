@@ -1,6 +1,10 @@
 package com.stratum.engine.microbridge
 
 import com.stratum.core.domain.content.BiomeDefinition
+import com.stratum.core.domain.micro.BlockBox
+import com.stratum.core.domain.micro.MicroModel
+import com.stratum.core.domain.micro.MicroStamp
+import com.stratum.core.domain.micro.MicroStampSurface
 import com.stratum.core.domain.settlement.SettlementAtlas
 import com.stratum.core.domain.settlement.SettlementPlan
 import com.stratum.core.domain.world.BiomeSource
@@ -40,7 +44,7 @@ import com.stratum.engine.microvoxel.gen.StageSpec
  * seed, the packs, the sea level. Only [passes] changes, and it is what a
  * save keeps ([com.stratum.core.domain.world.WorldConfig.terrainPasses]).
  */
-class HotTerrain(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource, SettlementAtlas {
+class HotTerrain(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource, SettlementAtlas, MicroStampSurface {
 
     @Volatile
     var current: MicrovoxelTerrainGenerator = MicrovoxelTerrainGenerator.create(context)
@@ -82,6 +86,8 @@ class HotTerrain(private val context: TerrainContext) : TerrainGenerator, BiomeS
         return try {
             val recipe = context.recipe.copy(passes = passes.map { PassSpec(it.id, it.options) })
             val next = MicrovoxelTerrainGenerator.create(context.copy(recipe = recipe))
+            // The statues and carvings stand on whatever land is made next.
+            next.stampLayer = current.stampLayer
             // Build the fields and one chunk now, so a stage that throws throws here and not in the render thread.
             next.micro.generate(MicroChunkPos(0, 0, context.config.seaLevel * MicrovoxelTerrainGenerator.MICRO_PER_BLOCK / MicroChunk.SIZE))
             registry?.let(next::paletteFor)
@@ -147,6 +153,16 @@ class HotTerrain(private val context: TerrainContext) : TerrainGenerator, BiomeS
     override fun materialForBlock(blockIndex: Int): Short = current.materialForBlock(blockIndex)
 
     override fun generatedChunk(x: Int, y: Int): ShortArray? = current.generatedChunk(x, y)
+
+    override fun stampModels(): List<MicroModel> = current.stampModels()
+
+    override fun stamps(): List<MicroStamp> = current.stamps()
+
+    override fun restoreStamps(models: Collection<MicroModel>, stamps: List<MicroStamp>) = current.restoreStamps(models, stamps)
+
+    override fun stamp(stamp: MicroStamp, model: MicroModel?): BlockBox? = current.stamp(stamp, model)
+
+    override fun unstamp(): BlockBox? = current.unstamp()
 
     private companion object {
         const val REFUSED = "Those settings do not make a world"

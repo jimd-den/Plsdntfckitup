@@ -94,7 +94,32 @@ sealed interface BuildResult {
 
     /** An erase drag, and how many blocks it handed back. */
     data class Erased(val removed: Int) : BuildResult
+
+    /** A paint drag: [painted] cells swapped for the selected block, [short] skipped for want of it. */
+    data class Painted(val painted: Int, val short: Int) : BuildResult
 }
+
+/** What an undo or redo did. */
+sealed interface UndoResult {
+    /** [cells] blocks put back as they were; [what] names the step for the player. */
+    data class Undone(val what: String, val cells: Int) : UndoResult
+    data class Redone(val what: String, val cells: Int) : UndoResult
+    data object NothingToUndo : UndoResult
+    data object NothingToRedo : UndoResult
+}
+
+/** What a sculpt, a chisel or a placed model did to the microvoxel land. */
+sealed interface SculptResult {
+    /** [blocks] cells changed at block scale (a fine carving may change none); [gathered] what the player picked up. */
+    data class Shaped(val blocks: Int, val gathered: Map<String, Int> = emptyMap()) : SculptResult
+    /** This world is not made of microvoxels: there is nothing finer than a block to shape. */
+    data object NotMicrovoxel : SculptResult
+    /** No room: the model would not stand there. */
+    data object NoRoom : SculptResult
+}
+
+/** A sculpting brush: its shape, how big, what it lays down. [material] is a microvoxel material name or a `#RRGGBB` paint. */
+data class SculptBrush(val shape: String = "sphere", val radius: Int = 3, val material: String = "#8A6A4A")
 
 /** An item lying in the world. */
 data class GroundLoot(val item: ItemInstance, val position: WorldPoint)

@@ -28,6 +28,16 @@ object BuildPlanner {
             // Erasing works on the region the drag covers, top to bottom of the
             // walls you would have built there: a mistake is usually a wall.
             BuildTool.ERASE -> box(from, to, height)
+            BuildTool.BOX -> box(from, to, height)
+            BuildTool.PILLAR -> (0 until height).map { BlockPos(to.x, to.y, to.z + it) }
+            BuildTool.STAIRS -> stairs(from, to)
+            BuildTool.ROOF -> roof(from, to)
+            BuildTool.DOME -> dome(from, to)
+            BuildTool.RING -> ring(from, to, height)
+            // Repainting takes the surface the drag covers, and as many layers under it as the height asks.
+            BuildTool.PAINT -> box(from.below(height - 1), to.below(height - 1), height)
+            // Digging goes down from the ground the drag started on.
+            BuildTool.DIG -> box(from.below(height - 1), to.below(height - 1), height)
         }
         return positions.distinct().take(MAX_PLAN_SIZE)
     }
@@ -47,6 +57,72 @@ object BuildPlanner {
                 for (y in min(from.y, to.y)..max(from.y, to.y)) {
                     for (x in min(from.x, to.x)..max(from.x, to.x)) add(BlockPos(x, y, z))
                 }
+            }
+        }
+    }
+
+    /**
+     * A flight of steps up the drag's long axis, as wide as the drag is
+     * across it, each step solid down to where the flight starts: walkable
+     * from either end without a jump.
+     */
+    private fun stairs(from: BlockPos, to: BlockPos): List<BlockPos> {
+        val dx = to.x - from.x; val dy = to.y - from.y
+        val alongX = abs(dx) >= abs(dy)
+        val run = if (alongX) abs(dx) else abs(dy)
+        val step = if ((if (alongX) dx else dy) >= 0) 1 else -1
+        val across = if (alongX) min(from.y, to.y)..max(from.y, to.y) else min(from.x, to.x)..max(from.x, to.x)
+        return buildList {
+            for (i in 0..run) for (c in across) for (z in from.z..from.z + i) {
+                add(if (alongX) BlockPos(from.x + i * step, c, z) else BlockPos(c, from.y + i * step, z))
+            }
+        }
+    }
+
+    /**
+     * A gable roof over the rectangle, its ridge along the long side, rising a
+     * block per block in from the eaves; the gable ends are closed.
+     */
+    private fun roof(from: BlockPos, to: BlockPos): List<BlockPos> {
+        val minX = min(from.x, to.x); val maxX = max(from.x, to.x)
+        val minY = min(from.y, to.y); val maxY = max(from.y, to.y)
+        val ridgeAlongY = maxX - minX <= maxY - minY
+        val span = if (ridgeAlongY) maxX - minX + 1 else maxY - minY + 1
+        return buildList {
+            for (y in minY..maxY) for (x in minX..maxX) {
+                val a = if (ridgeAlongY) x - minX else y - minY
+                val end = if (ridgeAlongY) y == minY || y == maxY else x == minX || x == maxX
+                val rise = min(a, span - 1 - a)
+                // The slope, and under it at each end the triangle that closes the gable.
+                add(BlockPos(x, y, to.z + rise))
+                if (end) for (z in to.z until to.z + rise) add(BlockPos(x, y, z))
+            }
+        }
+    }
+
+    /** A dome over the rectangle: a shell one block thick, as high as it is half wide. */
+    private fun dome(from: BlockPos, to: BlockPos): List<BlockPos> {
+        val cx = (from.x + to.x) / 2f; val cy = (from.y + to.y) / 2f
+        val rx = abs(to.x - from.x) / 2f + 0.5f; val ry = abs(to.y - from.y) / 2f + 0.5f
+        val rz = min(rx, ry)
+        val inner = 1f - 1.2f / min(rx, ry).coerceAtLeast(1f)
+        return buildList {
+            for (z in 0..rz.toInt()) for (y in min(from.y, to.y)..max(from.y, to.y)) for (x in min(from.x, to.x)..max(from.x, to.x)) {
+                val d = kotlin.math.sqrt(((x - cx) / rx).let { it * it } + ((y - cy) / ry).let { it * it } + ((z + 0.5f) / rz).let { it * it })
+                if (d <= 1f && d >= inner) add(BlockPos(x, y, to.z + z))
+            }
+        }
+    }
+
+    /** A round wall: the ellipse the rectangle holds, raised [height] blocks. A tower, a kraal, a hut. */
+    private fun ring(from: BlockPos, to: BlockPos, height: Int): List<BlockPos> {
+        val cx = (from.x + to.x) / 2f; val cy = (from.y + to.y) / 2f
+        val rx = abs(to.x - from.x) / 2f + 0.5f; val ry = abs(to.y - from.y) / 2f + 0.5f
+        val inner = 1f - 1.3f / min(rx, ry).coerceAtLeast(1f)
+        return buildList {
+            for (level in 0 until height) for (y in min(from.y, to.y)..max(from.y, to.y)) for (x in min(from.x, to.x)..max(from.x, to.x)) {
+                val d = kotlin.math.sqrt(((x + 0.5f - cx - 0.5f) / rx).let { it * it } + ((y + 0.5f - cy - 0.5f) / ry).let { it * it })
+                if (d <= 1f && d >= inner) add(BlockPos(x, y, to.z + level))
             }
         }
     }
@@ -160,8 +236,41 @@ enum class BuildTool(val label: String, val needsDrag: Boolean) {
      * one gesture that made it.
      */
     ERASE("Erase", true),
+
+    /** A solid block of the selected block: a plinth, a platform, a wall of a given thickness. */
+    BOX("Fill", true),
+
+    /** A column [height] blocks tall, from a tap. */
+    PILLAR("Pillar", false),
+
+    /** A flight of steps up the drag, as wide as the drag is across. */
+    STAIRS("Stairs", true),
+
+    /** A gable roof over the rectangle. */
+    ROOF("Roof", true),
+
+    /** A dome over the rectangle. */
+    DOME("Dome", true),
+
+    /** A round wall in the rectangle. */
+    RING("Round", true),
+
+    /** Swaps what is there for the selected block, handing back what it replaced. */
+    PAINT("Paint", true),
+
+    /**
+     * Digs the ground out, down from where the drag started: a cellar, a
+     * pond, a moat, in one gesture, every block handed back.
+     */
+    DIG("Dig", true),
     ;
 
     /** Whether committing this tool removes blocks rather than placing them. */
-    val removes: Boolean get() = this == ERASE
+    val removes: Boolean get() = this == ERASE || this == DIG
+
+    /** Whether it swaps blocks already there rather than filling air. */
+    val replaces: Boolean get() = this == PAINT
+
+    /** Whether its shape reads the build height. */
+    val usesHeight: Boolean get() = this in setOf(WALLS, ROOM, ERASE, BOX, PILLAR, RING, PAINT, DIG)
 }

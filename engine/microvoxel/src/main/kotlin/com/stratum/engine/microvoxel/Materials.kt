@@ -107,6 +107,8 @@ class MaterialPalette {
             register(M.OBSIDIAN, 0x1E1B22, gloss = 0.7f, jitter = 0.04f)
             register(M.LAVA_GLOW, 0xE8561E, emission = 2.2f, jitter = 0.1f)
             ArchMaterials.all.forEach { (name, color, jitter) -> register(name, color, jitter = jitter) }
+            // Free colour for the models players make and pictures turned into voxels.
+            Paints.register(this)
         }
     }
 }

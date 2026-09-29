@@ -146,6 +146,8 @@ class WorldSession private constructor(
         // resumed player is the ground they left rather than a fresh copy of it.
         restoring?.let { save ->
             val remap = SavedChunk.remapTable(save.blockIds, content.registry)
+            // Stamps are part of the land as generated: laid before any chunk is made, so the saved chunks match it.
+            if (save.stamps.isNotEmpty()) parts.stampSurface?.restoreStamps(save.microModels, save.stamps)
             streamingWorld.restoreEdited(save.chunks.map { it.toChunk(remap) })
             encounters.restoreMarkers(save.consumedMarkers)
         }
@@ -266,6 +268,8 @@ class WorldSession private constructor(
         chunks = streamingWorld.dirtyChunks().map(SavedChunk::of).sortedWith(compareBy({ it.x }, { it.y })),
         realm = parts.politics.realmSave(),
         consumedMarkers = encounters.consumedMarkers,
+        microModels = parts.stampSurface?.stampModels().orEmpty(),
+        stamps = parts.stampSurface?.stamps().orEmpty(),
     )
 
     /** Short-lived visuals: damage numbers, misses, level-ups. */

@@ -70,6 +70,12 @@ object MicroScenePreview {
         val textures = TextureLibrary().also { lib -> forged?.let { ForgedTextures.loadInto(it, lib) } }
 
         // `traditions [ids...]`: only the building traditions, one home town each.
+        if (args.getOrNull(3) == "parametric") {
+            val ids = com.stratum.engine.microvoxel.arch.ParametricTradition.ID
+            val looks = PARAMETRIC_LOOKS.filter { args.size <= 4 || it.first in args.drop(4) }
+            traditions(out, content, config, hot, director, textures, looks.map { it.first }, looks.associate { it.first to (mapOf("homeStyle" to ids) + it.second) })
+            return
+        }
         if (args.getOrNull(3) == "traditions") {
             traditions(out, content, config, hot, director, textures, args.drop(4))
             return
@@ -172,12 +178,14 @@ object MicroScenePreview {
     private fun traditions(
         out: File, content: AssembledContent, config: WorldConfig, hot: com.stratum.engine.microbridge.HotTerrain,
         director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String>,
+        optionsFor: Map<String, Map<String, String>> = emptyMap(),
     ) {
         val base = hot.passes
         val ids = only.ifEmpty { com.stratum.engine.microvoxel.arch.Traditions.ids }
         for (id in ids) {
             val towns = base.firstOrNull { it.id == "micro:settlements" } ?: com.stratum.engine.microvoxel.gen.StageSpec("micro:settlements")
-            hot.retune(MicrovoxelTerrainGenerator.withStage(base, towns.copy(options = towns.options + mapOf("homeStyle" to id))))?.let { error("$id: $it") }
+            val options = optionsFor[id] ?: mapOf("homeStyle" to id)
+            hot.retune(MicrovoxelTerrainGenerator.withStage(base, towns.copy(options = towns.options + options)))?.let { error("$id: $it") }
             val v = homeVantage(hot.current)
             val world = StreamingWorld(content.registry, hot, config)
             world.focusOn(BlockPos(v.first, v.second, 0))
@@ -186,18 +194,35 @@ object MicroScenePreview {
             val micro = SceneBuilder(director, textures, biomeAt = { x, y -> hot.biomeAt(x, y) }, settings = RenderSettings.of(QualityTier.HIGH), microTerrain = hot)
             val frame = settled(micro) { micro.build(world, camera, actorsAround(world, v.first, v.second), WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)) }
             val img = SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
-            val name = com.stratum.engine.microvoxel.arch.Traditions.all(hot.palette).first { it.id == id }.name
+            val name = com.stratum.engine.microvoxel.arch.Traditions.all(hot.palette).firstOrNull { it.id == id }?.name
+                ?: options["homeStyle"]?.takeIf { it.startsWith("parametric:") }?.let { v ->
+                    val t = v.removePrefix("parametric:")
+                    "Invented within the " + (com.stratum.engine.microvoxel.arch.Traditions.all(hot.palette).firstOrNull { it.id == t }?.name ?: t) + " grammar"
+                }
+                ?: ("Parametric: " + options.filterKeys { it != "homeStyle" }.entries.joinToString("  ") { "${it.key}=${it.value}" })
             runCatching {
                 val g = img.createGraphics()
                 g.color = java.awt.Color(0, 0, 0, 150); g.fillRect(0, HEIGHT - 34, WIDTH, 34)
                 g.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 18); g.color = java.awt.Color.WHITE
                 g.drawString(name, 14, HEIGHT - 11); g.dispose()
             }
-            ImageIO.write(img, "png", File(out, "tradition-$id.png"))
-            println("wrote tradition-$id.png")
+            val file = if (id in optionsFor) "parametric-$id.png" else "tradition-$id.png"
+            ImageIO.write(img, "png", File(out, file))
+            println("wrote $file")
         }
         hot.retune(base)
     }
+
+    /** Parametric home towns, each from a different corner of the genome's space. */
+    private val PARAMETRIC_LOOKS: List<Pair<String, Map<String, String>>> = listOf(
+        "any" to emptyMap(),
+        "lime-domes" to mapOf("materials" to "lime", "roofs" to "dome,onion,flat,terrace", "storeys" to "1-3", "towers" to "0.6", "ornament" to "0.9"),
+        "stone-hall" to mapOf("materials" to "stone", "roofs" to "gable,hip,cone,pyramid", "storeys" to "0-1", "ornament" to "0.4"),
+        "painted-round" to mapOf("materials" to "painted", "roofs" to "cone,terrace,dome", "plans" to "round,octagon,rect,cross", "ornament" to "1"),
+        "brick-mill" to mapOf("materials" to "brick,modern", "roofs" to "sawtooth,flat,mansard,barrel", "storeys" to "2-4", "variety" to "0.8"),
+        "earth-courts" to mapOf("materials" to "earth", "roofs" to "flat,terrace", "plans" to "courtyard,u,l,stepped", "towers" to "0.4", "ornament" to "0.8"),
+        "timber-town" to mapOf("materials" to "timber", "roofs" to "gable,pyramid,cone,mansard", "storeys" to "1-2", "variety" to "0.9"),
+    ) + com.stratum.engine.microvoxel.arch.Traditions.ids.map { "vernacular-$it" to mapOf("homeStyle" to "parametric:$it") }
 
     /** Builds frames until the background detail meshes are all in, as a player standing still would see. */
     private fun settled(builder: SceneBuilder, build: () -> SceneFrame): SceneFrame {

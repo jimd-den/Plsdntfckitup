@@ -26,7 +26,13 @@ import com.stratum.engine.microvoxel.gen.TreesStage
 import com.stratum.engine.microvoxel.arch.ArchPalette
 import com.stratum.engine.microvoxel.arch.Building
 import com.stratum.engine.microvoxel.arch.PlainBuildings
+import com.stratum.engine.microvoxel.arch.GenomeRules
+import com.stratum.engine.microvoxel.arch.MaterialFamilies
 import com.stratum.engine.microvoxel.arch.Monuments
+import com.stratum.engine.microvoxel.arch.ParametricTradition
+import com.stratum.engine.microvoxel.arch.PlanShape
+import com.stratum.engine.microvoxel.arch.RoofForm
+import com.stratum.engine.microvoxel.arch.Vernacular
 import com.stratum.engine.microvoxel.arch.Side
 import com.stratum.engine.microvoxel.arch.Tradition
 import com.stratum.engine.microvoxel.arch.Traditions
@@ -80,9 +86,21 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
                 "style", "Building tradition",
                 "Regional: each town builds as the people of its land do (Sudano-Sahelian on the Sahel, Swahili on the coast, Great Zimbabwe " +
                     "among the granite domes...). Or one tradition everywhere. Plain: the block buildings.",
-                listOf(REGIONAL) + Traditions.ids + PLAIN, REGIONAL,
+                listOf(REGIONAL) + Traditions.ids + ParametricTradition.ID + PLAIN, REGIONAL,
             ),
-            StageParam.Choice("homeStyle", "Home tradition", "How your home town is built; auto follows its land.", listOf(AUTO) + Traditions.ids, AUTO),
+            StageParam.Number(
+                "parametric", "Invented towns",
+                "In regional mode, the share of towns that invent variations within their land's own grammar -- " +
+                    "Kano's courtyards and pinnacles, Lamu's storeyed coral houses, Zimbabwe's round dry stone -- rolled per building.", 0f, 1f, 0.35f,
+            ),
+            StageParam.Choice("plans", "Plans", "Parametric buildings' plans (any, or a comma list).", listOf(GenomeRules.ANY) + PlanShape.entries.map { it.name.lowercase() }, GenomeRules.ANY),
+            StageParam.Choice("roofs", "Roofs", "Parametric buildings' roofs (any, or a comma list).", listOf(GenomeRules.ANY) + RoofForm.entries.map { it.name.lowercase() }, GenomeRules.ANY),
+            StageParam.Choice("materials", "Materials", "Parametric buildings' material families (any, or a comma list).", listOf(GenomeRules.ANY) + MaterialFamilies.ids, GenomeRules.ANY),
+            StageParam.Choice("storeys", "Upper storeys", "Storeys above the ground floor: a number or a range.", listOf("0-2", "0", "1", "0-1", "1-3", "2-4", "3-5"), "0-2"),
+            StageParam.Number("ornament", "Ornament", "Bare walls to every building dressed in all it can carry.", 0f, 1f, 0.5f),
+            StageParam.Number("towers", "Towers", "How often a parametric building raises towers.", 0f, 1f, 0.2f),
+            StageParam.Number("variety", "Variety", "How far each building strays from its town's shared look.", 0f, 1f, 0.45f),
+            StageParam.Choice("homeStyle", "Home tradition", "How your home town is built; auto follows its land.", listOf(AUTO) + Traditions.ids + ParametricTradition.ID, AUTO),
             StageParam.Number("density", "Towns", "How many towns the wilds hold, relative to the world rules.", 0f, 3f, 1f),
             StageParam.Toggle("sacredTree", "Town heart", "What stands at each town's centre: a sacred tree, a stele, a tower, a kraal.", true),
             StageParam.Choice("homeRecipe", "Home town", "Which kind of town you begin in.", listOf(AUTO) + context.settlements.map { it.id }, AUTO),
@@ -96,11 +114,13 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
     override fun create(setup: StageSetup): MicroStage {
         val o = setup.options
         val style = o.string("style", REGIONAL).let { if (it == EARTHEN) "igbo" else it }
-        require(style == REGIONAL || style == PLAIN || style in Traditions.ids) {
-            "Stage '$ID' option 'style' is $REGIONAL, $PLAIN or a tradition (${Traditions.ids.joinToString()}), not '$style'"
+        require(style == REGIONAL || style == PLAIN || style == ParametricTradition.ID || style in Traditions.ids) {
+            "Stage '$ID' option 'style' is $REGIONAL, $PLAIN, ${ParametricTradition.ID} or a tradition (${Traditions.ids.joinToString()}), not '$style'"
         }
+        val genome = GenomeRules.parse { key -> o.string(key, "") }
+        val invented = o.float("parametric", 0.35f).coerceIn(0f, 1f)
         val homeStyle = o.string("homeStyle", AUTO).let { if (it == EARTHEN) "igbo" else it }
-        require(homeStyle == AUTO || homeStyle in Traditions.ids) { "Stage '$ID' option 'homeStyle' is $AUTO or a tradition, not '$homeStyle'" }
+        require(homeStyle == AUTO || homeStyle == ParametricTradition.ID || homeStyle in Traditions.ids || homeStyle.removePrefix("parametric:") in Traditions.ids) { "Stage '$ID' option 'homeStyle' is $AUTO or a tradition, not '$homeStyle'" }
         val fields = setup.fields
         val natural = fields.require(Fields.SURFACE)
         val rules = context.config.rules
@@ -124,7 +144,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         val previous = fields.get(Fields.FOOTPRINT)
         fields.publish(Fields.FOOTPRINT, TownFootprint(planner, previous))
 
-        val grammar = TownGrammar(setup.palette, blocks, style, homeStyle, fields.get(Fields.GEOLOGY))
+        val grammar = TownGrammar(setup.palette, blocks, style, homeStyle, fields.get(Fields.GEOLOGY), genome, invented)
         return MicroStage { ctx -> build(ctx, planner, grammar, sacred) }
     }
 
@@ -366,8 +386,16 @@ internal class TownGrammar(
     /** `auto`, or the home town's tradition. */
     private val homeStyle: String,
     private val geology: GeoField?,
+    private val genome: GenomeRules = GenomeRules(),
+    /** In regional mode, the share of towns that invent their look from their land's materials. */
+    private val invented: Float = 0f,
 ) {
-    private val traditions: Map<String, Tradition> = (Traditions.all(palette) + PlainBuildings(ArchPalette(palette))).associateBy { it.id }
+    private val arch = ArchPalette(palette)
+    private val traditions: Map<String, Tradition> =
+        (Traditions.all(palette) + PlainBuildings(arch) + ParametricTradition(arch, genome)).associateBy { it.id }
+
+    /** A regional town that invents its own look, one per tradition: its land's grammar, rolled per building. */
+    private val inventedBy = java.util.concurrent.ConcurrentHashMap<String, Tradition>()
     private val chosen = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val specs = java.util.concurrent.ConcurrentHashMap<PlacedBuilding, Building>()
 
@@ -391,7 +419,19 @@ internal class TownGrammar(
             when {
                 home && homeStyle != SettlementsStage.AUTO -> homeStyle
                 style != SettlementsStage.REGIONAL -> style
-                else -> Traditions.choose(geology?.provinceAt(plan.centerX * R, plan.centerY * R)?.id, Hash.mix(0L, plan.centerX, plan.centerY, 0, 97))
+                else -> {
+                    val native = Traditions.choose(geology?.provinceAt(plan.centerX * R, plan.centerY * R)?.id, Hash.mix(0L, plan.centerX, plan.centerY, 0, 97))
+                    val invents = !home && invented > 0f && Hash.unit(0L, plan.centerX, plan.centerY, 0, 96) < invented
+                    if (invents) INVENTED + native else native
+                }
+            }
+        }
+        if (id.startsWith(INVENTED)) {
+            // A town that invents its look within its land's own grammar: its tradition's forms, walls and heart.
+            val native = id.removePrefix(INVENTED)
+            return inventedBy.getOrPut(native) {
+                val tradition = traditions.getValue(native)
+                ParametricTradition(arch, Vernacular.rulesFor(native, genome), id, tradition.town, "${tradition.name} (vernacular)")
             }
         }
         return traditions.getValue(id)
@@ -411,9 +451,11 @@ internal class TownGrammar(
             r = R,
             seed = Hash.mix(0L, b.x, b.y, 0, 98),
             windowAt = { bx, by, bz -> bz == plan.groundZ + 2 && (bx + by) % 3 == 0 },
+            town = Hash.mix(0L, plan.centerX, plan.centerY, 0, 99),
         )
     }
     private val R = SettlementsStage.R
+    private val INVENTED = "parametric:"
     val thatchDark = palette.id(M.THATCH_DARK)
     val beaten = palette.id(M.BEATEN_EARTH)
 }

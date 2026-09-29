@@ -14,6 +14,10 @@ import com.stratum.core.domain.world.TerrainGeneratorFactory
 import com.stratum.core.domain.world.TerrainRecipe
 import com.stratum.core.domain.world.WorldMarker
 import com.stratum.core.domain.world.WorldMarkerKind
+import com.stratum.core.domain.micro.BlockBox
+import com.stratum.core.domain.micro.MicroModel
+import com.stratum.core.domain.micro.MicroStamp
+import com.stratum.core.domain.micro.MicroStampSurface
 import com.stratum.engine.microvoxel.M
 import com.stratum.engine.microvoxel.MaterialPalette
 import com.stratum.engine.microvoxel.MicroChunk
@@ -72,7 +76,7 @@ import kotlin.math.abs
  * dirt and rock instead of the packs' region blocks. See
  * [MicroWorldgen.catalogue] for every stage and its options.
  */
-open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource {
+open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : TerrainGenerator, BiomeSource, MarkedWorld, MicroTerrainSource, MicroStampSurface {
 
     /** The packs' blocks as materials, registered before anything is generated. */
     val blockMaterials = BlockMaterials(MaterialPalette.standard(), context.blocks)
@@ -138,7 +142,52 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
 
     // ---- MicroTerrainSource ------------------------------------------------------------
 
-    override fun microChunk(pos: MicroChunkPos): MicroChunk = micros.getOrPut(pos) { micro.generate(pos) }
+    override fun microChunk(pos: MicroChunkPos): MicroChunk {
+        // Made while a stamp went in, it may be missing it: used once, never kept.
+        val revision = stampLayer.revision
+        return micros.getOrPut(pos, keep = { stampLayer.revision == revision }) {
+            val made = micro.generate(pos)
+            if (stampLayer.isEmpty) made else stampLayer.apply(pos, made, palette)
+        }
+    }
+
+    // ---- Stamps ------------------------------------------------------------------------
+
+    /**
+     * Models laid over the land: statues, sculpted mounds, chiselled
+     * tunnels. A [HotTerrain] hands the same layer to every generator it
+     * builds, so a retune keeps them.
+     */
+    var stampLayer: StampLayer = StampLayer()
+
+    override fun stampModels(): List<MicroModel> = stampLayer.models()
+
+    override fun stamps(): List<MicroStamp> = stampLayer.stamps()
+
+    override fun restoreStamps(models: Collection<MicroModel>, stamps: List<MicroStamp>) {
+        stampLayer.restore(models, stamps)
+        micros.clear(); converted.clear()
+    }
+
+    override fun stamp(stamp: MicroStamp, model: MicroModel?): BlockBox? {
+        val box = stampLayer.stamp(stamp, model) ?: return null
+        forget(box)
+        return StampLayer.blocksOf(box, MICRO_PER_BLOCK)
+    }
+
+    override fun unstamp(): BlockBox? {
+        val box = stampLayer.unstamp() ?: return null
+        forget(box)
+        return StampLayer.blocksOf(box, MICRO_PER_BLOCK)
+    }
+
+    /** Drops what was made from the land under a micro box, so it is made again with the stamps as they are now. */
+    internal fun forget(box: IntArray) {
+        val cx0 = Math.floorDiv(box[0], MicroChunk.SIZE); val cx1 = Math.floorDiv(box[3], MicroChunk.SIZE)
+        val cy0 = Math.floorDiv(box[1], MicroChunk.SIZE); val cy1 = Math.floorDiv(box[4], MicroChunk.SIZE)
+        micros.removeIf { it.x in cx0..cx1 && it.y in cy0..cy1 }
+        converted.removeIf { it.x in cx0..cx1 && it.y in cy0..cy1 }
+    }
 
     override fun generatedBlock(x: Int, y: Int, z: Int): Int {
         if (z !in 0 until Chunk.HEIGHT) return BlockRegistry.AIR_INDEX
@@ -154,7 +203,7 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
 
     // ---- Conversion --------------------------------------------------------------------
 
-    private fun convert(pos: ChunkPos, bp: BlockPalette): ShortArray = converted.getOrPut(pos) {
+    private fun convert(pos: ChunkPos, bp: BlockPalette): ShortArray = stampLayer.revision.let { revision -> converted.getOrPut(pos, keep = { stampLayer.revision == revision }) {
         val out = ShortArray(Chunk.VOLUME)
         val exM = ShortArray(EXACT_SLOTS); val exC = IntArray(EXACT_SLOTS)
         val r = MICRO_PER_BLOCK
@@ -206,7 +255,7 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
         placeCrowns(out, bp)
         for (y in 0 until Chunk.SIZE) for (x in 0 until Chunk.SIZE) out[Chunk.indexOf(x, y, 0)] = BEDROCK
         out
-    }
+    } }
 
     /** Counts [m] among a cell's pack-block materials; returns the new number of distinct ones. */
     private fun tally(ms: ShortArray, cs: IntArray, n: Int, m: Short): Int {
@@ -460,11 +509,15 @@ internal class Lru<K, V>(private val capacity: Int) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?) = size > capacity
     }
 
-    fun getOrPut(key: K, build: () -> V): V {
+    /** The cached value, or [build]'s, kept only when [keep] still says so once it is made. */
+    fun getOrPut(key: K, keep: () -> Boolean = { true }, build: () -> V): V {
         synchronized(map) { map[key]?.let { return it } }
         val value = build()
+        if (!keep()) return value
         synchronized(map) { return map[key] ?: value.also { map[key] = it } }
     }
 
     fun clear() = synchronized(map) { map.clear() }
+
+    fun removeIf(predicate: (K) -> Boolean) = synchronized(map) { map.keys.removeAll(predicate) }
 }

@@ -41,6 +41,8 @@ class Building(
     val seed: Long,
     /** Whether the plan puts a window in this block cell. */
     private val windowAt: (bx: Int, by: Int, bz: Int) -> Boolean,
+    /** The town's own number, for looks a whole town shares (see [BuildingGenome]). */
+    val town: Long = 0L,
 ) {
     val width get() = x1 - x0 + 1
     val depth get() = y1 - y0 + 1
