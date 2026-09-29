@@ -42,6 +42,19 @@ class MotionBody {
         private set
     var profile: MotionProfile = MotionProfile.DEFAULT
 
+    /** 0..1 phases from the seed, worked out once at [reset] so the layers never hash per frame. */
+    private val phases = FloatArray(PHASES)
+
+    /** The body's [salt]th phase, 0..1: the same for the same id on every run. */
+    fun phase(salt: Int): Float = phases[salt and (PHASES - 1)]
+
+    /** [Springs.tremor] on this body's own phases. */
+    fun tremor(salt: Int, t: Float, rate: Float): Float {
+        val p1 = phase(salt) * Springs.TAU; val p2 = phase(salt + 1) * Springs.TAU; val p3 = phase(salt + 2) * Springs.TAU
+        return kotlin.math.sin(t * rate * Springs.TAU + p1) * 0.5f + kotlin.math.sin(t * rate * 2.13f * Springs.TAU + p2) * 0.3f +
+            kotlin.math.sin(t * rate * 3.71f * Springs.TAU + p3) * 0.2f
+    }
+
     /** Whatever the caller hangs on this body (the scene hangs its mesh here); cleared by [reset]. */
     var tag: Any? = null
 
@@ -102,6 +115,7 @@ class MotionBody {
     fun reset(id: String, profile: MotionProfile, x: Float, y: Float, z: Float, facingX: Float = 0f, facingY: Float = 1f, spawning: Boolean = true) {
         this.id = id
         seed = Springs.hash(id.hashCode())
+        for (i in 0 until PHASES) phases[i] = Springs.unit(seed, i)
         this.profile = profile
         tag = null
         trueX = x; trueY = y; trueZ = z
@@ -256,6 +270,9 @@ class MotionBody {
         const val SPEED_SMOOTHING = 10f
         const val FLINCH_KICK = 5f
         const val FLINCH_SPRING = 16f
+        /** The flinch spring's peak displacement from one kick of [FLINCH_KICK]: v / (omega * e). */
+        const val FLINCH_PEAK = FLINCH_KICK / (FLINCH_SPRING * 2.7182817f)
+        private const val PHASES = 32
         const val TURN_LEAD_CAP = 8f
         /** The idle clock wraps after this long, so its sines keep their precision. */
         const val TIME_WRAP = 3600f

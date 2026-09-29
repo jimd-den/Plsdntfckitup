@@ -100,6 +100,12 @@ class MotionRig(private val layers: Array<MotionLayer>) {
 object MotionLayers {
     private const val DEG = (PI / 180.0).toFloat()
 
+    /** Blocks an ordinary blow throws a body back, at the flinch's peak. */
+    const val FLINCH_SHOVE = 0.26f
+
+    /** Degrees it tips away from an ordinary blow. */
+    const val FLINCH_TILT = 20f
+
     /** The drawn body where its springs have carried it. Everything else is laid on top. */
     val Tether = MotionLayer { b, p -> p.x = b.x; p.y = b.y; p.z = b.z; p.scale = b.profile.scale }
 
@@ -112,10 +118,10 @@ object MotionLayers {
         val pr = b.profile
         if (pr.hover <= 0f) return@MotionLayer
         val t = b.time
-        val ph = Springs.unit(b.seed, 1) * Springs.TAU
+        val ph = b.phase(1) * Springs.TAU
         p.z += pr.bob * (sin(t * pr.bobRate * Springs.TAU + ph) * 0.75f + sin(t * pr.bobRate * 1.618f * Springs.TAU + ph * 2f) * 0.25f)
         val sway = pr.sway * DEG
-        val ps = Springs.unit(b.seed, 2) * Springs.TAU
+        val ps = b.phase(2) * Springs.TAU
         p.yaw += sway * 0.6f * sin(t * pr.swayRate * Springs.TAU + ps)
         p.roll += sway * 0.5f * sin(t * pr.swayRate * 0.83f * Springs.TAU + ps * 1.7f)
         p.pitch += sway * 0.3f * sin(t * pr.swayRate * 1.31f * Springs.TAU + ps * 0.6f)
@@ -125,7 +131,7 @@ object MotionLayers {
     /** The glow breathing: the whole mask, and its lines more than its eyes, slow and steady. */
     val Breath = MotionLayer { b, p ->
         val pr = b.profile
-        val breath = 0.5f + 0.5f * sin(b.time * pr.glowRate * Springs.TAU + Springs.unit(b.seed, 3) * Springs.TAU)
+        val breath = 0.5f + 0.5f * sin(b.time * pr.glowRate * Springs.TAU + b.phase(3) * Springs.TAU)
         p.glow += pr.glow + pr.glowPulse * (breath - 0.5f)
         p.lines += pr.glowPulse * breath * 0.6f
         p.eyes += 0.1f * breath
@@ -154,10 +160,13 @@ object MotionLayers {
         val tw = b.profile.twitch
         if (tw <= 0f) return@MotionLayer
         val t = b.time
-        p.x += Springs.tremor(b.seed, 11, t, 7f) * 0.018f * tw
-        p.y += Springs.tremor(b.seed, 13, t, 7.7f) * 0.018f * tw
-        p.z += Springs.tremor(b.seed, 17, t, 9f) * 0.012f * tw
-        p.yaw += Springs.tremor(b.seed, 19, t, 5f) * 5f * DEG * tw
+        p.x += b.tremor(11, t, 7f) * 0.028f * tw
+        p.y += b.tremor(13, t, 7.7f) * 0.028f * tw
+        p.z += b.tremor(17, t, 9f) * 0.02f * tw
+        // Snaps of the head: the tremor's peaks sharpened, so a feral mask jerks rather than wobbles.
+        val snap = b.tremor(19, t, 2.2f)
+        p.yaw += (snap * snap * snap) * 16f * DEG * tw
+        p.roll += b.tremor(23, t, 3.1f) * 4f * DEG * tw
     }
 
     /**
@@ -239,14 +248,16 @@ object MotionLayers {
      */
     val Flinch = MotionLayer { b, p ->
         val pr = b.profile
-        val shove = b.flinch * 0.12f + b.impact * 0.1f * pr.flinch
+        // The flinch spring's displacement, as a share of an ordinary blow's peak.
+        val k = b.flinch / MotionBody.FLINCH_PEAK
+        val shove = k * FLINCH_SHOVE + b.impact * 0.12f * pr.flinch
         p.x += b.hitDirX * shove; p.y += b.hitDirY * shove
         // Tilt away from the blow: back if hit in the face, sideways if from the side.
         val fx = -sin(b.yaw); val fy = cos(b.yaw)
         val fromFront = -(b.hitDirX * fx + b.hitDirY * fy)
         val side = b.hitDirX * fy - b.hitDirY * fx
-        p.pitch -= fromFront * b.flinch * 14f * DEG
-        p.roll += side * b.flinch * 14f * DEG
+        p.pitch -= fromFront * k * FLINCH_TILT * DEG
+        p.roll += side * k * FLINCH_TILT * DEG
         if (b.hitAge >= 0f) {
             val flash = Springs.decay(b.hitAge, 14f) * b.hitPower.coerceAtMost(1f)
             p.flash = maxOf(p.flash, flash)
@@ -276,7 +287,7 @@ object MotionLayers {
         val h = p.hands
         for (side in 0 until 2) {
             val s = if (side == 0) -1f else 1f
-            val bob = sin(t * b.profile.bobRate * Springs.TAU + side * 1.9f + Springs.unit(b.seed, 5) * 6f) * 0.05f
+            val bob = sin(t * b.profile.bobRate * Springs.TAU + side * 1.9f + b.phase(5) * 6f) * 0.05f
             var hx = 0.62f * s; var hy = 0.12f; var hz = -0.42f + bob
             // Punch: the leading hand drives forward on the blow.
             val a = b.strikeAge
@@ -335,7 +346,7 @@ object MotionLayers {
         val s = b.speed
         if (s < MotionBody.MOVING) return@MotionLayer
         val rate = 1.6f + s * 0.35f
-        val step = abs(sin(b.time * rate * PI.toFloat() + Springs.unit(b.seed, 7) * 3f))
+        val step = abs(sin(b.time * rate * PI.toFloat() + b.phase(7) * 3f))
         val k = Springs.clamp01((s - MotionBody.MOVING) / 2f)
         p.z += b.profile.walkBounce * step * k
         p.stretch *= 1f - b.profile.squash * 0.4f * (1f - step) * k

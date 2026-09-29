@@ -1,6 +1,7 @@
 package com.stratum.core.domain.motion
 
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -25,7 +26,8 @@ class Fringe(val ribbons: Int = RIBBONS, val points: Int = POINTS) {
     /** x, y, z of every point, ribbon by ribbon, anchor first. */
     val positions = FloatArray(ribbons * points * 3)
     private val velocities = FloatArray(ribbons * points * 3)
-    private val out = FloatArray(1)
+    private val omegas = FloatArray(points)
+    private val decays = FloatArray(points)
     private var placed = false
     /** How long each ribbon is, in world blocks, as last updated. */
     var length = 0f; private set
@@ -42,6 +44,7 @@ class Fringe(val ribbons: Int = RIBBONS, val points: Int = POINTS) {
         val h = size * pose.scale
         length = h * share
         val seg = length / (points - 1)
+        for (i in 1 until points) { omegas[i] = stiffness * (1f - 0.1f * i); decays[i] = exp(-omegas[i] * dt) }
         // The body's orientation, as the scene will draw it: yaw, then the top tipped forward, then the roll.
         val cy = cos(pose.yaw); val sy = sin(pose.yaw)
         val cp = cos(-pose.pitch); val sp = sin(-pose.pitch)
@@ -67,10 +70,15 @@ class Fringe(val ribbons: Int = RIBBONS, val points: Int = POINTS) {
                     velocities[p] = 0f; velocities[p + 1] = 0f; velocities[p + 2] = 0f
                     continue
                 }
-                val w = stiffness * (1f - 0.1f * i)
-                positions[p] = Springs.step(positions[p], velocities[p], tx, w, dt, out); velocities[p] = out[0]
-                positions[p + 1] = Springs.step(positions[p + 1], velocities[p + 1], ty, w, dt, out); velocities[p + 1] = out[0]
-                positions[p + 2] = Springs.step(positions[p + 2], velocities[p + 2], tz, w, dt, out); velocities[p + 2] = out[0]
+                // The critically damped spring of [Springs.step], inlined with its decay shared by the level.
+                val w = omegas[i]; val e = decays[i]
+                for (d in 0 until 3) {
+                    val target = if (d == 0) tx else if (d == 1) ty else tz
+                    val x = positions[p + d] - target; val v = velocities[p + d]
+                    val k = v + w * x
+                    velocities[p + d] = (v - w * k * dt) * e
+                    positions[p + d] = target + (x + k * dt) * e
+                }
                 // Hold the segment's length: stretchy raffia looks like chewing gum.
                 val dx = positions[p] - positions[q]; val dy = positions[p + 1] - positions[q + 1]; val dz = positions[p + 2] - positions[q + 2]
                 val d = sqrt(dx * dx + dy * dy + dz * dz)
