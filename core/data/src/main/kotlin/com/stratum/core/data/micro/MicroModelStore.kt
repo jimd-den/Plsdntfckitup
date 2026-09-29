@@ -36,6 +36,23 @@ class MicroModelStore(private val root: File) {
         file(id).delete()
     }
 
+    /**
+     * Fills an empty library with [defaults] the first time it is ever
+     * opened, and never again: a marker file named [marker] records that the
+     * seeding happened, so a player who deletes the starter models does not
+     * find them back on the next launch. A library that already has models
+     * when the marker is first missing (a player from before the defaults
+     * existed) is left as it is. Returns how many models were written.
+     */
+    @Synchronized
+    fun seedOnce(marker: String, defaults: () -> List<MicroModel>): Int {
+        val flag = File(dir, ".$marker")
+        if (flag.exists()) return 0
+        val written = if (all().isEmpty()) defaults().onEach(::save).size else 0
+        flag.writeText("seeded\n")
+        return written
+    }
+
     private fun file(id: String): File = File(dir, id.replace(Regex("[^A-Za-z0-9_.-]"), "_") + SUFFIX)
 
     companion object {

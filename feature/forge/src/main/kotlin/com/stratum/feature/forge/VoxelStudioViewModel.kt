@@ -8,6 +8,11 @@ import com.stratum.engine.model.ArgbImage
 import com.stratum.engine.model.ImageVoxelizer
 import com.stratum.engine.model.MicroModelOps
 import com.stratum.engine.model.MicroModelOps.Axis
+import com.stratum.engine.model.mask.IgboMaskGenerator
+import com.stratum.engine.model.mask.MaskCodec
+import com.stratum.engine.model.mask.MaskGenome
+import com.stratum.engine.model.mask.MaskTradition
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +56,14 @@ data class VoxelStudioUiState(
     val imageMode: ImageVoxelizer.Mode = ImageVoxelizer.Mode.INFLATE,
     val imageHeight: Int = 48,
     val tradition: String? = null,
+    /**
+     * The dials of the mask being edited, or null when the model is not a
+     * generated mask (or has been hand-edited since). While set, the studio
+     * shows the mask dials and every dial regenerates the model.
+     */
+    val mask: MaskGenome? = null,
+    /** The masquerade tradition 🎲 Randomize rolls in; null for any. */
+    val maskTradition: MaskTradition? = null,
     val message: String? = null,
     /** Bumped on every change, so the preview redraws. */
     val revision: Int = 0,
@@ -168,7 +181,56 @@ class VoxelStudioViewModel(
 
     fun open(model: MicroModel) {
         undo.addLast(_state.value.model); redo.clear()
+        _state.update { it.copy(turn = previewTurn(model)) }
         show(model, layer = 0)
+    }
+
+    // ---- Masks ------------------------------------------------------------
+
+    fun setMaskTradition(tradition: MaskTradition?) = _state.update { it.copy(maskTradition = tradition) }
+
+    /** Starts from a mask: a preset, a roll, or anything else with dials. A fresh id, so keeping it never overwrites another. */
+    fun startMask(genome: MaskGenome) {
+        regenerate(genome, id = newId(), record = true, face = true)
+    }
+
+    /** 🎲 A fresh mask in the chosen tradition. */
+    fun randomMask() = startMask(MaskGenome.random(System.nanoTime(), _state.value.maskTradition))
+
+    /** Another like this: the current mask with a few dials nudged, or a fresh one when there is none. */
+    fun anotherMask() {
+        val current = _state.value.mask ?: return randomMask()
+        regenerate(current.mutate(System.nanoTime(), 0.3f), id = _state.value.model.id, record = true)
+    }
+
+    /**
+     * Turns a dial. The mask is carved again off the main thread; a newer
+     * turn cancels an older one still carving, so a dragged slider only ever
+     * shows its latest value. [record] is false for slider drags, so undo
+     * steps back over whole choices rather than every pixel of a drag.
+     */
+    fun editMask(record: Boolean = true, edit: (MaskGenome) -> MaskGenome) {
+        val current = _state.value.mask ?: return
+        regenerate(edit(current).normalised(), id = _state.value.model.id, record = record)
+    }
+
+    private var carving: Job? = null
+
+    private fun regenerate(genome: MaskGenome, id: String, record: Boolean, face: Boolean = false) {
+        _state.update { it.copy(mask = genome, turn = if (face) MASK_TURN else it.turn) }
+        carving?.cancel()
+        carving = viewModelScope.launch {
+            val made = runCatching { withContext(Dispatchers.Default) { IgboMaskGenerator.generate(genome, id) } }
+            made.onSuccess { m ->
+                if (_state.value.mask != genome) return@onSuccess
+                if (record) {
+                    undo.addLast(_state.value.model)
+                    while (undo.size > HISTORY) undo.removeFirst()
+                    redo.clear()
+                }
+                show(m, layer = if (record) (m.sizeZ / 2) else null)
+            }.onFailure { e -> if (e !is kotlinx.coroutines.CancellationException) _state.update { it.copy(message = e.message ?: "That mask would not carve") } }
+        }
     }
 
     fun save() {
@@ -223,8 +285,12 @@ class VoxelStudioViewModel(
 
     private fun change(record: Boolean = true, edit: (MicroModel) -> MicroModel) {
         val before = _state.value.model
-        val after = runCatching { edit(before) }.getOrElse { e -> _state.update { it.copy(message = e.message) }; return }
+        var after = runCatching { edit(before) }.getOrElse { e -> _state.update { it.copy(message = e.message) }; return }
         if (after == before) return
+        // A hand edit makes a generated mask the player's own model: its
+        // genome no longer describes its voxels, so the tag (and with it the
+        // dials, which would undo the edit) goes.
+        if (after.cells !== before.cells) after = after.copy(tags = after.tags.filterNot { it.startsWith(MaskCodec.TAG_PREFIX) })
         if (record) {
             undo.addLast(before)
             while (undo.size > HISTORY) undo.removeFirst()
@@ -235,7 +301,9 @@ class VoxelStudioViewModel(
 
     private fun show(model: MicroModel, layer: Int? = null) = _state.update {
         it.copy(
-            model = model, layer = (layer ?: it.layer).coerceIn(0, model.sizeZ - 1),
+            model = model,
+            // The dials follow the model: a generated mask carries its genome in its tags.
+            mask = MaskCodec.fromTags(model.tags, model.name), layer = (layer ?: it.layer).coerceIn(0, model.sizeZ - 1),
             canUndo = undo.isNotEmpty(), canRedo = redo.isNotEmpty(), revision = it.revision + 1,
         )
     }
@@ -246,6 +314,12 @@ class VoxelStudioViewModel(
 
     companion object {
         const val HISTORY = 60
+
+        /** The preview's quarter turn that shows a mask's face (masks face -Y). */
+        const val MASK_TURN = 1
+
+        /** The view a model's thumbnail is best seen from: masks face front, the rest as built. */
+        fun previewTurn(model: MicroModel): Int = if ("mask" in model.tags) MASK_TURN else 0
 
         /** Colours to hand: earths, stones, woods, paints, leaves and water. */
         val SWATCHES = listOf(
