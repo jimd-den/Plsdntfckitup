@@ -28,7 +28,15 @@ import com.stratum.engine.microvoxel.mesh.Quad
  * flat-coloured quads with per-corner occlusion on the opaque path -- so
  * every backend (GLES renderer, preview rasteriser) draws it unchanged.
  */
-class MicroDetailMesher(private val source: MicroTerrainSource) {
+class MicroDetailMesher(
+    private val source: MicroTerrainSource,
+    /**
+     * Also scatter surfels over full-detail chunks ([SurfelScatter]), for
+     * tiers that draw them. Off, meshing costs exactly what it did.
+     */
+    private val scatterSurfels: Boolean = false,
+    private val surfelDensity: Float = 1f,
+) {
 
     private val palette: MaterialPalette get() = source.palette
     private val r = source.microPerBlock
@@ -40,6 +48,7 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
         val out = MeshBuilder(MaterialKind.OPAQUE)
         val idx = IntArray(4)
         val occ = FloatArray(4)
+        val surfels = if (scatterSurfels) SurfelScatter(source.palette, surfelDensity) else null
     }
 
     private val work = ThreadLocal.withInitial { Work() }
@@ -65,10 +74,11 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
         val props = ArrayList<PropInstance>()
         val lights = ArrayList<PointLight>()
         val changed = changedBlocks(world, pos) ?: return null
+        val surfels = surfelsFor(w, pos, factor)
         var quads = 0
-        for (cz in 0 until layers) quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights)
+        for (cz in 0 until layers) quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights, surfels)
         lastQuads.set(quads)
-        return TerrainMesher.Result(finish(w), props, lights)
+        return TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build())
     }
 
     /**
@@ -111,12 +121,18 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             w.out.clear()
             val props = ArrayList<PropInstance>()
             val lights = ArrayList<PointLight>()
-            quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights)
-            out += TerrainMesher.Result(finish(w), props, lights)
+            // Surfels per layer too, so an edit rescatters only the layer it touched.
+            val surfels = surfelsFor(w, pos, factor)
+            quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights, surfels)
+            out += TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build())
         }
         lastQuads.set(quads)
         return out
     }
+
+    /** The worker's scatter, begun on [pos], when this tier grows surfels and [factor] is full detail. */
+    private fun surfelsFor(w: Work, pos: ChunkPos, factor: Int): SurfelScatter? =
+        w.surfels?.takeIf { factor == 1 }?.also { it.begin(pos.originX, pos.originY) }
 
     private fun requireFactor(factor: Int) = require(factor == 1 || factor == 2 || factor == 4) { "level of detail $factor is 1, 2 or 4" }
 
@@ -130,7 +146,7 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
     /** Emits one micro-chunk layer of a block chunk into the worker's builder; returns its quads. */
     private fun emitLayer(
         w: Work, world: BlockSnapshot, pos: ChunkPos, cz: Int, factor: Int, mine: IntArray,
-        props: MutableList<PropInstance>, lights: MutableList<PointLight>,
+        props: MutableList<PropInstance>, lights: MutableList<PointLight>, surfels: SurfelScatter? = null,
     ): Int {
         val mpos = MicroChunkPos(pos.x, pos.y, cz)
         val generated = source.microChunk(mpos)
@@ -145,6 +161,7 @@ class MicroDetailMesher(private val source: MicroTerrainSource) {
             ambientOcclusion = true,
         )
         emit(w, mesh.quads, mesh.count, mpos, factor)
+        surfels?.scatter(mesh.quads, mesh.count, mpos, r)
         water(grid, mpos)
         lamps(grid, mpos, lights)
         return mesh.count

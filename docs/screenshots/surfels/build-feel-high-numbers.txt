@@ -1,0 +1,6 @@
+Placement bench (high): 100 edits (50 placed, then 50 undone), one every 4 frames at 30 fps, HIGH tier, 4 cores
+  frames around edits: worst 9.7 ms, p95 1.8 ms, mean 0.52 ms (400 frames)
+  quiet frames:        worst 1.7 ms, p95 0.3 ms, mean 0.18 ms
+  chunks block-meshed on the frame: 0
+  detail pops (a detailed chunk drawn as blocks again): 0 over 0 frames
+  detail mesh of the edited chunk: whole 12.1 ms, only its 2 dirty layer(s) 8.8 ms; finding changed blocks 0.1 ms, each layer 4.1 / 5.5 / 0.0 ms

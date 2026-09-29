@@ -7,6 +7,8 @@ import android.util.Log
 import com.stratum.engine.scene.MeshBatch
 import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
+import com.stratum.engine.scene.Surfel
+import com.stratum.engine.scene.SurfelBatch
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureBudget
 import com.stratum.engine.scene.Vertex
@@ -80,18 +82,30 @@ class SceneGlRenderer(
     private var shadowProgram = 0
     private var sky = 0
     private var finish = 0
+    private var surfelProgram = 0
 
     private var shadowFbo = 0
     private var shadowDepth = 0
     private var sceneFbo = 0
     private var sceneColor = 0
     private var sceneDepth = 0
+    /** Whether [sceneDepth] is a texture the finishing pass reads (the diorama's depth finish), or a renderbuffer. */
+    private var sceneDepthIsTexture = false
     private var textureArray = 0
     private var mapArray = 0
     private var hasTextures = false
     private var emptyVao = 0
 
     private val staticMeshes = IdentityHashMap<MeshBatch, GpuMesh>()
+
+    /** Each chunk's surfels, uploaded once like its mesh and freed when it leaves the meshed square. */
+    private val surfelBuffers = IdentityHashMap<SurfelBatch, GpuPoints>()
+    private val staleSurfels = ArrayList<SurfelBatch>()
+
+    // Point-light uniforms, filled in place each frame rather than allocated.
+    private val lightPos = FloatArray(SceneFrame.MAX_LIGHTS * 3)
+    private val lightCol = FloatArray(SceneFrame.MAX_LIGHTS * 3)
+    private val lightRad = FloatArray(SceneFrame.MAX_LIGHTS)
 
     // One buffer per kind of per-frame geometry. The actors are drawn by both
     // the shadow and the scene pass; each batch is uploaded once, when it is
@@ -131,6 +145,7 @@ class SceneGlRenderer(
         shadowProgram = program(SceneShaders.SHADOW_VERTEX, SceneShaders.SHADOW_FRAGMENT)
         sky = program(SceneShaders.SCREEN_VERTEX, SceneShaders.SKY_FRAGMENT)
         finish = program(SceneShaders.SCREEN_VERTEX, SceneShaders.FINISH_FRAGMENT)
+        surfelProgram = program(SceneShaders.SURFEL_VERTEX, SceneShaders.SURFEL_FRAGMENT)
         emptyVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         profile = AndroidDeviceProfiles.withGl(device)
         shadowFbo = 0
@@ -138,6 +153,8 @@ class SceneGlRenderer(
         textureArray = 0
         settingsStale = true
         staticMeshes.clear()
+        surfelBuffers.clear()
+        locations.clear()
         listOf(actorMesh, cutoutMesh, decalMesh, glowMesh).forEach { it.vao = 0; it.source = null }
         // A new context has none of the old one's objects: queue the last art again.
         pendingTextures = pendingTextures ?: textures
@@ -168,6 +185,7 @@ class SceneGlRenderer(
             return
         }
         releaseStale(frame)
+        releaseStaleSurfels(frame)
         shadowPass(frame)
         scenePass(frame)
         finishPass(frame)
@@ -239,40 +257,11 @@ class SceneGlRenderer(
         GLES30.glDepthMask(true)
         GLES30.glUseProgram(lit)
         val t = ShadingModel.Terms(l)
-        matrix(lit, "uViewProj", frame.camera.viewProjection)
-        matrix(lit, "uShadowViewProj", frame.shadowViewProjection)
-        val eye = frame.camera.eye
-        GLES30.glUniform3f(loc(lit, "uEye"), eye.x, eye.y, eye.z)
-        vec3(lit, "uSun", t.sun)
-        vec3(lit, "uFill", t.fill)
-        GLES30.glUniform1f(loc(lit, "uFillStrength"), t.fillStrength)
+        lighting(lit, frame, t)
         GLES30.glUniform1f(loc(lit, "uFloorDetail"), t.floorDetail)
         GLES30.glUniform1f(loc(lit, "uFloorSaturation"), t.floorSaturation)
-        vec3(lit, "uSunColor", t.sunColor)
-        vec3(lit, "uSky", t.sky)
-        vec3(lit, "uGround", t.ground)
-        vec3(lit, "uFog", t.fog)
         vec3(lit, "uRim", t.rim)
-        GLES30.glUniform1f(loc(lit, "uFogStart"), l.fogStart)
-        GLES30.glUniform1f(loc(lit, "uFogEnd"), l.fogEnd)
-        GLES30.glUniform1f(loc(lit, "uFogFloor"), l.fogFloor)
-        GLES30.glUniform1f(loc(lit, "uShadowStrength"), l.shadowStrength)
-        GLES30.glUniform1f(loc(lit, "uExposure"), l.exposure)
         GLES30.glUniform1f(loc(lit, "uShadowSize"), shadowSize.coerceAtLeast(1).toFloat())
-        GLES30.glUniform1i(loc(lit, "uShadowTaps"), if (settings.shadows) settings.shadowTaps else 0)
-        val lights = frame.lights.take(minOf(SceneFrame.MAX_LIGHTS, settings.maxPointLights))
-        GLES30.glUniform1i(loc(lit, "uLightCount"), lights.size)
-        if (lights.isNotEmpty()) {
-            val pos = FloatArray(lights.size * 3); val col = FloatArray(lights.size * 3); val rad = FloatArray(lights.size)
-            lights.forEachIndexed { i, light ->
-                pos[i * 3] = light.x; pos[i * 3 + 1] = light.y; pos[i * 3 + 2] = light.z
-                ShadingModel.rgb(light.color, light.strength).copyInto(col, i * 3)
-                rad[i] = light.radius
-            }
-            GLES30.glUniform3fv(loc(lit, "uLightPos[0]"), lights.size, pos, 0)
-            GLES30.glUniform3fv(loc(lit, "uLightColor[0]"), lights.size, col, 0)
-            GLES30.glUniform1fv(loc(lit, "uLightRadius[0]"), lights.size, rad, 0)
-        }
         bindTextures(lit)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowDepth)
@@ -280,6 +269,11 @@ class SceneGlRenderer(
 
         GLES30.glUniform1i(loc(lit, "uCutout"), 0)
         drawOpaque(frame)
+        // Surfels on the land they lie on: depth-tested, never depth-written, as the rasteriser draws them.
+        if (frame.surfels.isNotEmpty()) {
+            drawSurfels(frame, t)
+            GLES30.glUseProgram(lit)
+        }
         GLES30.glUniform1i(loc(lit, "uCutout"), 1)
         drawStreamed(frame.cutout, cutoutMesh)
 
@@ -299,6 +293,134 @@ class SceneGlRenderer(
         GLES30.glDepthMask(true)
     }
 
+    /**
+     * The uniforms every lit program shares: camera, sun, sky, fog, lights,
+     * and the per-surface half of the diorama finish.
+     */
+    private fun lighting(program: Int, frame: SceneFrame, t: ShadingModel.Terms) {
+        val l = frame.lighting
+        matrix(program, "uViewProj", frame.camera.viewProjection)
+        matrix(program, "uShadowViewProj", frame.shadowViewProjection)
+        val eye = frame.camera.eye
+        GLES30.glUniform3f(loc(program, "uEye"), eye.x, eye.y, eye.z)
+        vec3(program, "uSun", t.sun)
+        vec3(program, "uFill", t.fill)
+        GLES30.glUniform1f(loc(program, "uFillStrength"), t.fillStrength)
+        vec3(program, "uSunColor", t.sunColor)
+        vec3(program, "uSky", t.sky)
+        vec3(program, "uGround", t.ground)
+        vec3(program, "uFog", t.fog)
+        GLES30.glUniform1f(loc(program, "uFogStart"), l.fogStart)
+        GLES30.glUniform1f(loc(program, "uFogEnd"), l.fogEnd)
+        GLES30.glUniform1f(loc(program, "uFogFloor"), l.fogFloor)
+        GLES30.glUniform1f(loc(program, "uShadowStrength"), l.shadowStrength)
+        GLES30.glUniform1f(loc(program, "uExposure"), l.exposure)
+        GLES30.glUniform1i(loc(program, "uShadowTaps"), if (settings.shadows) settings.shadowTaps else 0)
+        val count = minOf(frame.lights.size, SceneFrame.MAX_LIGHTS, settings.maxPointLights)
+        GLES30.glUniform1i(loc(program, "uLightCount"), count)
+        if (count > 0) {
+            for (i in 0 until count) {
+                val light = frame.lights[i]
+                lightPos[i * 3] = light.x; lightPos[i * 3 + 1] = light.y; lightPos[i * 3 + 2] = light.z
+                ShadingModel.rgb(light.color, light.strength).copyInto(lightCol, i * 3)
+                lightRad[i] = light.radius
+            }
+            GLES30.glUniform3fv(loc(program, "uLightPos[0]"), count, lightPos, 0)
+            GLES30.glUniform3fv(loc(program, "uLightColor[0]"), count, lightCol, 0)
+            GLES30.glUniform1fv(loc(program, "uLightRadius[0]"), count, lightRad, 0)
+        }
+        val look = frame.look
+        GLES30.glUniform1f(loc(program, "uGrain"), look.grain)
+        GLES30.glUniform1f(loc(program, "uBevel"), look.bevel)
+        GLES30.glUniform1f(loc(program, "uOcclusionDepth"), look.occlusionDepth)
+        GLES30.glUniform1i(loc(program, "uHaze"), if (look.aerialHaze) 1 else 0)
+        GLES30.glUniform1f(loc(program, "uGlowGain"), look.nightGlow * frame.night)
+        val focus = frame.camera.target
+        GLES30.glUniform3f(loc(program, "uFocus"), focus.x, focus.y, focus.z)
+        GLES30.glUniform1f(loc(program, "uFocusDistance"), frame.camera.distance)
+        // World size of one scene-target pixel at distance 1, for fading the bevels out where voxels shrink to a pixel.
+        GLES30.glUniform1f(loc(program, "uPixelAngle"), 2f / (frame.camera.projection[5] * sceneHeight))
+    }
+
+    // ---- surfels -----------------------------------------------------------
+
+    private class GpuPoints {
+        var vao = 0
+        var vbo = 0
+    }
+
+    /**
+     * The frame's surfels as point sprites, a prefix of each chunk's
+     * rank-sorted buffer (see [com.stratum.engine.scene.SurfelLod]): one
+     * draw call per chunk, nothing uploaded once a chunk is resident.
+     */
+    private fun drawSurfels(frame: SceneFrame, t: ShadingModel.Terms) {
+        val p = surfelProgram
+        GLES30.glUseProgram(p)
+        lighting(p, frame, t)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowDepth)
+        GLES30.glUniform1i(loc(p, "uShadowMap"), 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        val reveal = frame.reveal
+        if (reveal != null) GLES30.glUniform4f(loc(p, "uReveal"), reveal.x, reveal.y, reveal.z, reveal.radius)
+        else GLES30.glUniform4f(loc(p, "uReveal"), 0f, 0f, 0f, 0f)
+        GLES30.glUniform1f(loc(p, "uSurfelRadius"), frame.look.surfelRadius.toFloat())
+        GLES30.glUniform1f(loc(p, "uPixelsPerUnit"), sceneHeight * frame.camera.projection[5] / 2f)
+        GLES30.glUniform1f(loc(p, "uMinPixels"), ShadingModel.SURFEL_MIN_PIXELS * governor.renderScale)
+        GLES30.glUniform2f(loc(p, "uViewport"), sceneWidth.toFloat(), sceneHeight.toFloat())
+        GLES30.glDepthMask(false)
+        val draws = frame.surfels
+        for (i in draws.indices) {
+            val draw = draws[i]
+            val batch = draw.batch
+            val points = surfelBuffers[batch] ?: GpuPoints().also { uploadSurfels(it, batch); surfelBuffers[batch] = it }
+            GLES30.glUniform2f(loc(p, "uOrigin"), batch.originX.toFloat(), batch.originY.toFloat())
+            GLES30.glUniform1f(loc(p, "uKeep"), draw.keep)
+            GLES30.glBindVertexArray(points.vao)
+            GLES30.glDrawArrays(GLES30.GL_POINTS, 0, draw.count)
+        }
+        GLES30.glBindVertexArray(0)
+        GLES30.glDepthMask(true)
+    }
+
+    private fun uploadSurfels(points: GpuPoints, batch: SurfelBatch) {
+        val ids = IntArray(2)
+        GLES30.glGenVertexArrays(1, ids, 0)
+        GLES30.glGenBuffers(1, ids, 1)
+        points.vao = ids[0]; points.vbo = ids[1]
+        GLES30.glBindVertexArray(points.vao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, points.vbo)
+        val n = batch.count * Surfel.INTS
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, n * 4, ints(batch.data, n), GLES30.GL_STATIC_DRAW)
+        GLES30.glEnableVertexAttribArray(0)
+        // Integer attributes: the packed bits reach the shader untouched.
+        GLES30.glVertexAttribIPointer(0, 3, GLES30.GL_UNSIGNED_INT, Surfel.INTS * 4, 0)
+        GLES30.glBindVertexArray(0)
+    }
+
+    /** Surfel buffers of chunks that were remeshed or left the meshed square. */
+    private fun releaseStaleSurfels(frame: SceneFrame) {
+        val resident = frame.residentSurfels
+        if (surfelBuffers.isEmpty()) return
+        var allLive = surfelBuffers.size <= resident.size
+        if (allLive) {
+            // Cheap common case: every buffer's batch is still resident. Identity lookups, no allocation.
+            var live = 0
+            for (i in resident.indices) if (surfelBuffers.containsKey(resident[i])) live++
+            allLive = live == surfelBuffers.size
+        }
+        if (allLive) return
+        val keep = java.util.Collections.newSetFromMap(IdentityHashMap<SurfelBatch, Boolean>()).apply { addAll(resident) }
+        staleSurfels.clear()
+        for (b in surfelBuffers.keys) if (b !in keep) staleSurfels += b
+        for (b in staleSurfels) surfelBuffers.remove(b)?.let { points ->
+            GLES30.glDeleteVertexArrays(1, intArrayOf(points.vao), 0)
+            GLES30.glDeleteBuffers(1, intArrayOf(points.vbo), 0)
+        }
+        staleSurfels.clear()
+    }
+
     private fun finishPass(frame: SceneFrame) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, width, height)
@@ -307,6 +429,24 @@ class SceneGlRenderer(
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sceneColor)
         GLES30.glUniform1i(loc(finish, "uScene"), 0)
+        val look = frame.look
+        val depthFinish = sceneDepthIsTexture && look.readsDepth
+        GLES30.glUniform1i(loc(finish, "uDepthFinish"), if (depthFinish) 1 else 0)
+        if (depthFinish) {
+            val cam = frame.camera
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sceneDepth)
+            GLES30.glUniform1i(loc(finish, "uDepth"), 3)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glUniform2f(loc(finish, "uTexel"), 1f / sceneWidth, 1f / sceneHeight)
+            GLES30.glUniform1f(loc(finish, "uNear"), cam.near)
+            GLES30.glUniform1f(loc(finish, "uFar"), cam.far)
+            GLES30.glUniform1f(loc(finish, "uEdges"), look.edges)
+            GLES30.glUniform1f(loc(finish, "uScreenAo"), look.screenOcclusion)
+            GLES30.glUniform1f(loc(finish, "uTiltShift"), look.tiltShift)
+            GLES30.glUniform1f(loc(finish, "uFocusDepth"), cam.distance)
+            GLES30.glUniform1f(loc(finish, "uPixelsPerUnit"), sceneHeight * cam.projection[5] / 2f)
+        }
         GLES30.glUniform1f(loc(finish, "uExposure"), frame.lighting.exposure)
         GLES30.glUniform1f(loc(finish, "uSaturation"), frame.lighting.saturation)
         GLES30.glUniform1f(loc(finish, "uVignette"), frame.lighting.vignette)
@@ -454,7 +594,8 @@ class SceneGlRenderer(
         if (sceneFbo != 0) {
             GLES30.glDeleteFramebuffers(1, intArrayOf(sceneFbo), 0)
             GLES30.glDeleteTextures(1, intArrayOf(sceneColor), 0)
-            GLES30.glDeleteRenderbuffers(1, intArrayOf(sceneDepth), 0)
+            if (sceneDepthIsTexture) GLES30.glDeleteTextures(1, intArrayOf(sceneDepth), 0)
+            else GLES30.glDeleteRenderbuffers(1, intArrayOf(sceneDepth), 0)
         }
         val halfFloat = settings.highRange
         val ids = IntArray(1)
@@ -468,15 +609,33 @@ class SceneGlRenderer(
         }
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-        GLES30.glGenRenderbuffers(1, ids, 0)
-        sceneDepth = ids[0]
-        GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, sceneDepth)
-        GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, sceneWidth, sceneHeight)
+        // The diorama's depth finish reads the scene's depth, so those tiers
+        // keep it in a texture; the rest keep the cheaper renderbuffer.
+        sceneDepthIsTexture = settings.diorama.readsDepth
+        if (sceneDepthIsTexture) {
+            GLES30.glGenTextures(1, ids, 0)
+            sceneDepth = ids[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sceneDepth)
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_DEPTH_COMPONENT24, sceneWidth, sceneHeight, 0,
+                GLES30.GL_DEPTH_COMPONENT, GLES30.GL_UNSIGNED_INT, null,
+            )
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        } else {
+            GLES30.glGenRenderbuffers(1, ids, 0)
+            sceneDepth = ids[0]
+            GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, sceneDepth)
+            GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT24, sceneWidth, sceneHeight)
+        }
         GLES30.glGenFramebuffers(1, ids, 0)
         sceneFbo = ids[0]
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, sceneFbo)
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, sceneColor, 0)
-        GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, sceneDepth)
+        if (sceneDepthIsTexture) GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_TEXTURE_2D, sceneDepth, 0)
+        else GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT, GLES30.GL_RENDERBUFFER, sceneDepth)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
     }
 
