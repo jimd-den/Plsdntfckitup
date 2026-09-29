@@ -159,11 +159,26 @@ class SceneBuilder(
         settings.microFarRadius,
     )
 
+    /** Where a placed block's pop takes its colour from, so it matches the detail it becomes. */
+    private val microSource = microTerrain
+
+    /** Blocks just placed or removed near the camera, drawn as a pop or a puff of dust; see [BuildPulses]. */
+    private val pulses = BuildPulses()
+
+    /** Cells animating a placement or removal in the last frame; what a test or a tool checks. */
+    val activePulses: List<BuildPulses.Pulse> get() = pulses.active
+
     /** Chunks drawn from microvoxels in the last frame, for profiling. */
     val detailedChunksLastFrame: Int get() = chunks.detailedLastCall
 
     /** Microvoxel chunk meshes still being made in the background. */
     val detailPending: Int get() = chunks.detailPending
+
+    /** Chunks that fell from microvoxels back to blocks in the last frame: a visible pop, zero when edits are patched. */
+    val detailPopsLastFrame: Int get() = chunks.poppedLastCall
+
+    /** Microvoxel layers an edit remeshed during the last frame; see [ChunkMeshCache]. */
+    val editLayersLastFrame: Int get() = chunks.editLayersLastCall
 
     /** The chunks' meshes, props, lights and litter gathered into lists, redone only when a chunk changes. */
     private class Terrain(
@@ -306,6 +321,8 @@ class SceneBuilder(
             glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength), light.color, BLOOM_OPACITY)
         }
         actors.forEach { actor(it, camera, eyeLevel) }
+        pulses.update(world, cx, cy, worldRevision, time.elapsedSeconds)
+        pulses.active.forEach { pulse(world, it, time.elapsedSeconds) }
         val palette = director.direction.palette
         ghosts.forEach { cell ->
             // A pending build glows where it will stand, in the hero's colour,
@@ -703,6 +720,88 @@ class SceneBuilder(
             val idx = c.map { p -> out.vertex(p[0], p[1], p[2], n[0], n[1], n[2], color, 1f, 0f, 0f, Vertex.ACTOR) }
             out.quad(idx[0], idx[1], idx[2], idx[3])
         }
+    }
+
+    /**
+     * A block just placed or removed: the placed one pops in and kicks up a
+     * little dust at its foot; the removed one leaves a puff where it stood.
+     *
+     * The pop is also what makes an edit show on the frame it happens. A
+     * chunk drawn in microvoxels gets its new mesh from a worker a frame or
+     * two later ([ChunkMeshCache.awaiting]); until then the pop stands in for
+     * the block, at full size once its animation is over. It is a hair larger
+     * than a block, so once the real one lands beneath it the two never fight
+     * over the same pixels.
+     */
+    private fun pulse(world: World, p: BuildPulses.Pulse, now: Float) {
+        val age = now - p.born
+        val registry = world.registry
+        if (p.placed) {
+            val block = registry.typeOf(p.block)
+            val (top, side) = pulseColours(registry, p.block)
+            val t = age / BuildPulses.POP_SECONDS
+            val solid = block.glyph == null && block.shape == com.stratum.core.domain.world.BlockShape.CUBE
+            if (solid && (t < 1f || p.chunk in chunks.awaiting)) {
+                val s = BuildPulses.popScale(t) * PULSE_SIZE
+                cube(actorMesh, p.x + 0.5f, p.y + 0.5f, p.z + 0.5f, s, top, side)
+            }
+            if (age < BuildPulses.DUST_SECONDS) dust(p, age / BuildPulses.DUST_SECONDS, side, grains = PLACE_GRAINS, rise = 0.15f)
+        } else if (p.was != com.stratum.core.domain.world.BlockRegistry.AIR_INDEX && age < BuildPulses.DUST_SECONDS) {
+            dust(p, age / BuildPulses.DUST_SECONDS, pulseColours(registry, p.was).second, grains = BREAK_GRAINS, rise = 0.5f)
+        }
+    }
+
+    /** A block's top and side colours as the detail mesher will draw it, or as the block mesher does. */
+    private fun pulseColours(registry: com.stratum.core.domain.world.BlockRegistry, index: Int): Pair<Long, Long> {
+        val micro = microSource
+        if (micro != null) {
+            val rgb = runCatching { micro.palette[micro.materialForBlock(index)].color }.getOrNull()
+            if (rgb != null) {
+                val c = Tint.OPAQUE or (rgb.toLong() and 0xFFFFFF)
+                return c to Tint.scale(c, PULSE_SIDE_SHADE)
+            }
+        }
+        val block = registry.typeOf(index.coerceAtLeast(0))
+        return block.topColor to block.sideColor
+    }
+
+    /**
+     * Grains of the block flung out from its cell and falling back, with a
+     * faint scuff on the ground: small, quick and cheap -- a few boxes in the
+     * per-frame actor batch -- because a build makes dozens of these.
+     */
+    private fun dust(p: BuildPulses.Pulse, t: Float, block: Long, grains: Int, rise: Float) {
+        val fade = 1f - t
+        // Dust is the block ground fine: paler than the block, or it vanishes against ground of the same stuff.
+        val color = Tint.mix(block, DUST_LIGHT, DUST_PALER)
+        val baseZ = if (p.placed) p.z.toFloat() else p.z + 0.5f
+        decal(p.x + 0.5f, p.y + 0.5f, p.z.toFloat(), 0.45f + 0.45f * t, color, fade * fade * DUST_SCUFF_OPACITY, Vertex.DISC)
+        for (i in 0 until grains) {
+            val a = unit(hash(p.x * 31 + i, p.y * 17 + p.z), i) * TAU
+            val reach = 0.35f + 0.55f * t * (0.6f + 0.4f * unit(p.x + i, p.y - i))
+            val lift = rise * (0.5f + unit(p.y + i, p.x)) * t * (1.6f - t) * 2f - 0.35f * t * t
+            val size = DUST_GRAIN * fade * (0.6f + 0.6f * unit(i, p.z))
+            if (size <= 0.01f) continue
+            cube(actorMesh, p.x + 0.5f + cos(a) * reach, p.y + 0.5f + sin(a) * reach, baseZ + 0.08f + lift, size, color, color)
+        }
+    }
+
+    /** An axis-aligned cube of edge [size] centred on a point: top and four sides, flat-coloured like microvoxel ground. */
+    private fun cube(out: MeshBuilder, cx: Float, cy: Float, cz: Float, size: Float, top: Long, side: Long) {
+        val h = size / 2
+        val x0 = cx - h; val x1 = cx + h; val y0 = cy - h; val y1 = cy + h; val z0 = cz - h; val z1 = cz + h
+        fun face(nx: Float, ny: Float, nz: Float, color: Long, vararg c: Float) {
+            val a = out.vertex(c[0], c[1], c[2], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val b = out.vertex(c[3], c[4], c[5], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val d = out.vertex(c[6], c[7], c[8], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val e = out.vertex(c[9], c[10], c[11], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            out.quad(a, b, d, e)
+        }
+        face(0f, 0f, 1f, top, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1)
+        face(1f, 0f, 0f, side, x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1)
+        face(-1f, 0f, 0f, side, x0, y1, z0, x0, y0, z0, x0, y0, z1, x0, y1, z1)
+        face(0f, 1f, 0f, side, x1, y1, z0, x0, y1, z0, x0, y1, z1, x1, y1, z1)
+        face(0f, -1f, 0f, side, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1)
     }
 
     /** A piece of ground litter, lying flat and turned its own way. */
@@ -1129,6 +1228,18 @@ class SceneBuilder(
         const val HERO_LIGHT_HEIGHT = 1.8f
         const val GHOST_RADIUS = 0.62f
         const val GHOST_OPACITY = 0.45f
+
+        /** A placed block's pop, as a share of a block: a hair over, so it covers the real block when that lands. */
+        const val PULSE_SIZE = 1.03f
+        /** Sides of a microvoxel-coloured pop, darkened as the detail's sides read under the sun. */
+        const val PULSE_SIDE_SHADE = 0.82f
+        /** Grains of dust a placed block kicks up, and a removed one leaves. */
+        const val PLACE_GRAINS = 5
+        const val BREAK_GRAINS = 9
+        const val DUST_GRAIN = 0.2f
+        const val DUST_SCUFF_OPACITY = 0.35f
+        const val DUST_LIGHT = 0xFFF2E6D0
+        const val DUST_PALER = 0.4f
         const val HIGHLIGHT_RADIUS = 0.7f
         const val HIGHLIGHT_OPACITY = 0.9f
 

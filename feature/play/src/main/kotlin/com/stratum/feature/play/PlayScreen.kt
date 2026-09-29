@@ -144,10 +144,13 @@ fun PlayScreen(
             onOrder = viewModel::command,
         )
     }
+    // A light tick, not a buzz: building is dozens of these a minute.
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     PlayScreenContent(
         state = state,
         world = viewModel.world,
         modifier = modifier,
+        onBuildLanded = { haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) },
         onTapBlock = viewModel::tapBlock,
         onLongPressBlock = viewModel::place,
         onMoveInput = viewModel::setMoveInput,
@@ -248,8 +251,13 @@ fun PlayScreenContent(
     shaperActions: WorldShaperActions = WorldShaperActions(),
     gearActions: GearActions = GearActions(),
     sandboxActions: SandboxActions = SandboxActions(),
+    /** Called once per build that lands (see [BuildPanel.ticks]); the device's haptic tick, on a phone. */
+    onBuildLanded: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
+    // Keyed on the count, so each block laid, drag committed, undo or redo ticks once -- and a recomposition never does.
+    val landed by androidx.compose.runtime.rememberUpdatedState(onBuildLanded)
+    LaunchedEffect(state.build.ticks) { if (state.build.ticks > 0) landed() }
 
     // The world runs edge to edge in either orientation; the HUD floats over
     // it inside the safe area, so a notch or a gesture bar never sits on a

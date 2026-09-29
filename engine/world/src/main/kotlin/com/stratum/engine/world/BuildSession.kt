@@ -69,10 +69,16 @@ internal class BuildSession(
 
         // A floor tile lies on what was picked rather than replacing it, so its
         // plan is lifted one level: a drag across grass paves the grass.
-        val lift = if (shapeOf(blockId) == BlockShape.FLOOR) 1 else 0
+        val floor = shapeOf(blockId) == BlockShape.FLOOR
+        // A drag is anchored on what the finger touched -- in the 3D view, a
+        // solid block, the only thing a ray can hit -- and a build stands on
+        // it, as an erase takes what stands on it. Planned in the touched
+        // cells themselves, a drag across the ground found them all full and
+        // built nothing; a box or a wall came out a course short.
+        fun onTop(pos: BlockPos) = if (floor || !world.blockAt(pos).isAir) pos.above() else pos
         // Only cells that are actually free: the preview should show what will
         // happen, not what was asked for.
-        preview = BuildPlanner.plan(tool, from.above(lift), to.above(lift), height).filter { pos ->
+        preview = BuildPlanner.plan(tool, onTop(from), onTop(to), height).filter { pos ->
             isInWorld(pos, lowest = 0) && world.blockAt(pos).isAir && pos != player.feet && pos != player.feet.above()
         }
         val held = player.countOf(blockId)

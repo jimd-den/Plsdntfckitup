@@ -159,8 +159,13 @@ internal class BuildingSystem(
         cancelMining()
         val target = interaction.placementCellFor(picked, player.blockPos, actorCells()) ?: return PlaceResult.Rejected(PlaceRejection.OCCUPIED)
         val spent = player.consuming(blockId) ?: return PlaceResult.Rejected(PlaceRejection.UNKNOWN_BLOCK)
+        val before = world.blockIndexAt(target)
         val result = interaction.place(PlaceRequest(player.blockPos, target, blockId, occupiedByActors = setOf(player.feet, player.feet.above())))
-        if (result is PlaceResult.Placed) player = spent
+        if (result is PlaceResult.Placed) {
+            player = spent
+            // A tapped block is undoable like a dragged wall: building boldly means taking back a misplaced tap too.
+            record(BlockStep(result.block.displayName, listOf(BuildSession.Change(target, before, world.blockIndexAt(target)))))
+        }
         return result
     }
 

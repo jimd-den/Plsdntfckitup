@@ -301,7 +301,7 @@ internal fun BuildControls(state: PlayUiState) {
             item { StratumChip(label = "↕ ${b.height}", selected = true, onClick = {}) }
             item { StratumChip(label = "+", selected = false, onClick = { a.height(1) }) }
         }
-        val taps = if (b.canSculpt) BuildTap.entries else listOf(BuildTap.DIG, BuildTap.PICK)
+        val taps = if (b.canSculpt) BuildTap.entries else listOf(BuildTap.PLACE, BuildTap.DIG, BuildTap.PICK)
         items(taps.size) { i ->
             val tap = taps[i]
             StratumChip(label = "${tap.glyph} ${tap.label}", selected = b.tap == tap, onClick = { a.tap(tap) })

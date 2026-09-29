@@ -98,6 +98,110 @@ class MicroDetailTest {
         kotlin.test.assertTrue(half.triangleCount * 2 < full.triangleCount, "half-block ${half.triangleCount} triangles against ${full.triangleCount}")
     }
 
+    /** A cache drawing every chunk within 20 blocks in full detail, the rest as blocks. */
+    private fun detailCache(editLayersPerCall: Int = 0) =
+        ChunkMeshCache(TerrainMesher(director, TextureLibrary()), MicroDetailMesher(generator), detailRadius = 20, editLayersPerCall = editLayersPerCall)
+
+    private fun settle(cache: ChunkMeshCache, world: StreamingWorld, revision: Int): List<TerrainMesher.Result> {
+        var out = cache.around(world, 200, 200, 24, revision)
+        var waited = 0
+        while (cache.detailPending > 0 && waited < 20_000) { Thread.sleep(5); waited += 5; out = cache.around(world, 200, 200, 24, revision) }
+        return out
+    }
+
+    private fun revision(world: StreamingWorld) = world.loadedChunks.sumOf { it.revision }
+
+    /** Every vertex of every mesh, for comparing two caches' pictures of the same world. */
+    private fun vertices(results: List<TerrainMesher.Result>): Int = results.sumOf { it.mesh.vertexCount }
+
+    @Test
+    fun `remeshing only the layers an edit touched gives the same mesh as remeshing the chunk`() {
+        val world = world()
+        val mesher = MicroDetailMesher(generator)
+        val pos = ChunkPos.containing(200, 200)
+        val before = BlockSnapshot.of(world, pos)
+        val layers = assertNotNull(mesher.meshLayers(before, pos))
+        assertEquals(mesher.layers, layers.size)
+        val top = world.surfaceAt(203, 205)
+        world.setBlock(BlockPos(203, 205, top + 1), content.registry.indexOf("igbo:red_earth"))
+        val after = BlockSnapshot.of(world, pos)
+        val dirty = assertNotNull(after.changedLayers(before, mesher.layers, mesher.blocksPerLayer))
+        assertTrue(dirty.count { it } in 1..2, "one block dirtied ${dirty.toList()}")
+        val patched = assertNotNull(mesher.meshLayers(after, pos, only = dirty, previous = layers))
+        val whole = assertNotNull(mesher.mesh(after, pos))
+        assertEquals(whole.mesh.vertexCount, vertices(patched))
+        assertEquals(whole.mesh.triangleCount, patched.sumOf { it.mesh.triangleCount })
+        (0 until mesher.layers).filterNot { dirty[it] }.forEach { assertTrue(patched[it] === layers[it], "untouched layer $it was remade") }
+    }
+
+    @Test
+    fun `with a budget for it, each edit is remeshed in detail on its own frame`() {
+        val world = world()
+        val cache = detailCache(editLayersPerCall = ChunkMeshCache.EDIT_LAYERS_PER_CALL)
+        settle(cache, world, revision(world))
+        val detailed = cache.detailedLastCall
+        assertTrue(detailed > 0)
+        val block = content.registry.indexOf("igbo:red_earth")
+        // A wall crossing the border between chunks 12 and 13 (x 192..207 | 208..223), laid one block a frame.
+        for (i in 0 until 24) {
+            val x = 202 + i % 12; val y = 200
+            val z = world.surfaceAt(x, y) + 1
+            world.setBlock(BlockPos(x, y, z), block)
+            val generation = cache.generation
+            cache.around(world, 200, 200, 24, revision(world))
+            assertEquals(0, cache.poppedLastCall, "block $i popped a chunk back to blocks")
+            assertEquals(detailed, cache.detailedLastCall, "block $i")
+            assertTrue(cache.generation > generation, "block $i was not drawn on the frame it was laid")
+            assertTrue(cache.editLayersLastCall in 1..ChunkMeshCache.EDIT_LAYERS_PER_CALL, "block $i remeshed ${cache.editLayersLastCall} layers")
+        }
+    }
+
+    @Test
+    fun `placing blocks never drops a detailed chunk back to blocks, and the edit worker catches up within a few frames`() {
+        val world = world()
+        val cache = detailCache()
+        settle(cache, world, revision(world))
+        val block = content.registry.indexOf("igbo:red_earth")
+        val cell = BlockPos(203, 203, world.surfaceAt(203, 203) + 1)
+        world.setBlock(cell, block)
+        cache.around(world, 200, 200, 24, revision(world))
+        assertEquals(0, cache.poppedLastCall)
+        assertEquals(0, cache.meshedLastCall, "nothing was block-meshed for an edit to a detailed chunk")
+        assertTrue(cell.chunkPos in cache.awaiting, "the edited chunk is not marked as catching up")
+        var frames = 0
+        while (cell.chunkPos in cache.awaiting && frames < 400) { Thread.sleep(5); frames++; cache.around(world, 200, 200, 24, revision(world)) }
+        assertTrue(cell.chunkPos !in cache.awaiting, "the edit never landed")
+        assertEquals(0, cache.poppedLastCall)
+    }
+
+    @Test
+    fun `rapid place, undo and redo at chunk borders ends where a fresh mesh of the same world does`() {
+        val world = world()
+        val cache = detailCache()
+        settle(cache, world, revision(world))
+        val block = content.registry.indexOf("igbo:red_earth")
+        val placed = ArrayList<BlockPos>()
+        // Corners and sides of the chunk holding (200, 200): 192..207 each way.
+        val cells = listOf(192 to 192, 207 to 192, 192 to 207, 207 to 207, 200 to 192, 192 to 200, 207 to 200, 200 to 207, 208 to 200, 191 to 200)
+        repeat(3) { round ->
+            for ((x, y) in cells) {
+                val p = BlockPos(x, y, world.surfaceAt(x, y) + 1)
+                world.setBlock(p, block); placed += p
+                cache.around(world, 200, 200, 24, revision(world))
+                assertEquals(0, cache.poppedLastCall, "round $round placing at $x,$y")
+            }
+            // Undo half, as fast as the thumb goes, then redo it.
+            val undone = placed.takeLast(placed.size / 2)
+            undone.reversed().forEach { world.setBlock(it, BlockRegistry.AIR_INDEX); cache.around(world, 200, 200, 24, revision(world)) }
+            undone.forEach { world.setBlock(it, block); cache.around(world, 200, 200, 24, revision(world)) }
+            assertEquals(0, cache.poppedLastCall)
+        }
+        val settled = settle(cache, world, revision(world))
+        val fresh = settle(detailCache(), world, revision(world))
+        assertEquals(vertices(fresh), vertices(settled), "the edited cache and a fresh one disagree about the world")
+        assertEquals(fresh.sumOf { it.mesh.triangleCount }, settled.sumOf { it.mesh.triangleCount })
+    }
+
     @Test
     fun `with the far ring on, the whole view is drawn from microvoxels`() {
         val world = world()
