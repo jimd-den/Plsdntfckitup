@@ -51,6 +51,7 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "builder") builder(out)
         if (only == null || only == "all" || only == "vector") vectorMasks(out)
         if (only == null || only == "all" || only == "emojimask") emojiMasks(out)
+        if (only == null || only == "all" || only == "shapemask") shapeMasks(out)
     }
 
     private fun turntables(out: File) {
@@ -116,6 +117,39 @@ object MaskSpiritPreview {
      * Igbo masks as emoji: the carvers' masks smiling, one mask through
      * twenty feelings, another through the same, a turn, and fresh rolls.
      */
+    /** Masks built from flat shapes: the set, how one is built layer by layer, its feelings, a turn, rolls. */
+    private fun shapeMasks(out: File) {
+        val sm = com.stratum.engine.model.mask.ShapeMask
+        val em = com.stratum.engine.model.mask.EmojiMask
+        fun card(px: IntArray, size: Int, label: String): BufferedImage {
+            val img = BufferedImage(size, size + 30, BufferedImage.TYPE_INT_ARGB)
+            val g = img.createGraphics()
+            g.color = Color(0xFA, 0xF7, 0xF1); g.fillRect(0, 0, size, size + 30)
+            g.drawImage(BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { it.setRGB(0, 0, size, size, px, 0, size) }, 0, 0, null)
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+            g.color = Color(0x3A, 0x30, 0x2C); g.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
+            g.drawString(label, (size - g.fontMetrics.stringWidth(label)) / 2, size + 20)
+            g.dispose()
+            return img
+        }
+        val smile = em.expressions.getValue("Smile")
+        ImageIO.write(sheet(sm.presets.map { card(sm.image(it, smile, 280, 0.12f, 0.4f), 280, it.name) }, 4), "png", File(out, "shape-masks.png"))
+        val L = com.stratum.engine.model.mask.ShapeMask.Layer.entries
+        for ((i, look) in listOf(sm.presets[3], sm.presets[1]).withIndex()) {
+            val steps = listOf("The shapes behind" to 1, "+ the face" to 2, "+ its fields" to 3, "+ plates and crest" to 4, "+ eyes, nose, mouth" to 5, "+ what hangs" to 6)
+            val built = steps.map { (label, n) -> card(sm.image(look, smile, 240, 0.15f, 0.4f, L.take(n).toSet()), 240, label) }
+            ImageIO.write(sheet(built, 6), "png", File(out, "shape-built-${i + 1}.png"))
+        }
+        for ((i, look) in listOf(sm.presets[0], sm.presets[3]).withIndex()) {
+            ImageIO.write(sheet(em.expressions.map { (name, face) -> card(sm.image(look, face, 240, 0.1f, 0.4f), 240, name) }, 5), "png", File(out, "shape-expressions-${i + 1}.png"))
+        }
+        val turn = listOf(-0.7f, -0.4f, -0.15f, 0f, 0.15f, 0.4f, 0.7f).map { card(sm.image(sm.presets[4], em.expressions.getValue("Grin"), 240, it, 0.4f), 240, "") }
+        ImageIO.write(strip(turn, "Horned Moon turning: every shape slides on a shallow dome, like a paper puppet"), "png", File(out, "shape-turn.png"))
+        val feelings = em.expressions.keys.toList()
+        val rolls = (1..12).map { k -> val look = sm.generate(k * 7919L, "Roll $k"); val fe = feelings[(k * 7) % feelings.size]; card(sm.image(look, em.expressions.getValue(fe), 280, 0.12f, 0.4f), 280, "${look.base.label} · $fe") }
+        ImageIO.write(sheet(rolls, 6), "png", File(out, "shape-rolls.png"))
+    }
+
     private fun emojiMasks(out: File) {
         val em = com.stratum.engine.model.mask.EmojiMask
         fun card(look: com.stratum.engine.model.mask.EmojiMask.Look, face: com.stratum.engine.model.mask.EmojiMask.Face, label: String, size: Int = 280, turn: Float = 0.12f, time: Float = 0.4f): BufferedImage {
