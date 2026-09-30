@@ -53,6 +53,31 @@ object Anatomy {
         EYE_RINGS("Kaolin round the eyes"), SPLIT("Split face"), BANDS("Painted bands"), CHECKER("Checkers"), DOTS("Dots"),
         TRIANGLES("Triangles"), CONCENTRIC("Concentric rings"), STRIATED("Painted striations"), ULI("Uli lines"),
     }
+
+    /** What part of the mask a dial shapes, for grouping them in an editor. */
+    enum class Part(val label: String) {
+        FACE("Face"), EYES("Eyes"), NOSE("Nose"), MOUTH("Mouth"), BROW_EARS("Brow & ears"), MARKS("Marks & paint"),
+        HAIR("Coiffure"), HORNS("Horns & crest"), RAFFIA("Raffia"), ADORN("Adornment"), SURFACE("Wood & wear"),
+    }
+
+    /**
+     * A carver's hand on a continuous choice: each 0..1, [default] as the
+     * tradition carves it. Together with the named choices they make every
+     * proportion of the mask the player's to set.
+     */
+    enum class Dial(val label: String, val part: Part, val default: Float = 0.5f) {
+        FACE_DEPTH("Depth", Part.FACE), CONVEXITY("Curve across", Part.FACE), JAW("Jaw", Part.FACE),
+        CHEEKS("Cheeks", Part.FACE), FOREHEAD("Forehead", Part.FACE), ASYMMETRY("Asymmetry", Part.FACE, 0f),
+        EYE_SIZE("Size", Part.EYES), EYE_SPACING("Spacing", Part.EYES), EYE_TILT("Tilt", Part.EYES), EYE_DEPTH("Lids", Part.EYES),
+        NOSE_LENGTH("Length", Part.NOSE), NOSE_SIZE("Size", Part.NOSE), NOSE_BRIDGE("Bridge", Part.NOSE),
+        MOUTH_SIZE("Size", Part.MOUTH), MOUTH_HEIGHT("Height", Part.MOUTH), LIP_FULLNESS("Lips", Part.MOUTH),
+        BROW_WEIGHT("Brow weight", Part.BROW_EARS), EAR_SIZE("Ear size", Part.BROW_EARS),
+        SCAR_DEPTH("Cut depth", Part.MARKS), PATTERN_SCALE("Pattern scale", Part.MARKS),
+        HAIRLINE("Hairline", Part.HAIR), HAIR_VOLUME("Volume", Part.HAIR), HAIR_TEXTURE("Rows", Part.HAIR),
+        HORN_CURL("Curl", Part.HORNS), HORN_SPREAD("Spread", Part.HORNS), HORN_GIRTH("Girth", Part.HORNS), HORN_RIDGES("Ridges", Part.HORNS),
+        RAFFIA_LENGTH("Length", Part.RAFFIA),
+        WEAR("Wear", Part.SURFACE), GRAIN("Grain", Part.SURFACE), PATINA("Patina", Part.SURFACE),
+    }
 }
 
 /** A mask, fully specified: every choice the sculptor needs, in the carvers' terms. */
@@ -91,8 +116,20 @@ data class MaskSpec(
     val glow: Int = 0xFFFFA23A.toInt(),
     /** How much raffia hangs from it, 0..1: its swing in play comes from the fringe physics. */
     val raffia: Float = 0f,
+    /** The raffia's dye as a pigment index, or [NATURAL] for undyed straw. */
+    val raffiaDye: Int = NATURAL,
+    /** The beads' colour, a pigment index, strung with the accents. */
+    val beads: Int = Pigments.VERMILION,
+    /** Continuous proportions off their defaults; a missing dial is its [Anatomy.Dial.default]. */
+    val dials: Map<Anatomy.Dial, Float> = emptyMap(),
     val seed: Long = 0L,
-)
+) {
+    fun dial(d: Anatomy.Dial): Float = dials[d] ?: d.default
+
+    fun withDial(d: Anatomy.Dial, v: Float): MaskSpec = copy(dials = dials + (d to v.coerceIn(0f, 1f)))
+
+    companion object { const val NATURAL = -1 }
+}
 
 /** The pigment indices the masks use, by name. */
 object Pigments {
@@ -438,8 +475,22 @@ object MaskCulture {
             accent = g.accents[r.nextInt(g.accents.size)], accent2 = g.accents[r.nextInt(g.accents.size)],
             hornColour = g.horns[r.nextInt(g.horns.size)], glow = g.glows[r.nextInt(g.glows.size)],
             raffia = range(g.raffia), seed = seed,
-        )
+        ).let { spec ->
+            // The carver's hand: every proportion nudged off the tradition's own, now and then a face pulled askew.
+            spec.copy(
+                dials = Anatomy.Dial.entries.associateWith { d ->
+                    if (d == Anatomy.Dial.ASYMMETRY) (if (r.nextFloat() < 0.12f) 0.2f + 0.5f * r.nextFloat() else 0f)
+                    else (d.default + (r.nextFloat() - 0.5f) * VARIATION).coerceIn(0f, 1f)
+                },
+                raffiaDye = if (r.nextFloat() < 0.2f) g.accents[r.nextInt(g.accents.size)] else MaskSpec.NATURAL,
+                beads = BEADS[r.nextInt(BEADS.size)],
+            )
+        }
     }
+
+    /** How far a roll moves each dial off its tradition's own setting. */
+    private const val VARIATION = 0.6f
+    private val BEADS = listOf(Pigments.VERMILION, Pigments.LAPIS, Pigments.CORAL, Pigments.GOLD, Pigments.JADE, Pigments.KAOLIN)
 
     /** A spirit that belongs to two traditions: its parts drawn from each in turn. */
     fun blend(a: Tradition, b: Tradition, seed: Long, name: String = "${a.name}–${b.name}"): MaskSpec {
@@ -450,6 +501,7 @@ object MaskCulture {
             outline = one(x.outline, y.outline), eyes = one(x.eyes, y.eyes), mouth = one(x.mouth, y.mouth), nose = one(x.nose, y.nose),
             coiffure = one(x.coiffure, y.coiffure), crown = one(x.crown, y.crown), scars = one(x.scars, y.scars),
             finish = one(x.finish, y.finish), patterns = one(x.patterns, y.patterns), tradition = "${a.id}+${b.id}",
+            dials = Anatomy.Dial.entries.associateWith { d -> (x.dial(d) + y.dial(d)) / 2f },
         )
     }
 }

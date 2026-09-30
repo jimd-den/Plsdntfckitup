@@ -39,6 +39,9 @@ sealed interface Route {
 
         /** Make your own Igbo mask, and wear it. */
         data object Masks : Create
+
+        /** Carve a sculpted African mask with every part open, and wear it. */
+        data object Carver : Create
         data object Mapper : Create
 
         /** The agent crew, opened on [preset] when the way in chose one. */

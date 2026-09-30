@@ -89,6 +89,33 @@ class MaskCharacters(
 
     private val heroCards = HashMap<String, SpiritMesh>()
 
+    /**
+     * The hero's mask when it was carved in the mask carver: a sculpted mask
+     * that moves as its tradition's spirits do. Wins over the others. Carved
+     * off the frame with a [builder]; the plain mask stands in until it is done.
+     */
+    var heroCarved: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
+        set(value) { if (field != value) { field = value; carvedProfile = null } }
+
+    @Volatile private var carvedMesh: SpiritMesh? = null
+    @Volatile private var carvedFor: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
+    @Volatile private var carving: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
+    private var carvedProfile: MotionProfile? = null
+
+    /** The carved hero's mesh when it is ready, starting its carving if it is not. */
+    private fun carvedHero(spec: com.stratum.engine.model.mask.sculpt.MaskSpec): SpiritMesh? {
+        if (carvedFor == spec) return carvedMesh
+        if (carving != spec) {
+            carving = spec
+            val job = Runnable {
+                val mesh = runCatching { com.stratum.engine.model.mask.sculpt.MaskSculptor.cached(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME) }.getOrNull()
+                if (carving == spec) { carvedMesh = mesh; carvedFor = spec }
+            }
+            if (builder != null) builder.execute(job) else job.run()
+        }
+        return if (carvedFor == spec) carvedMesh else null
+    }
+
     /** What the hero feels, from its state: serene, fierce in a strike, afraid when hit, struck down in death. */
     private fun heroFeeling(state: AnimationState, flash: Float): String = when {
         state == AnimationState.DIE -> "Knocked out"
@@ -143,7 +170,8 @@ class MaskCharacters(
     ): MotionBody? {
         heroId = id
         val maker = heroMaker
-        val mesh = if (maker != null) {
+        val carved = heroCarved?.let { carvedHero(it) }
+        val mesh = if (carved != null) carved else if (maker != null) {
             val feeling = heroFeeling(state, flash)
             heroCards.getOrPut(feeling) { MaskMaker.card(maker, EmojiMask.expressions.getValue(feeling)) }
         } else heroMesh ?: (heroArt?.let { AfricanMaskArt.head(it) } ?: MaskSpiritMesher.cached(heroGenome, MaskSpiritMesher.COMPANION_BUDGET)).also { heroMesh = it }
@@ -151,7 +179,10 @@ class MaskCharacters(
             heroProfile = MotionProfiles.resolve(CharacterMasks.profileIdFor(heroGenome), profileOverrides)
             heroProfileFor = heroGenome
         }
-        val body = cast.track(id, mesh, heroProfile!!, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false) ?: return null
+        val profile = if (carved != null) {
+            carvedProfile ?: MotionProfiles.resolve(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(heroCarved!!.tradition.substringBefore('+')).motion, profileOverrides).also { carvedProfile = it }
+        } else heroProfile!!
+        val body = cast.track(id, mesh, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false) ?: return null
         react(id, body, state, flash, impact, casting = false, aimX, aimY)
         return body
     }

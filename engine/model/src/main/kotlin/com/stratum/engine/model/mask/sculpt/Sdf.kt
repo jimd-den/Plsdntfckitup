@@ -39,11 +39,13 @@ class Sphere(val cx: Float, val cy: Float, val cz: Float, val r: Float) : Shape(
     }
 }
 
-/** An ellipsoid, by the usual close approximation to its distance. */
-class Ellipsoid(val cx: Float, val cy: Float, val cz: Float, val rx: Float, val ry: Float, val rz: Float) : Shape() {
-    init { bound(cx, cy, cz, rx, ry, rz) }
+/** An ellipsoid, by the usual close approximation to its distance, tilted by [roll] in the face's plane (x toward z). */
+class Ellipsoid(val cx: Float, val cy: Float, val cz: Float, val rx: Float, val ry: Float, val rz: Float, roll: Float = 0f) : Shape() {
+    private val cr = kotlin.math.cos(roll); private val sr = kotlin.math.sin(roll)
+    init { if (roll == 0f) bound(cx, cy, cz, rx, ry, rz) else max(rx, rz).let { bound(cx, cy, cz, it, ry, it) } }
     override fun d(x: Float, y: Float, z: Float): Float {
-        val px = (x - cx) / rx; val py = (y - cy) / ry; val pz = (z - cz) / rz
+        val ux = x - cx; val uz = z - cz
+        val px = (ux * cr + uz * sr) / rx; val py = (y - cy) / ry; val pz = (uz * cr - ux * sr) / rz
         val k0 = sqrt(px * px + py * py + pz * pz)
         val qx = px / rx; val qy = py / ry; val qz = pz / rz
         val k1 = sqrt(qx * qx + qy * qy + qz * qz)

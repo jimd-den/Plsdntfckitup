@@ -55,6 +55,7 @@ internal class MaskTheatre(looks: MaskLooks) {
             // A mask from the mask maker, or an older sculpted mask's genome code.
             val maker = input.heroMask?.takeIf(MaskMaker::isCode)?.let { MaskMaker.decode(it, "Hero") }
             masks.heroMaker = maker
+            masks.heroCarved = input.heroMask?.takeIf(com.stratum.engine.model.mask.sculpt.MaskCarver::isCode)?.let { com.stratum.engine.model.mask.sculpt.MaskCarver.decode(it) }
             val art = input.heroMask?.takeIf(AfricanMaskCodec::isCode)?.let { AfricanMaskCodec.decode(it, "Hero") }
             masks.heroArt = art
             masks.heroGenome = if (art != null || maker != null) CharacterMasks.DEFAULT_HERO

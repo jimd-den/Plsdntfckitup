@@ -34,6 +34,7 @@ data class StudioStatus(
     val microModelCount: Int = 0,
     /** Whether the hero wears a mask from the mask maker. */
     val wearsMakerMask: Boolean = false,
+    val wearsCarvedMask: Boolean = false,
 )
 
 /** Every way into the studio's tools. */
@@ -49,6 +50,7 @@ data class CreateHubActions(
     val onModels: () -> Unit = {},
     val onVoxels: () -> Unit = {},
     val onMasks: () -> Unit = {},
+    val onCarver: () -> Unit = {},
     val onCrew: () -> Unit = {},
     val onMapper: () -> Unit = {},
     val onSettings: () -> Unit = {},
@@ -113,6 +115,14 @@ fun CreateHubScreen(
             glyph = "🎨", title = "Art", promise = "Textures, sprites and 3D props",
             onClick = actions.onTextures, status = art.first, statusTone = art.second,
             links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
+            modifier = Modifier.fillMaxWidth(),
+            tint = StratumTheme.colors.accentAlt,
+        )
+        HubCard(
+            glyph = "🗿", title = "Mask carver", promise = "Carve a sculpted African mask — sixteen peoples' traditions, every part and proportion yours",
+            onClick = actions.onCarver,
+            status = if (status.wearsCarvedMask) "Worn by your hero" else "Ready",
+            statusTone = if (status.wearsCarvedMask) StatusTone.NEUTRAL else StatusTone.READY,
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accentAlt,
         )

@@ -54,6 +54,7 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "shapemask") shapeMasks(out)
         if (only == "sculpt") sculptedMasks(out)
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
+        if (only == "carver") carver(out)
     }
 
     private fun turntables(out: File) {
@@ -223,6 +224,47 @@ object MaskSpiritPreview {
             decals = MeshBuilder(MaterialKind.DECAL).build(recycler), glows = glows.build(recycler),
         )
         return SceneRasterizer(width, height, TextureLibrary(), supersample = 3, shadowSize = 2048).render(frame)
+    }
+
+    /** Every dial of the carver at both ends, and a wall of random designs. */
+    private fun carver(out: File) {
+        val mc = com.stratum.engine.model.mask.sculpt.MaskCarver
+        val sculptor = com.stratum.engine.model.mask.sculpt.MaskSculptor
+        val portrait = com.stratum.engine.model.mask.sculpt.MaskPortrait
+        fun pic(spec: com.stratum.engine.model.mask.sculpt.MaskSpec, label: String, size: Int = 220, detail: com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail = com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME, yaw: Float = 0.35f): BufferedImage {
+            val mesh = sculptor.carve(spec, detail)
+            val px = portrait.render(mesh, size, (size * 1.2f).toInt(), yaw = yaw)
+            val img = BufferedImage(size, (size * 1.2f).toInt(), BufferedImage.TYPE_INT_RGB)
+            img.setRGB(0, 0, img.width, img.height, px, 0, img.width)
+            return labelled(img, label)
+        }
+        println("Designs from named choices alone: ${mc.designs()}  (with every slider step: ${mc.designs(sliders = true).toString().length} digits)")
+        // Each dial: low, as carved, high, on masks that show it.
+        val showcase = mapOf(
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.HORNS to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("ikenga"), 3L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.HAIR to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("punu"), 3L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.RAFFIA to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("mgbedike"), 3L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.MARKS to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("kuba"), 5L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.EYES to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("dan"), 4L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.BROW_EARS to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("ogbodo_enyi"), 3L),
+            com.stratum.engine.model.mask.sculpt.Anatomy.Part.SURFACE to com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("mgbedike"), 8L),
+        )
+        // Dials of depth read best from the side.
+        val sideways = setOf("FACE_DEPTH", "CONVEXITY", "NOSE_BRIDGE", "LIP_FULLNESS", "EYE_DEPTH")
+        val base = com.stratum.engine.model.mask.sculpt.MaskCulture.generate(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("okoroshi"), 2L).copy(dials = emptyMap())
+        val rows = com.stratum.engine.model.mask.sculpt.Anatomy.Dial.entries.map { d ->
+            val spec = (showcase[d.part] ?: base).copy(dials = emptyMap())
+            listOf(0f, d.default, 1f).map { v -> pic(spec.withDial(d, v), "${d.label} ${"%.1f".format(v)}", 180, yaw = if (d.name in sideways) 1.05f else 0.35f) }
+        }
+        rows.chunked(11).forEachIndexed { i, chunk -> ImageIO.write(sheet(chunk.flatten(), 6), "png", File(out, "carver-dials-${i + 1}.png")) }
+        val wall = (1..30).map { k -> val spec = mc.roll(k * 7717L); pic(spec, spec.name, 200) }
+        ImageIO.write(sheet(wall, 6), "png", File(out, "carver-designs.png"))
+        // One mask, part by part carved afresh.
+        val hero = mc.roll(99L, com.stratum.engine.model.mask.sculpt.MaskCulture.tradition("agbogho_mmuo"))
+        val parts = listOf(hero to "As rolled") + com.stratum.engine.model.mask.sculpt.Anatomy.Part.entries.map { p -> mc.reroll(hero, p, 4242L + p.ordinal) to "New ${p.label.lowercase()}" }
+        ImageIO.write(sheet(parts.map { (s, l) -> pic(s, l, 200) }, 6), "png", File(out, "carver-parts.png"))
+        val code = mc.encode(hero)
+        println("Share code (${code.length} chars): $code")
     }
 
     private fun labelled(img: BufferedImage, label: String): BufferedImage {
