@@ -66,6 +66,7 @@ import com.stratum.engine.model.mask.sculpt.MaskSculptor
 import com.stratum.engine.model.mask.sculpt.MaskSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
 import kotlin.math.roundToInt
@@ -297,13 +298,15 @@ fun CarvedPortrait(spec: MaskSpec, animate: Boolean, modifier: Modifier = Modifi
     var turn by remember { mutableFloatStateOf(0.35f) }
     val currentTurn by rememberUpdatedState(turn)
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
-    val still = if (!animate) remember(spec, turn) { picture(spec, MaskSculptor.Detail.GAME, width, height, turn, 2) } else null
+    val still = if (!animate) remember(spec, turn) { picture(spec, MaskSculptor.Detail.HIGH, width, height, turn, 2) } else null
     if (animate) {
         LaunchedEffect(spec) {
             val rough = withContext(Dispatchers.Default) { MaskSculptor.cached(spec, MaskSculptor.Detail.FAR) }
             var mesh = rough
             frame = withContext(Dispatchers.Default) { bitmap(MaskPortrait.render(mesh, width, height, yaw = currentTurn, supersample = 1), width, height) }
             mesh = withContext(Dispatchers.Default) { MaskSculptor.cached(spec, MaskSculptor.Detail.GAME) }
+            // Left alone a moment, it is carved again at the finest detail, every cut crisp.
+            launch { delay(1200); val fine = withContext(Dispatchers.Default) { MaskSculptor.cached(spec, MaskSculptor.Detail.HIGH) }; mesh = fine }
             val start = System.nanoTime()
             while (true) {
                 val t = (System.nanoTime() - start) / 1e9f
@@ -311,7 +314,8 @@ fun CarvedPortrait(spec: MaskSpec, animate: Boolean, modifier: Modifier = Modifi
                 val yaw = currentTurn + 0.22f * sin(t * 0.7f)
                 val pitch = 0.18f + 0.05f * sin(t * 1.1f)
                 val glow = 0.7f + 0.25f * sin(t * 2.3f)
-                frame = withContext(Dispatchers.Default) { bitmap(MaskPortrait.render(mesh, width, height, yaw = yaw, pitch = pitch, glow = glow, supersample = 1), width, height) }
+                val now = mesh
+                frame = withContext(Dispatchers.Default) { bitmap(MaskPortrait.render(now, width, height, yaw = yaw, pitch = pitch, glow = glow, supersample = 1), width, height) }
                 delay(60)
             }
         }

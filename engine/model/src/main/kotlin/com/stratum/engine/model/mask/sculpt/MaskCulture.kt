@@ -68,9 +68,9 @@ object Anatomy {
     enum class Dial(val label: String, val part: Part, val default: Float = 0.5f) {
         FACE_DEPTH("Depth", Part.FACE), CONVEXITY("Curve across", Part.FACE), JAW("Jaw", Part.FACE),
         CHEEKS("Cheeks", Part.FACE), FOREHEAD("Forehead", Part.FACE), ASYMMETRY("Asymmetry", Part.FACE, 0f),
-        EYE_SIZE("Size", Part.EYES), EYE_SPACING("Spacing", Part.EYES), EYE_TILT("Tilt", Part.EYES), EYE_DEPTH("Lids", Part.EYES),
+        EYE_SIZE("Size", Part.EYES), EYE_SPACING("Spacing", Part.EYES), EYE_TILT("Tilt", Part.EYES), EYE_DEPTH("Lids", Part.EYES), ORBITS("Sockets", Part.EYES),
         NOSE_LENGTH("Length", Part.NOSE), NOSE_SIZE("Size", Part.NOSE), NOSE_BRIDGE("Bridge", Part.NOSE),
-        MOUTH_SIZE("Size", Part.MOUTH), MOUTH_HEIGHT("Height", Part.MOUTH), LIP_FULLNESS("Lips", Part.MOUTH),
+        MOUTH_SIZE("Size", Part.MOUTH), MOUTH_HEIGHT("Height", Part.MOUTH), LIP_FULLNESS("Lips", Part.MOUTH), MUZZLE("Muzzle", Part.MOUTH),
         BROW_WEIGHT("Brow weight", Part.BROW_EARS), EAR_SIZE("Ear size", Part.BROW_EARS),
         SCAR_DEPTH("Cut depth", Part.MARKS), PATTERN_SCALE("Pattern scale", Part.MARKS),
         HAIRLINE("Hairline", Part.HAIR), HAIR_VOLUME("Volume", Part.HAIR), HAIR_TEXTURE("Rows", Part.HAIR),

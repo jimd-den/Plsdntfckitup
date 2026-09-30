@@ -244,7 +244,7 @@ object MaskSpiritPreview {
             ImageIO.write(sheet(cards, 4), "png", File(out, "wood-$name.png"))
         }
         // Close-ups at the finest detail, turned to catch the light across the cuts.
-        val close = listOf("okoroshi" to 0.5f, "chokwe" to -0.6f).mapNotNull { (id, yaw) ->
+        val close = listOf("okoroshi" to 0.5f, "chokwe" to -0.6f, "okoroshi" to 1.35f).mapNotNull { (id, yaw) ->
             cu.traditions.firstOrNull { it.id == id || it.name.lowercase().replace(' ', '_') == id }?.let { t ->
                 val mesh = sculptor.carve(cu.generate(t, 1L), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.SHOWCASE)
                 val px = com.stratum.engine.model.mask.sculpt.MaskPortrait.render(mesh, 640, 760, yaw = yaw, pitch = 0.1f)

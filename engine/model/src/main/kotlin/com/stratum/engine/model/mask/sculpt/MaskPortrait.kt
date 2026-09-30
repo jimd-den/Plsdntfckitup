@@ -13,8 +13,9 @@ import kotlin.math.sqrt
  * A carved mask drawn as a picture, in software: for the maker's preview and
  * for cards, wherever there is no scene to fly it in.
  *
- * It is lit like a carving on a shelf: a warm key light from the upper left,
- * a cool fill, and a rim from behind. Its eyes burn with their own light. It is
+ * It is lit like a carving on a shelf: a warm key light from the upper left
+ * that casts shadows (the brow over the eyes, the nose across the cheek), a
+ * cool fill, and a rim from behind. Its eyes burn with their own light. It is
  * depth-buffered and drawn at [supersample] times the size, then filtered
  * down.
  */
@@ -52,17 +53,18 @@ object MaskPortrait {
 
         // Lit colour at each vertex.
         val key = norm(-0.55f, 0.75f, 0.62f); val fill = norm(0.7f, 0.5f, -0.1f)
+        val lit = shadowing(mesh, vx, vy, vz, key)
         val lr = FloatArray(n); val lg = FloatArray(n); val lb = FloatArray(n)
         for (i in 0 until n) {
             val c = mesh.colors[i]
             val r = ((c shr 16) and 255) / 255f; val g = ((c shr 8) and 255) / 255f; val b = (c and 255) / 255f
-            val kd = max(0f, nx[i] * key[0] + ny[i] * key[1] + nz[i] * key[2])
+            val kd = max(0f, nx[i] * key[0] + ny[i] * key[1] + nz[i] * key[2]) * lit[i]
             val fd = max(0f, nx[i] * fill[0] + ny[i] * fill[1] + nz[i] * fill[2])
             val sky = 0.5f + 0.5f * nz[i]
             val rim = (1f - max(0f, ny[i])).pow(3f) * 0.35f
             // A soft sheen on polished wood, from the key light.
             val hx = key[0]; val hy = key[1] + 1f; val hz = key[2]; val hl = sqrt(hx * hx + hy * hy + hz * hz)
-            val spec = max(0f, (nx[i] * hx + ny[i] * hy + nz[i] * hz) / hl).pow(28f) * 0.28f
+            val spec = max(0f, (nx[i] * hx + ny[i] * hy + nz[i] * hz) / hl).pow(22f) * 0.22f * lit[i]
             var er = r * (0.2f + 0.16f * sky + 1.05f * kd * 1.0f + 0.25f * fd * 0.8f) + spec + rim * 0.9f
             var eg = g * (0.2f + 0.16f * sky + 1.05f * kd * 0.93f + 0.25f * fd * 0.9f) + spec * 0.95f + rim * 0.75f
             var eb = b * (0.22f + 0.2f * sky + 1.05f * kd * 0.82f + 0.25f * fd * 1.1f) + spec * 0.85f + rim * 0.6f
@@ -129,6 +131,63 @@ object MaskPortrait {
         }
         return out
     }
+
+    /**
+     * How much of the key light reaches each vertex, 0 to 1: a depth map drawn
+     * from the light, read back softly over its neighbours.
+     */
+    private fun shadowing(mesh: SpiritMesh, vx: FloatArray, vy: FloatArray, vz: FloatArray, light: FloatArray): FloatArray {
+        val n = vx.size
+        // The light's own frame: looking along -light, with a and b across it.
+        var ax = -light[2]; var ay = 0f; var az = light[0]
+        run { val l = sqrt(ax * ax + ay * ay + az * az).coerceAtLeast(1e-6f); ax /= l; ay /= l; az /= l }
+        val bx = light[1] * az - light[2] * ay; val by = light[2] * ax - light[0] * az; val bz = light[0] * ay - light[1] * ax
+        val la = FloatArray(n); val lb = FloatArray(n); val ld = FloatArray(n)
+        var a0 = Float.MAX_VALUE; var a1 = -Float.MAX_VALUE; var b0 = Float.MAX_VALUE; var b1 = -Float.MAX_VALUE; var d0 = Float.MAX_VALUE; var d1 = -Float.MAX_VALUE
+        for (i in 0 until n) {
+            la[i] = vx[i] * ax + vy[i] * ay + vz[i] * az; lb[i] = vx[i] * bx + vy[i] * by + vz[i] * bz
+            ld[i] = vx[i] * light[0] + vy[i] * light[1] + vz[i] * light[2]
+            a0 = min(a0, la[i]); a1 = max(a1, la[i]); b0 = min(b0, lb[i]); b1 = max(b1, lb[i]); d0 = min(d0, ld[i]); d1 = max(d1, ld[i])
+        }
+        val size = SHADOW_MAP
+        val span = max(a1 - a0, b1 - b0).coerceAtLeast(1e-6f)
+        val k = (size - 3) / span
+        val sa = FloatArray(n) { (la[it] - a0) * k + 1f }; val sb = FloatArray(n) { (lb[it] - b0) * k + 1f }
+        val near = FloatArray(size * size) { -Float.MAX_VALUE }
+        val idx = mesh.indices
+        for (t in 0 until idx.size / 3) {
+            val p = idx[t * 3]; val q = idx[t * 3 + 1]; val r = idx[t * 3 + 2]
+            val area = (sa[q] - sa[p]) * (sb[r] - sb[p]) - (sb[q] - sb[p]) * (sa[r] - sa[p])
+            if (area == 0f) continue
+            val x0 = max(0, min(sa[p], min(sa[q], sa[r])).toInt()); val x1 = min(size - 1, max(sa[p], max(sa[q], sa[r])).toInt() + 1)
+            val y0 = max(0, min(sb[p], min(sb[q], sb[r])).toInt()); val y1 = min(size - 1, max(sb[p], max(sb[q], sb[r])).toInt() + 1)
+            val inv = 1f / area
+            for (y in y0..y1) for (x in x0..x1) {
+                val fx = x + 0.5f; val fy = y + 0.5f
+                val w0 = ((sa[q] - fx) * (sb[r] - fy) - (sb[q] - fy) * (sa[r] - fx)) * inv
+                val w1 = ((sa[r] - fx) * (sb[p] - fy) - (sb[r] - fy) * (sa[p] - fx)) * inv
+                val w2 = 1f - w0 - w1
+                if (w0 < 0f || w1 < 0f || w2 < 0f) continue
+                val d = w0 * ld[p] + w1 * ld[q] + w2 * ld[r]
+                val o = y * size + x
+                if (d > near[o]) near[o] = d
+            }
+        }
+        // Lit where nothing stands nearer the light, a little slack for the surface itself; softened over a 5x5 patch.
+        val bias = (d1 - d0) * 0.012f + 2.2f / k
+        return FloatArray(n) { i ->
+            val cx = sa[i].toInt(); val cy = sb[i].toInt()
+            var sum = 0f; var cnt = 0
+            for (dy in -2..2) for (dx in -2..2) {
+                val x = (cx + dx).coerceIn(0, size - 1); val y = (cy + dy).coerceIn(0, size - 1)
+                val m = near[y * size + x]
+                sum += if (m == -Float.MAX_VALUE || ld[i] >= m - bias) 1f else 0f; cnt++
+            }
+            0.25f + 0.75f * (sum / cnt)
+        }
+    }
+
+    private const val SHADOW_MAP = 512
 
     private fun tone(v: Float): Float = v / (1f + 0.35f * v) * 1.2f
 
