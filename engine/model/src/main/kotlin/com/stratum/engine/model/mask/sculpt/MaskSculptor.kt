@@ -144,7 +144,17 @@ object MaskSculptor {
         val front0 = if (helmet) dy * 0.78f else dy * 0.62f
 
         /** The face plane: the front pressed flat, a little convex across, falling back at brow and chin. */
-        fun facePlane(x: Float, z: Float): Float = front0 - 0.9f * k(Dial.CONVEXITY, 0.35f, 1.9f) * x * x - 0.25f * (z - eyeZ).let { it * it } * (if (z > browZ) 1.6f else 1f)
+        fun facePlane(x: Float, z: Float): Float {
+            val across = 0.9f * k(Dial.CONVEXITY, 0.35f, 1.9f) * x * x
+            // Carved in planes: the forehead a plane falling back from the brow line, the chin one falling back below the mouth.
+            val brow = browZ + hh * 0.06f
+            val down = when {
+                z > brow -> 0.25f * (brow - eyeZ).let { it * it } + 0.42f * (z - brow)
+                z < mouthZ -> 0.25f * (z - eyeZ).let { it * it } * 0.6f + 0.18f * (mouthZ - z)
+                else -> 0.25f * (z - eyeZ).let { it * it } * 0.6f
+            }
+            return front0 - across - down
+        }
 
         fun run(): SpiritMesh {
             sculptHead()
@@ -160,7 +170,10 @@ object MaskSculptor {
         fun sculptHead() {
             val striated = Scar.STRIATIONS in s.scars
             val q = k(Dial.SCAR_DEPTH, 0.5f, 1.9f)
-            val head = if (striated) Displaced(shell, 0.006f * q) { x, _, z -> 0.004f * q * (0.5f + 0.5f * sin(z * 150f + 3f * sin(x * 9f))) } else shell
+            val scored = if (striated) Displaced(shell, 0.006f * q) { x, _, z -> 0.004f * q * vee(z * 24f + 0.5f * sin(x * 9f)) } else shell
+            // The adze's marks: shallow scoops, each cut flat across, meeting at sharp little ridges.
+            val adze = 0.0022f * k(Dial.TOOL_MARKS, 0f, 2.6f)
+            val head = if (adze > 0f) Displaced(scored, adze) { x, y, z -> adze * scoop(x, y, z) } else scored
             sc.add(head, FACE)
             // Press the front into a face plane, softly, so a rim runs round the face.
             val plane = Custom(-hw * 1.3f, -2f, -hh * 1.2f, hw * 1.3f, 2f, hh * 1.2f) { x, y, z -> y - facePlane(x, z) }
@@ -203,19 +216,19 @@ object MaskSculptor {
 
         fun sides(f: (Float) -> Unit) { f(-1f); f(1f) }
 
-        /** A chain of tapered segments through face points (x, z), standing [lift] off the surface. */
+        /** A ridge (or, cut, a V-groove) through face points (x, z), standing [lift] off the surface, tapering from [r0] to [r1]. */
         fun chain(pts: FloatArray, r0: Float, r1: Float, lift: Float, add: Boolean, material: Int, blend: Float) {
             val n = pts.size / 2
             // Kept on the face, however the jaw and outline narrow it.
             fun onFace(x: Float, z: Float): Float { val lim = hw * 0.92f * taper((z / hh).coerceIn(-1f, 1f)); return x.coerceIn(-lim, lim) }
-            var px = onFace(pts[0], pts[1]); var pz = pts[1]; var py = front(px, pz) + lift
-            for (i in 1 until n) {
-                val z = pts[i * 2 + 1]; val x = onFace(pts[i * 2], z); val y = front(x, z) + lift
-                val ra = r0 + (r1 - r0) * (i - 1) / (n - 1); val rb = r0 + (r1 - r0) * i / (n - 1)
-                val shape = RoundCone(px, py, pz, x, y, z, ra, rb)
-                if (add) sc.add(shape, material, blend) else sc.cut(shape, material, blend)
-                px = x; py = y; pz = z
+            val xyz = FloatArray(n * 3); val radii = FloatArray(n)
+            for (i in 0 until n) {
+                val z = pts[i * 2 + 1]; val x = onFace(pts[i * 2], z)
+                xyz[i * 3] = x; xyz[i * 3 + 1] = front(x, z) + lift; xyz[i * 3 + 2] = z
+                radii[i] = r0 + (r1 - r0) * i / (n - 1).coerceAtLeast(1)
             }
+            val shape = Ridge(xyz, radii)
+            if (add) sc.add(shape, material, blend) else sc.cut(shape, material, blend)
         }
 
         fun arc(x0: Float, z0: Float, xm: Float, zm: Float, x1: Float, z1: Float, n: Int = 8): FloatArray = FloatArray((n + 1) * 2) { k ->
@@ -266,7 +279,7 @@ object MaskSculptor {
             sides { sd ->
                 val x = sd * hw * 0.52f; val z = -hh * 0.14f
                 val y = front(x, z)
-                if (f > 0f) sc.add(Ellipsoid(x, y - 0.01f, z, hw * 0.26f, 0.02f + 0.035f * f, hh * 0.16f), FACE, 0.05f)
+                if (f > 0f) sc.add(Cap(x, y - 0.006f, z, hw * 0.26f, hh * 0.16f, 0.01f + 0.03f * f), FACE, 0.05f)
                 else sc.cut(Ellipsoid(x, y + 0.012f, z - hh * 0.04f, hw * 0.22f, 0.012f - 0.03f * f, hh * 0.15f), FACE, 0.05f)
             }
         }
@@ -286,11 +299,11 @@ object MaskSculptor {
                 eyeCentres += floatArrayOf(x, y, z)
                 when (s.eyes) {
                     Eyes.SLIT -> {
-                        sc.add(Ellipsoid(x, y + 0.004f * lid, z + 0.006f, hw * 0.32f * sz, 0.04f * lid, hh * 0.1f * sz, er), FACE, 0.018f)
+                        sc.add(Cap(x, y - 0.004f, z + 0.006f, hw * 0.32f * sz, hh * 0.1f * sz, 0.036f * lid, er), FACE, 0.012f)
                         sc.cut(RoundBox(x, y + 0.03f, z, hw * 0.26f * sz, 0.06f + 0.03f * lid, 0.008f * sz, 0.005f, bx[0], bx[1], bx[2]), EYE)
                     }
                     Eyes.BEAN -> {
-                        sc.add(Ellipsoid(x, y + 0.008f * lid, z, hw * 0.33f * sz, 0.05f * lid, hh * 0.12f * sz, er), FACE, 0.016f)
+                        sc.add(Cap(x, y - 0.004f, z, hw * 0.33f * sz, hh * 0.12f * sz, 0.05f * lid, er), FACE, 0.012f)
                         sc.cut(RoundBox(x, y + 0.045f, z, hw * 0.27f * sz, 0.07f + 0.03f * lid, 0.0075f * sz, 0.005f, bx[0], bx[1], bx[2]), EYE)
                     }
                     Eyes.TUBE -> {
@@ -322,24 +335,27 @@ object MaskSculptor {
             val nx = asym * hw * 0.08f
             val topZ = browZ - hh * 0.04f
             val y0 = front(0f, topZ); val yt = front(nx, tipZ)
+            /** A nose as a carver cuts it: a prism, its bridge a sharp ridge, its sides flat planes down to the face, its underside cut square. */
+            fun prism(top: Float, tip: Float, halfWidth: Float, tz: Float = tipZ) =
+                sc.add(Wedge(0f, y0 - 0.004f, topZ, nx, yt - 0.002f, tz, top, tip, aspect = halfWidth / tip), FACE, 0.012f)
             when (s.nose) {
                 Nose.NONE -> Unit
                 Nose.LONG -> {
-                    sc.add(RoundCone(0f, y0 - 0.004f, topZ, nx, yt + 0.075f * nb, tipZ, 0.024f * ns, 0.04f * ns), FACE, 0.026f)
-                    nostrils(nx, yt + 0.06f * nb, ns)
+                    prism(0.022f * nb, 0.075f * nb, 0.058f * ns)
+                    nostrils(nx, yt + 0.05f * nb, ns)
                 }
                 Nose.BROAD -> {
-                    sc.add(RoundCone(0f, y0 - 0.004f, topZ, nx, yt + 0.05f * nb, tipZ + hh * 0.03f, 0.026f * ns, 0.045f * ns), FACE, 0.028f)
-                    sc.add(Ellipsoid(nx, yt + 0.045f * nb, tipZ, hw * 0.3f * ns, 0.06f * nb, hh * 0.1f * ns), FACE, 0.028f)
-                    nostrils(nx, yt + 0.07f * nb, ns)
+                    prism(0.02f * nb, 0.05f * nb, 0.07f * ns, tipZ + hh * 0.03f)
+                    sc.add(Cap(nx, yt - 0.004f, tipZ, hw * 0.3f * ns, hh * 0.1f * ns, 0.05f * nb), FACE, 0.012f)
+                    nostrils(nx, yt + 0.05f * nb, ns)
                 }
                 Nose.TRIANGLE -> {
-                    sc.add(RoundCone(0f, y0 - 0.004f, topZ, nx, yt + 0.07f * nb, tipZ, 0.016f * ns, 0.058f * ns), FACE, 0.024f)
-                    nostrils(nx, yt + 0.06f * nb, ns)
+                    prism(0.012f * nb, 0.07f * nb, 0.085f * ns)
+                    nostrils(nx, yt + 0.05f * nb, ns)
                 }
                 Nose.BEAK -> {
-                    sc.add(RoundCone(0f, y0, topZ, nx, yt + 0.09f * nb, tipZ + hh * 0.05f, 0.02f * ns, 0.014f * ns), FACE, 0.02f)
-                    sc.add(RoundCone(nx, yt + 0.09f * nb, tipZ + hh * 0.05f, nx, yt + 0.12f * nb, tipZ - hh * 0.08f, 0.014f * ns, 0.004f), FACE, 0.01f)
+                    prism(0.02f * nb, 0.09f * nb, 0.042f * ns, tipZ + hh * 0.05f)
+                    sc.add(Wedge(nx, yt + 0.06f * nb, tipZ + hh * 0.05f, nx, yt + 0.09f * nb, tipZ - hh * 0.08f, 0.03f * nb, 0.008f, 0f, 1f, 0f, 0.8f), FACE, 0.008f)
                 }
             }
         }
@@ -355,12 +371,13 @@ object MaskSculptor {
             val lf = k(Dial.LIP_FULLNESS, 0.45f, 1.8f)
             when (s.mouth) {
                 Mouth.CLOSED -> {
-                    sc.add(Ellipsoid(mx, y + 0.022f * lf, mouthZ + 0.02f, mw, 0.045f * lf, 0.022f * lf), LIP, 0.016f)
-                    sc.add(Ellipsoid(mx, y + 0.022f * lf, mouthZ - 0.022f, mw * 0.92f, 0.048f * lf, 0.026f * lf), LIP, 0.016f)
+                    // Two lips, each a boss with its edge cut sharp.
+                    sc.add(Cap(mx, y - 0.004f, mouthZ + 0.02f, mw, 0.024f * lf, 0.04f * lf), LIP, 0.01f)
+                    sc.add(Cap(mx, y - 0.004f, mouthZ - 0.022f, mw * 0.92f, 0.028f * lf, 0.044f * lf), LIP, 0.01f)
                     sc.cut(RoundBox(mx, y + 0.06f * lf, mouthZ, mw * 0.88f, 0.04f, 0.004f, 0.003f), MOUTH)
                 }
                 Mouth.OPEN, Mouth.TEETH -> {
-                    sc.add(Ellipsoid(mx, y + 0.035f * lf, mouthZ, mw * 1.15f, 0.065f * lf, hh * 0.13f), LIP, 0.024f)
+                    sc.add(Cap(mx, y - 0.004f, mouthZ, mw * 1.15f, hh * 0.13f, 0.07f * lf), LIP, 0.014f)
                     sc.cut(Ellipsoid(mx, y + 0.085f * lf, mouthZ, mw * 0.85f, 0.07f, hh * 0.07f), MOUTH, 0.005f)
                     if (s.mouth == Mouth.TEETH) {
                         val n = 6
@@ -371,7 +388,7 @@ object MaskSculptor {
                     }
                 }
                 Mouth.PURSED -> {
-                    sc.add(Ellipsoid(mx, y + 0.012f * lf, mouthZ, mw * 0.55f, 0.035f * lf, hh * 0.06f), LIP, 0.014f)
+                    sc.add(Cap(mx, y - 0.004f, mouthZ, mw * 0.55f, hh * 0.06f, 0.04f * lf), LIP, 0.01f)
                     sc.cut(Sphere(mx, y + 0.045f * lf, mouthZ, 0.012f), MOUTH)
                 }
                 Mouth.BOX -> {
@@ -383,6 +400,12 @@ object MaskSculptor {
                     sc.cut(Cylinder(mx, y + 0.07f * lf, mouthZ, mw * 0.3f, 0.06f * lf), MOUTH)
                 }
             }
+        }
+
+        /** A keloid as carved: a small raised lozenge with a sharp crest. */
+        fun keloid(x: Float, z: Float, r: Float) {
+            val y = front(x, z)
+            sc.add(Wedge(x - r * 1.2f, y - r * 0.3f, z, x + r * 1.2f, y - r * 0.3f, z, r, r), FACE, 0.003f)
         }
 
         fun scars() {
@@ -399,13 +422,13 @@ object MaskSculptor {
                     fun diamond(cx: Float, cz: Float, sz: Float) {
                         for (i in -2..2) for (j in -2..2) if (abs(i) + abs(j) == 2 || (i == 0 && j == 0)) {
                             val x = cx + i * sz; val z = cz + j * sz
-                            sc.add(Sphere(x, front(x, z), z, 0.0075f * q), FACE, 0.004f * q)
+                            keloid(x, z, 0.0075f * q)
                         }
                     }
                     diamond(0f, browZ + hh * 0.16f, hh * 0.035f)
                     sides { sd -> diamond(sd * hw * 0.78f, eyeZ + hh * 0.02f, hh * 0.028f) }
                 }
-                Scar.CHEEK_KELOIDS -> sides { sd -> for (i in 0 until 3) for (j in 0 until 2) { val x = sd * (hw * 0.45f + i * hw * 0.1f); val z = -hh * 0.18f - j * hh * 0.07f; sc.add(Sphere(x, front(x, z), z, 0.007f * q), FACE, 0.004f * q) } }
+                Scar.CHEEK_KELOIDS -> sides { sd -> for (i in 0 until 3) for (j in 0 until 2) { val x = sd * (hw * 0.45f + i * hw * 0.1f); val z = -hh * 0.18f - j * hh * 0.07f; keloid(x, z, 0.007f * q) } }
                 Scar.CENTRE_RIDGE -> chain(floatArrayOf(0f, hh * 0.72f, 0f, browZ + hh * 0.2f, 0f, browZ), 0.009f * q, 0.007f * q, 0f, true, FACE, 0.012f)
                 Scar.STRIATIONS -> Unit
             }
@@ -429,7 +452,7 @@ object MaskSculptor {
                 val above = hairZ(y) - z
                 max(swell, above)
             }
-            val cap = if (cornrows) Displaced(capBase, 0.008f) { x, y, _ -> 0.005f * abs(sin(atan2(x, y + dy * 0.3f) * rows)) } else capBase
+            val cap = if (cornrows) Displaced(capBase, 0.008f) { x, y, _ -> 0.005f * vee(atan2(x, y + dy * 0.3f) * rows / PI.toFloat()) } else capBase
             sc.add(cap, HAIR, 0.01f)
             when (s.coiffure) {
                 Coiffure.CREST -> sc.add(RoundBox(0f, -dy * 0.05f, top + hh * 0.08f * hv, hw * 0.1f * hv, dy * 0.75f, hh * 0.16f * hv, hw * 0.08f * hv), HAIR, 0.04f)
@@ -727,14 +750,15 @@ object MaskSculptor {
 
         fun surface(m: Int, x: Float, y: Float, z: Float, ny: Float, cav: Float): Int {
             val wood = Pigments.argb(s.wood)
-            val grain = 1f + grainK * (-0.1f + 0.1f * sin(x * 140f + 7f * noise(x * 3f, z * 1.2f, y * 3f)) + 0.05f * (noise(x * 40f, z * 4f, y * 40f) - 0.5f))
+            // Grain runs down the block, wandering, never ruled.
+            val grain = 1f + grainK * (0.045f * sin(x * 70f + 11f * noise(x * 2.5f, z * 0.7f, y * 2.5f)) + 0.06f * (noise(x * 30f, z * 2.5f, y * 30f) - 0.5f))
             return when {
                 m == EYE -> 0xFF1A0806.toInt()
                 m == MOUTH -> 0xFF160A08.toInt()
                 m == TEETH -> 0xFFEDE4D2.toInt()
                 m == COWRIE -> 0xFFF3EAD6.toInt()
                 m == STUD -> if (s.finish == Finish.BRASS) 0xFFE8C070.toInt() else Pigments.argb(Pigments.BRASS)
-                m == HAIR -> scale(mix(Pigments.argb(s.hair), wood, 0.12f), 0.9f + 0.1f * sin(z * 260f + x * 30f))
+                m == HAIR -> mix(Pigments.argb(s.hair), wood, 0.12f)
                 m in TIER until TIER + 4 -> {
                     val band = listOf(s.accent, s.accent2, Pigments.JADE, Pigments.OCHRE)[(m - TIER) % 4]
                     val c = Pigments.argb(band)
@@ -754,7 +778,8 @@ object MaskSculptor {
         fun faceColour(m: Int, x: Float, y: Float, z: Float, ny: Float, cav: Float, grain: Float): Int {
             val wood = Pigments.argb(s.wood)
             // Handling wears the high points and edges back toward the bare wood.
-            val wear = noise(x * 8f + 3f, z * 8f, y * 8f) + 0.15f * noise(x * 40f, z * 40f, y * 40f)
+            // Small chips, not blotches: paint knocked off in flakes.
+            val wear = noise(x * 20f + 3f, z * 20f, y * 20f) + 0.2f * noise(x * 70f, z * 70f, y * 70f) - 0.1f
             var c = when (s.finish) {
                 Finish.KAOLIN -> {
                     if (wear > wearAt) scale(wood, grain) else mix(Pigments.argb(Pigments.KAOLIN), wood, 0.08f + 0.1f * (1f - cav))
@@ -818,6 +843,31 @@ object MaskSculptor {
     }
 
     // ---- shared helpers ------------------------------------------------------------------
+
+    /** A sharp triangle wave, 0 at whole numbers and 1 halfway: V-cut grooves and ridges. */
+    internal fun vee(t: Float): Float = abs(2f * (t - floor(t + 0.5f)))
+
+    /**
+     * An adze's scoops over the head: 1 at the heart of each shallow scoop,
+     * falling to 0 at the sharp ridge where it meets the next. Scoops sit on a
+     * jittered grid wrapped round the head, about [ADZE] across.
+     */
+    internal fun scoop(x: Float, y: Float, z: Float): Float {
+        // Strokes run with the grain, down the block: longer than they are wide.
+        val u = atan2(x, y) * 0.3f / ADZE; val v = z / (ADZE * 1.8f)
+        val iu = floor(u).toInt(); val iv = floor(v).toInt()
+        var best = 9f
+        for (a in -1..1) for (b in -1..1) {
+            val cu = iu + a + 0.5f + 0.7f * (hash(iu + a, iv + b, 7) - 0.5f)
+            val cv = iv + b + 0.5f + 0.7f * (hash(iu + a, iv + b, 13) - 0.5f)
+            val d = (u - cu) * (u - cu) + (v - cv) * (v - cv)
+            if (d < best) best = d
+        }
+        // Nearly flat across the middle, turning up only near the ridge: a blade's stroke, not a hammer's dent.
+        return (1f - (best / 0.5f).pow(2f)).coerceIn(0f, 1f)
+    }
+
+    private const val ADZE = 0.045f
 
     private val STRAW = intArrayOf(0xFFD9B26A.toInt(), 0xFFB8894A.toInt(), 0xFF8C5A2B.toInt(), 0xFFE2C686.toInt())
 

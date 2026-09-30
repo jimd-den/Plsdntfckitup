@@ -55,6 +55,7 @@ object MaskSpiritPreview {
         if (only == "sculpt") sculptedMasks(out)
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
         if (only == "carver") carver(out)
+        if (only == "wood") wood(out)
     }
 
     private fun turntables(out: File) {
@@ -224,6 +225,33 @@ object MaskSpiritPreview {
             decals = MeshBuilder(MaterialKind.DECAL).build(recycler), glows = glows.build(recycler),
         )
         return SceneRasterizer(width, height, TextureLibrary(), supersample = 3, shadowSize = 2048).render(frame)
+    }
+
+    /** Close portraits of the traditions, to judge the carving itself: in play's detail and the finest. */
+    private fun wood(out: File) {
+        val cu = com.stratum.engine.model.mask.sculpt.MaskCulture
+        val sculptor = com.stratum.engine.model.mask.sculpt.MaskSculptor
+        for ((name, detail) in listOf("game" to com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME, "high" to com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.HIGH)) {
+            val cards = listOf("agbogho_mmuo", "mgbedike", "okoroshi", "ikenga", "punu", "dan", "songye", "chokwe").map { id ->
+                val t = cu.tradition(id)
+                val t0 = System.nanoTime()
+                val mesh = sculptor.carve(cu.generate(t, 1L), detail)
+                println("  ${t.name} ($name): ${mesh.triangleCount} triangles in ${(System.nanoTime() - t0) / 1_000_000} ms")
+                val px = com.stratum.engine.model.mask.sculpt.MaskPortrait.render(mesh, 330, 400, yaw = 0.45f)
+                val img = BufferedImage(330, 400, BufferedImage.TYPE_INT_RGB).also { it.setRGB(0, 0, 330, 400, px, 0, 330) }
+                labelled(img, t.name)
+            }
+            ImageIO.write(sheet(cards, 4), "png", File(out, "wood-$name.png"))
+        }
+        // Close-ups at the finest detail, turned to catch the light across the cuts.
+        val close = listOf("okoroshi" to 0.5f, "chokwe" to -0.6f).mapNotNull { (id, yaw) ->
+            cu.traditions.firstOrNull { it.id == id || it.name.lowercase().replace(' ', '_') == id }?.let { t ->
+                val mesh = sculptor.carve(cu.generate(t, 1L), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.SHOWCASE)
+                val px = com.stratum.engine.model.mask.sculpt.MaskPortrait.render(mesh, 640, 760, yaw = yaw, pitch = 0.1f)
+                labelled(BufferedImage(640, 760, BufferedImage.TYPE_INT_RGB).also { it.setRGB(0, 0, 640, 760, px, 0, 640) }, "${t.name}, close")
+            }
+        }
+        if (close.isNotEmpty()) ImageIO.write(sheet(close, close.size), "png", File(out, "wood-close.png"))
     }
 
     /** Every dial of the carver at both ends, and a wall of random designs. */

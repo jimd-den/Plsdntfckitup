@@ -76,7 +76,7 @@ object Anatomy {
         HAIRLINE("Hairline", Part.HAIR), HAIR_VOLUME("Volume", Part.HAIR), HAIR_TEXTURE("Rows", Part.HAIR),
         HORN_CURL("Curl", Part.HORNS), HORN_SPREAD("Spread", Part.HORNS), HORN_GIRTH("Girth", Part.HORNS), HORN_RIDGES("Ridges", Part.HORNS),
         RAFFIA_LENGTH("Length", Part.RAFFIA),
-        WEAR("Wear", Part.SURFACE), GRAIN("Grain", Part.SURFACE), PATINA("Patina", Part.SURFACE),
+        WEAR("Wear", Part.SURFACE), GRAIN("Grain", Part.SURFACE), PATINA("Patina", Part.SURFACE), TOOL_MARKS("Adze marks", Part.SURFACE),
     }
 }
 

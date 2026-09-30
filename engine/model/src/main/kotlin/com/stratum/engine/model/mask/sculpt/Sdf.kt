@@ -14,6 +14,8 @@ import kotlin.math.sqrt
  * to evaluate it: a sculpture of a hundred parts costs about what the few
  * parts near each point cost.
  */
+internal const val SQRT_HALF = 0.70710677f
+
 abstract class Shape {
     /** Bounds, in model units. */
     var x0 = 0f; var y0 = 0f; var z0 = 0f; var x1 = 0f; var y1 = 0f; var z1 = 0f
@@ -150,6 +152,137 @@ class Torus(val cx: Float, val cy: Float, val cz: Float, val major: Float, val m
     }
 }
 
+/**
+ * A carver's wedge: a bar from a to b whose cross-section is a diamond, [ra]
+ * across at a narrowing (or widening) to [rb] at b, turned so one corner faces
+ * [up], its width [aspect] times its height. Added, it stands as a
+ * knife-edged ridge -- a brow, a nose's bridge; cut, it is a V-shaped incision.
+ */
+class Wedge(
+    val ax: Float, val ay: Float, val az: Float, val bx: Float, val by: Float, val bz: Float, val ra: Float, val rb: Float,
+    upX: Float = 0f, upY: Float = 1f, upZ: Float = 0f, val aspect: Float = 1f,
+) : Shape() {
+    private val norm = 1f / sqrt(1f + 1f / (aspect * aspect))
+    private val len: Float
+    private val tx: Float; private val ty: Float; private val tz: Float
+    private val ux: Float; private val uy: Float; private val uz: Float
+    private val vx: Float; private val vy: Float; private val vz: Float
+
+    init {
+        var dx = bx - ax; var dy = by - ay; var dz = bz - az
+        len = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(1e-6f)
+        dx /= len; dy /= len; dz /= len
+        tx = dx; ty = dy; tz = dz
+        // The corner that faces out, square to the bar.
+        val k = upX * tx + upY * ty + upZ * tz
+        var px = upX - k * tx; var py = upY - k * ty; var pz = upZ - k * tz
+        var pl = sqrt(px * px + py * py + pz * pz)
+        if (pl < 1e-5f) { px = 0f; py = 0f; pz = 1f; pl = 1f }
+        ux = px / pl; uy = py / pl; uz = pz / pl
+        vx = ty * uz - tz * uy; vy = tz * ux - tx * uz; vz = tx * uy - ty * ux
+        val r = max(ra, rb) * max(1f, aspect)
+        x0 = min(ax, bx) - r; x1 = max(ax, bx) + r; y0 = min(ay, by) - r; y1 = max(ay, by) + r; z0 = min(az, bz) - r; z1 = max(az, bz) + r
+    }
+
+    override fun d(x: Float, y: Float, z: Float): Float {
+        val px = x - ax; val py = y - ay; val pz = z - az
+        val along = px * tx + py * ty + pz * tz
+        val t = (along / len).coerceIn(0f, 1f)
+        val r = ra + (rb - ra) * t
+        val u = abs(px * ux + py * uy + pz * uz); val v = abs(px * vx + py * vy + pz * vz)
+        val side = (u + v / aspect - r) * norm
+        val ends = max(-along, along - len)
+        return max(side, ends)
+    }
+}
+
+/**
+ * A [Wedge] swept along a polyline ([points], x y z triples), [radii] at each
+ * point, its joints mitred so the knife edge runs unbroken round every turn:
+ * a brow ridge, a heart line, an incised mark.
+ */
+class Ridge(private val points: FloatArray, private val radii: FloatArray, val aspect: Float = 1f, upX: Float = 0f, upY: Float = 1f, upZ: Float = 0f) : Shape() {
+    private val n = points.size / 3
+    private val segs = n - 1
+    private val norm = 1f / sqrt(1f + 1f / (aspect * aspect))
+    // Per segment: unit tangent, length, the out and side axes; per joint: the mitre plane's normal.
+    private val t = FloatArray(segs * 3); private val len = FloatArray(segs)
+    private val u = FloatArray(segs * 3); private val v = FloatArray(segs * 3)
+    private val m = FloatArray(n * 3)
+
+    init {
+        require(n >= 2)
+        for (i in 0 until segs) {
+            var dx = points[i * 3 + 3] - points[i * 3]; var dy = points[i * 3 + 4] - points[i * 3 + 1]; var dz = points[i * 3 + 5] - points[i * 3 + 2]
+            val l = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(1e-6f)
+            dx /= l; dy /= l; dz /= l
+            t[i * 3] = dx; t[i * 3 + 1] = dy; t[i * 3 + 2] = dz; len[i] = l
+            val k = upX * dx + upY * dy + upZ * dz
+            var px = upX - k * dx; var py = upY - k * dy; var pz = upZ - k * dz
+            var pl = sqrt(px * px + py * py + pz * pz)
+            if (pl < 1e-5f) { px = 0f; py = 0f; pz = 1f; pl = 1f }
+            px /= pl; py /= pl; pz /= pl
+            u[i * 3] = px; u[i * 3 + 1] = py; u[i * 3 + 2] = pz
+            v[i * 3] = dy * pz - dz * py; v[i * 3 + 1] = dz * px - dx * pz; v[i * 3 + 2] = dx * py - dy * px
+        }
+        for (j in 0 until n) {
+            val a = (j - 1).coerceAtLeast(0); val b = j.coerceAtMost(segs - 1)
+            var mx = t[a * 3] + t[b * 3]; var my = t[a * 3 + 1] + t[b * 3 + 1]; var mz = t[a * 3 + 2] + t[b * 3 + 2]
+            val l = sqrt(mx * mx + my * my + mz * mz).coerceAtLeast(1e-6f)
+            mx /= l; my /= l; mz /= l
+            m[j * 3] = mx; m[j * 3 + 1] = my; m[j * 3 + 2] = mz
+        }
+        val r = (radii.maxOrNull() ?: 0f) * max(1f, aspect)
+        x0 = Float.MAX_VALUE; y0 = Float.MAX_VALUE; z0 = Float.MAX_VALUE; x1 = -Float.MAX_VALUE; y1 = -Float.MAX_VALUE; z1 = -Float.MAX_VALUE
+        for (j in 0 until n) {
+            x0 = min(x0, points[j * 3] - r); x1 = max(x1, points[j * 3] + r)
+            y0 = min(y0, points[j * 3 + 1] - r); y1 = max(y1, points[j * 3 + 1] + r)
+            z0 = min(z0, points[j * 3 + 2] - r); z1 = max(z1, points[j * 3 + 2] + r)
+        }
+    }
+
+    override fun d(x: Float, y: Float, z: Float): Float {
+        // The segment whose mitred slab holds the point measures it, so neighbours meet without a seam;
+        // outside every slab (past an end, or round the outside of a turn), the nearest capped segment does.
+        var inSlab = Float.MAX_VALUE; var capped = Float.MAX_VALUE
+        for (i in 0 until segs) {
+            val ax = points[i * 3]; val ay = points[i * 3 + 1]; val az = points[i * 3 + 2]
+            val px = x - ax; val py = y - ay; val pz = z - az
+            val along = px * t[i * 3] + py * t[i * 3 + 1] + pz * t[i * 3 + 2]
+            val f = (along / len[i]).coerceIn(0f, 1f)
+            val r = radii[i] + (radii[i + 1] - radii[i]) * f
+            val uu = abs(px * u[i * 3] + py * u[i * 3 + 1] + pz * u[i * 3 + 2])
+            val vv = abs(px * v[i * 3] + py * v[i * 3 + 1] + pz * v[i * 3 + 2])
+            val side = (uu + vv / aspect - r) * norm
+            val c0 = -(px * m[i * 3] + py * m[i * 3 + 1] + pz * m[i * 3 + 2])
+            val bx = x - points[i * 3 + 3]; val by = y - points[i * 3 + 4]; val bz = z - points[i * 3 + 5]
+            val c1 = bx * m[(i + 1) * 3] + by * m[(i + 1) * 3 + 1] + bz * m[(i + 1) * 3 + 2]
+            if (c0 <= 0f && c1 <= 0f) { if (side < inSlab) inSlab = side }
+            else { val d = max(side, max(if (i == 0) c0 else c0 * 0.5f, if (i == segs - 1) c1 else c1 * 0.5f)); if (d < capped) capped = d }
+        }
+        return min(inSlab, capped)
+    }
+}
+
+/**
+ * A carved boss: domed [bulge] high over an oval [rx] by [rz] facing +y, its
+ * rim cut sharp, turned by [roll] in the face's plane. Lids, lips, keloids and
+ * cheek pads, as a carver leaves them.
+ */
+class Cap(val cx: Float, val cy: Float, val cz: Float, val rx: Float, val rz: Float, val bulge: Float, roll: Float = 0f, val depth: Float = 0.03f) : Shape() {
+    private val cr = kotlin.math.cos(roll); private val sr = kotlin.math.sin(roll)
+    init { val r = max(rx, rz); bound(cx, cy + (bulge - depth) / 2f, cz, r, (bulge + depth) / 2f + 0.002f, r) }
+    override fun d(x: Float, y: Float, z: Float): Float {
+        val ux = x - cx; val uz = z - cz
+        val qx = (ux * cr + uz * sr) / rx; val qz = (uz * cr - ux * sr) / rz
+        val q2 = qx * qx + qz * qz
+        val top = (y - cy) - bulge * (1f - q2)
+        val rim = (sqrt(q2) - 1f) * min(rx, rz)
+        val bottom = (cy - depth) - y
+        return max(max(top * 0.8f, rim), bottom)
+    }
+}
+
 /** A shape with a field added to its distance, within [amplitude]: grooves, striations, a bark of carving. */
 class Displaced(val base: Shape, val amplitude: Float, val field: (Float, Float, Float) -> Float) : Shape() {
     init { x0 = base.x0 - amplitude; x1 = base.x1 + amplitude; y0 = base.y0 - amplitude; y1 = base.y1 + amplitude; z0 = base.z0 - amplitude; z1 = base.z1 + amplitude }
@@ -192,6 +325,9 @@ class Sculpture {
 
     fun d(x: Float, y: Float, z: Float): Float = eval(x, y, z, null)
 
+    // Joins are chamfered, not melted: where two forms meet, a flat 45-degree
+    // facet as a chisel leaves it, [Part.blend] wide, instead of a clay fillet.
+
     /** The distance at a point; with [material], also which part's surface is nearest there. */
     fun eval(x: Float, y: Float, z: Float, material: IntArray?): Float {
         var d = FAR
@@ -202,32 +338,20 @@ class Sculpture {
                 Op.ADD -> {
                     if (s.boxDistance(x, y, z) - p.blend > d) continue
                     val e = s.d(x, y, z)
-                    if (p.blend > 0f) {
-                        // Smooth minimum: the new form grows out of what is there.
-                        val h = (0.5f + 0.5f * (d - e) / p.blend).coerceIn(0f, 1f)
-                        val nd = d + (e - d) * h - p.blend * h * (1f - h)
-                        if (h > 0.5f) mat = p.material
-                        d = nd
-                    } else if (e < d) { d = e; mat = p.material }
+                    if (e < d) mat = p.material
+                    d = if (p.blend > 0f) min(min(d, e), (d + e - p.blend * CHAMFER) * SQRT_HALF) else min(d, e)
                 }
                 Op.CUT -> {
                     if (s.boxDistance(x, y, z) - p.blend > -d) continue
                     val e = -s.d(x, y, z)
-                    if (p.blend > 0f) {
-                        // Smooth subtraction: a cut with softened lips.
-                        val h = (0.5f - 0.5f * (d - e) / p.blend).coerceIn(0f, 1f)
-                        val nd = d + (e - d) * h + p.blend * h * (1f - h)
-                        if (h > 0.5f) mat = p.material
-                        d = nd
-                    } else if (e > d) { d = e; mat = p.material }
+                    // A cut: its lip bevelled as a knife takes it.
+                    if (e > d) mat = p.material
+                    d = if (p.blend > 0f) max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF) else max(d, e)
                 }
                 Op.INTERSECT -> {
                     val e = s.d(x, y, z)
-                    if (p.blend > 0f) {
-                        val h = (0.5f - 0.5f * (d - e) / p.blend).coerceIn(0f, 1f)
-                        d = d + (e - d) * h + p.blend * h * (1f - h)
-                        if (h > 0.5f && p.material >= 0) mat = p.material
-                    } else if (e > d) { d = e; if (p.material >= 0) mat = p.material }
+                    if (e > d && p.material >= 0) mat = p.material
+                    d = if (p.blend > 0f) max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF) else max(d, e)
                 }
             }
         }
@@ -235,5 +359,9 @@ class Sculpture {
         return d
     }
 
-    companion object { const val FAR = 1e3f }
+    companion object {
+        const val FAR = 1e3f
+        /** How much of a part's blend width its chamfer takes. */
+        const val CHAMFER = 0.6f
+    }
 }
