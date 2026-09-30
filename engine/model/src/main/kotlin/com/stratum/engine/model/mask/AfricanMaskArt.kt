@@ -100,6 +100,7 @@ object AfricanMaskArt {
         Pigment("Camwood", c(0x8E2C2F)), Pigment("Vermilion", c(0xB3322B)), Pigment("Terracotta", c(0xB85A36)), Pigment("Umber", c(0x5A3A26)),
         Pigment("Charcoal", c(0x24211F)), Pigment("Lampblack", c(0x1C1212)), Pigment("Indigo", c(0x263B6E)), Pigment("Lapis", c(0x2F3A6B)),
         Pigment("Jade", c(0x3E7F6E)), Pigment("Malachite", c(0x2A5A4A)), Pigment("Brass", c(0xC8943C)), Pigment("Coral", c(0xE0705A)),
+        Pigment("Iroko", c(0x8A5A34)), Pigment("Blackwood", c(0x2B1D16)), Pigment("Mahogany", c(0x6B2E1E)),
     )
 
     /** The five colour slots, in the order [Design.pigments] holds them. */

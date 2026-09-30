@@ -159,11 +159,11 @@ object MaskSpiritPreview {
             if (label.isNotEmpty()) println("  $label drawn in ${"%.0f".format(ms)} ms")
             val img = BufferedImage(size, size + 30, BufferedImage.TYPE_INT_ARGB)
             val g = img.createGraphics()
-            g.color = Color(0xFA, 0xF7, 0xF1); g.fillRect(0, 0, size, size + 30)
+            g.paint = java.awt.GradientPaint(0f, 0f, Color(0x3A, 0x30, 0x2C), 0f, size + 30f, Color(0x16, 0x12, 0x10)); g.fillRect(0, 0, size, size + 30)
             val art = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { it.setRGB(0, 0, size, size, px, 0, size) }
             g.drawImage(art, 0, 0, null)
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-            g.color = Color(0x3A, 0x30, 0x2C); g.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
+            g.color = Color(0xE8, 0xDC, 0xC8); g.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
             g.drawString(label, (size - g.fontMetrics.stringWidth(label)) / 2, size + 20)
             g.dispose()
             return img
