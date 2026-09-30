@@ -1,5 +1,0 @@
-Placement bench (before): 100 edits (50 placed, then 50 undone), one every 4 frames at 30 fps, MEDIUM tier, 4 cores
-  frames around edits: worst 21.4 ms, p95 9.4 ms, mean 2.19 ms (400 frames)
-  quiet frames:        worst 1.4 ms, p95 0.5 ms, mean 0.22 ms
-  chunks block-meshed on the frame: 900
-  detail pops (a detailed chunk drawn as blocks again): 54 over 30 frames
