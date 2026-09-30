@@ -87,6 +87,13 @@ object MicroScenePreview {
             if ("bench" in rest) File(out, "micro-benchmark.txt").writeText(benchmark(content, config, generator, director, textures, homeVantage(generator)).also(::println))
             return
         }
+        // `splats [bench] [shots...]`: the land drawn as voxel splats against the greedy mesh, and what each costs.
+        if (args.getOrNull(3) == "splats") {
+            val rest = args.drop(4)
+            splatShots(out, content, config, generator, director, textures, rest.filter { it != "bench" })
+            if ("bench" in rest) File(out, "splat-benchmark.txt").writeText(splatBenchmark(content, config, generator, director, textures, homeVantage(generator)).also(::println))
+            return
+        }
         // `geology [province ids...]`: the wild land of each province, seen from a hillside away from towns.
         if (args.getOrNull(3) == "geology") {
             geology(out, content, config, hot, director, textures, args.drop(4))
@@ -396,6 +403,154 @@ object MicroScenePreview {
             // A crop at twice the size from the middle, where the surfels and bevels live.
             ImageIO.write(sideBySide(zoom(images.getValue("before")), zoom(images.getValue("ultra")), "Before (2x crop)", "After (2x crop)"), "png", File(out, "diorama-${shot.name}-closeup.png"))
         }
+    }
+
+    /**
+     * The same shots drawn three ways: the greedy mesh, [SplatMode.FAST]
+     * splats and [SplatMode.EXACT] splats, at HIGH; and LOW's mesh against
+     * LOW with fast splats, the phone the splats are for. Each shot also
+     * leaves what the GPU harness (`tools/splatgl`) needs to draw the same
+     * splats through the game's own GLSL.
+     */
+    private fun splatShots(
+        out: File, content: AssembledContent, config: WorldConfig, gen: MicrovoxelTerrainGenerator,
+        director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String> = emptyList(),
+    ) {
+        val home = homeVantage(gen)
+        val building = (gen as? com.stratum.core.domain.settlement.SettlementAtlas)?.settlementsNear(0, 0, 0)?.firstOrNull()
+            ?.buildings?.minByOrNull { kotlin.math.abs(it.x + it.width / 2 - home.first) + kotlin.math.abs(it.y + it.depth / 2 - home.second) }
+            ?.let { (it.x + it.width / 2) to (it.y + it.depth / 2) } ?: home
+        val noon = WorldTime(dayFraction = 0.40f, elapsedSeconds = 7f)
+        val night = WorldTime(dayFraction = 0.02f, elapsedSeconds = 7f)
+        data class Shot(val name: String, val at: Pair<Int, Int>, val distance: Float, val time: WorldTime, val actors: Boolean = true)
+        val shots = listOf(
+            Shot("home", home, 34f, noon),
+            Shot("wilds", wildVantage(gen), 34f, noon),
+            Shot("building", building, 12f, noon, actors = false),
+            Shot("night", glowNear(gen, home), 26f, night),
+        )
+        val mode = com.stratum.engine.scene.SplatMode.MESH
+        fun tier(t: QualityTier, m: com.stratum.engine.scene.SplatMode) = RenderSettings.of(t).copy(splats = m)
+        val looks = listOf(
+            "high-mesh" to tier(QualityTier.HIGH, mode),
+            "high-exact" to tier(QualityTier.HIGH, com.stratum.engine.scene.SplatMode.EXACT),
+            "medium-mesh" to tier(QualityTier.MEDIUM, mode),
+            "medium-fast" to tier(QualityTier.MEDIUM, com.stratum.engine.scene.SplatMode.FAST),
+            "medium-exact" to tier(QualityTier.MEDIUM, com.stratum.engine.scene.SplatMode.EXACT),
+            "low-mesh" to tier(QualityTier.LOW, mode),
+            "low-fast" to tier(QualityTier.LOW, com.stratum.engine.scene.SplatMode.FAST),
+        )
+        for (shot in shots.filter { only.isEmpty() || it.name in only }) {
+            val images = LinkedHashMap<String, BufferedImage>()
+            for ((lookName, settings) in looks) {
+                val world = StreamingWorld(content.registry, gen, config)
+                world.focusOn(BlockPos(shot.at.first, shot.at.second, 0))
+                val ground = world.surfaceAt(shot.at.first, shot.at.second)
+                val camera = SceneCamera(target = Vec3(shot.at.first + 0.5f, shot.at.second + 0.5f, ground + 1f), aspect = WIDTH.toFloat() / HEIGHT, distance = shot.distance)
+                val actors = if (shot.actors) actorsAround(world, shot.at.first, shot.at.second) else emptyList()
+                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> gen.biomeAt(x, y) }, settings = settings, microTerrain = gen)
+                val frame = settled(builder) { builder.build(world, camera, actors, shot.time) }
+                val t = System.nanoTime()
+                val img = SceneRasterizer(WIDTH, HEIGHT, textures).render(frame)
+                val ms = (System.nanoTime() - t) / 1e6
+                images[lookName] = img
+                ImageIO.write(img, "png", File(out, "splats-${shot.name}-$lookName.png"))
+                val splats = frame.splats.sumOf { it.count.toLong() }
+                val tris = frame.terrain.sumOf { it.triangleCount.toLong() }
+                println("wrote splats-${shot.name}-$lookName.png ($splats splats, $tris terrain triangles, rasterised in ${"%.0f".format(ms)} ms)")
+                if (lookName == "medium-fast") SplatGpuDump.write(File(out, "gpu/${shot.name}"), frame, WIDTH, HEIGHT)
+            }
+            ImageIO.write(sideBySide(images.getValue("high-mesh"), images.getValue("high-exact"), "HIGH: greedy mesh", "HIGH: exact voxel splats"), "png", File(out, "splats-${shot.name}-high.png"))
+            ImageIO.write(sideBySide(images.getValue("medium-mesh"), images.getValue("medium-fast"), "MEDIUM: greedy mesh", "MEDIUM: fast voxel splats"), "png", File(out, "splats-${shot.name}-medium.png"))
+            ImageIO.write(sideBySide(images.getValue("low-mesh"), images.getValue("low-fast"), "LOW: greedy mesh", "LOW: fast voxel splats"), "png", File(out, "splats-${shot.name}-low.png"))
+            ImageIO.write(sideBySide(zoom(images.getValue("medium-fast")), zoom(images.getValue("medium-exact")), "Fast splats (2x crop)", "Exact splats (2x crop)"), "png", File(out, "splats-${shot.name}-fast-vs-exact.png"))
+            ImageIO.write(sideBySide(zoom(images.getValue("high-mesh")), zoom(images.getValue("high-exact")), "Mesh (2x crop)", "Exact splats (2x crop)"), "png", File(out, "splats-${shot.name}-closeup.png"))
+        }
+    }
+
+    /**
+     * Greedy mesh against splats, where each is paid for: building a chunk,
+     * remaking one layer after an edit, what it holds on the GPU, and how
+     * many vertices the GPU runs through its vertex shader per frame.
+     */
+    private fun splatBenchmark(
+        content: AssembledContent, config: WorldConfig, generator: MicrovoxelTerrainGenerator,
+        director: StyleSheetArtDirector, textures: TextureLibrary, start: Pair<Int, Int>,
+    ): String {
+        val sb = StringBuilder()
+        sb.appendLine("Voxel splats against the greedy mesh (seed ${config.seed}, this JVM, ${Runtime.getRuntime().availableProcessors()} cores)")
+        sb.appendLine()
+        val world = StreamingWorld(content.registry, generator, config)
+        world.focusOn(BlockPos(start.first, start.second, 0))
+        val chunks = world.loadedChunks.map { it.pos }.take(16)
+        val mesher = com.stratum.engine.scene.MicroDetailMesher(generator)
+        val splatter = com.stratum.engine.scene.MicroDetailMesher(generator, splatMode = com.stratum.engine.scene.SplatMode.FAST)
+        fun time(m: com.stratum.engine.scene.MicroDetailMesher, lod: Int): Double {
+            repeat(2) { chunks.forEach { m.mesh(world, it, lod) } }
+            val t = System.nanoTime()
+            repeat(3) { chunks.forEach { m.mesh(world, it, lod) } }
+            return (System.nanoTime() - t) / 1e6 / (3 * chunks.size)
+        }
+        fun meshBytes(r: com.stratum.engine.scene.TerrainMesher.Result?) = r?.mesh?.let { it.vertexFloats.toLong() * 4 + it.indexCount.toLong() * 4 } ?: 0L
+        sb.appendLine("Per 16x16x48 chunk (average of ${chunks.size} around the home town)")
+        sb.appendLine("detail       build: mesh   splats    GPU bytes: mesh   splats    vertices run: mesh   splats   primitives: triangles   points")
+        for (lod in listOf(1, 2)) {
+            val m = chunks.map { mesher.mesh(world, it, lod) }
+            val s = chunks.map { splatter.mesh(world, it, lod) }
+            val mb = m.sumOf(::meshBytes) / chunks.size
+            // Splat chunks still carry their water as a small mesh.
+            val sbytes = s.sumOf { (it?.splats?.bytes?.toLong() ?: 0L) + meshBytes(it) } / chunks.size
+            val mv = m.sumOf { it?.mesh?.vertexCount?.toLong() ?: 0L } / chunks.size
+            val sp = s.sumOf { it?.splats?.count?.toLong() ?: 0L } / chunks.size
+            val tris = m.sumOf { it?.mesh?.triangleCount?.toLong() ?: 0L } / chunks.size
+            sb.appendLine("%-10s %9.1f ms %6.1f ms %13.0f KB %6.0f KB %15s %9s %16s %9s".format(
+                if (lod == 1) "full" else "half-block", time(mesher, lod), time(splatter, lod), mb / 1024.0, sbytes / 1024.0,
+                "%,d".format(mv), "%,d".format(sp), "%,d".format(tris), "%,d".format(sp),
+            ))
+        }
+        sb.appendLine()
+        // An edit: one layer of one chunk remade, as the edit worker does after a block is placed.
+        val layers = mesher.layers
+        fun editMs(m: com.stratum.engine.scene.MicroDetailMesher): Double {
+            val snaps = chunks.map { com.stratum.engine.scene.BlockSnapshot.of(world, it) }
+            val prev = chunks.indices.map { m.meshLayers(snaps[it], chunks[it], 1)!! }
+            val only = BooleanArray(layers).also { it[1] = true }
+            repeat(3) { chunks.indices.forEach { i -> m.meshLayers(snaps[i], chunks[i], 1, only, prev[i]) } }
+            val t = System.nanoTime()
+            repeat(5) { chunks.indices.forEach { i -> m.meshLayers(snaps[i], chunks[i], 1, only, prev[i]) } }
+            return (System.nanoTime() - t) / 1e6 / (5 * chunks.size)
+        }
+        sb.appendLine("One edit (a chunk layer remade at full detail): mesh %.2f ms, splats %.2f ms".format(editMs(mesher), editMs(splatter)))
+        sb.appendLine()
+        sb.appendLine("Whole view, per tier, settled (every chunk in detail)")
+        sb.appendLine("tier    splat  GPU bytes: mesh   splats    vertices run: mesh   splats   frame build: mesh   splats")
+        for (tier in QualityTier.values()) {
+            val base = RenderSettings.of(tier)
+            fun measure(mode: com.stratum.engine.scene.SplatMode): Triple<Long, Long, Double> {
+                val w = StreamingWorld(content.registry, generator, config)
+                w.focusOn(BlockPos(start.first, start.second, 0))
+                val builder = SceneBuilder(director, textures, biomeAt = { x, y -> generator.biomeAt(x, y) }, settings = base.copy(splats = mode), microTerrain = generator)
+                val cam = SceneCamera(target = Vec3(start.first + 0.5f, start.second + 0.5f, w.surfaceAt(start.first, start.second) + 1f), aspect = 16f / 9f)
+                val f = settled(builder) { builder.build(w, cam, emptyList(), WorldTime(dayFraction = 0.4f)) }
+                val bytes = f.residentTerrain.sumOf { it.vertexFloats.toLong() * 4 + it.indexCount.toLong() * 4 } + f.residentSplats.sumOf { it.bytes.toLong() }
+                val verts = f.terrain.sumOf { it.vertexCount.toLong() } + f.splats.sumOf { it.count.toLong() }
+                repeat(10) { builder.build(w, cam, emptyList(), WorldTime(dayFraction = 0.4f)).release() }
+                val t = System.nanoTime()
+                repeat(30) { builder.build(w, cam, emptyList(), WorldTime(dayFraction = 0.4f)).release() }
+                return Triple(bytes, verts, (System.nanoTime() - t) / 1e6 / 30)
+            }
+            val m = measure(com.stratum.engine.scene.SplatMode.MESH)
+            val s = measure(base.splats)
+            sb.appendLine("%-7s %-5s %12.1f MB %6.1f MB %16s %11s %13.2f ms %6.2f ms".format(
+                tier.name, base.splatDraw.name.lowercase(), m.first / 1e6, s.first / 1e6, "%,d".format(m.second), "%,d".format(s.second), m.third, s.third,
+            ))
+        }
+        sb.appendLine()
+        sb.appendLine("GPU bytes = vertex and index buffers held for the terrain (mesh: ${com.stratum.engine.scene.Vertex.STRIDE} floats a vertex + 4-byte indices; splats: 8 bytes a voxel).")
+        sb.appendLine("vertices run = vertex shader invocations per frame for the terrain in view; a splat is one, lit there once for its three faces.")
+        sb.appendLine("Splat chunks keep water as a small mesh; blocks beyond the detail rings are meshed either way.")
+        sb.appendLine("Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.")
+        return sb.toString()
     }
 
     /**

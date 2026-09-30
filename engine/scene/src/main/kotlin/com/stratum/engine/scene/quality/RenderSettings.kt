@@ -56,6 +56,11 @@ data class RenderSettings(
      * [DioramaLook]. [DioramaLook.OFF] draws exactly what the game drew before.
      */
     val diorama: DioramaLook = DioramaLook.OFF,
+    /**
+     * How the microvoxel detail is drawn: greedy-meshed quads, or one point
+     * sprite per surface voxel. See [com.stratum.engine.scene.SplatMode].
+     */
+    val splats: com.stratum.engine.scene.SplatMode = com.stratum.engine.scene.SplatMode.MESH,
 ) {
     init {
         require(renderScale in minRenderScale..1f) { "renderScale $renderScale is outside $minRenderScale..1" }
@@ -67,6 +72,15 @@ data class RenderSettings(
     }
 
     val shadows: Boolean get() = shadowMapSize > 0
+
+    /**
+     * How splats are really drawn: [splats], except that fast splats become
+     * exact under a finish that reads depth. A fast splat's depth is one
+     * value for the whole voxel, so the finish's edge ink found a crease
+     * at every voxel seam and drew a grid over the land.
+     */
+    val splatDraw: com.stratum.engine.scene.SplatMode
+        get() = if (splats == com.stratum.engine.scene.SplatMode.FAST && diorama.readsDepth) com.stratum.engine.scene.SplatMode.EXACT else splats
 
     /** Milliseconds one frame may take at [targetFps]. */
     val frameBudgetMillis: Float get() = 1000f / targetFps
@@ -93,26 +107,26 @@ data class RenderSettings(
                 tier, renderScale = 0.6f, minRenderScale = 0.45f, shadowMapSize = 0, shadowTaps = 1, highRange = false,
                 maxPointLights = 2, viewRadius = 32, streamingRadius = 2, textureBudgetBytes = 24L * MB, maxTextureSize = 128,
                 groundLitter = false, atmosphereMotes = false, targetFps = 30, microDetailRadius = 8, microFarRadius = 32,
-                diorama = DioramaLook.of(tier),
+                diorama = DioramaLook.of(tier), splats = com.stratum.engine.scene.SplatMode.FAST,
             )
             QualityTier.MEDIUM -> RenderSettings(
                 tier, renderScale = 0.8f, minRenderScale = 0.55f, shadowMapSize = 1024, shadowTaps = 1, highRange = true,
                 maxPointLights = 4, viewRadius = 44, streamingRadius = 3, textureBudgetBytes = 48L * MB, maxTextureSize = 256,
                 groundLitter = true, atmosphereMotes = false, targetFps = 30, microDetailRadius = 20, microFarRadius = 44,
-                diorama = DioramaLook.of(tier),
+                diorama = DioramaLook.of(tier), splats = com.stratum.engine.scene.SplatMode.FAST,
             )
             // What the game drew before tiers existed.
             QualityTier.HIGH -> RenderSettings(
                 tier, renderScale = 1f, minRenderScale = 0.7f, shadowMapSize = 2048, shadowTaps = 9, highRange = true,
                 maxPointLights = MAX_POINT_LIGHTS, viewRadius = 56, streamingRadius = 4, textureBudgetBytes = 96L * MB, maxTextureSize = 512,
                 groundLitter = true, atmosphereMotes = true, targetFps = 60, microDetailRadius = 32, microFarRadius = 56,
-                diorama = DioramaLook.of(tier),
+                diorama = DioramaLook.of(tier), splats = com.stratum.engine.scene.SplatMode.EXACT,
             )
             QualityTier.ULTRA -> RenderSettings(
                 tier, renderScale = 1f, minRenderScale = 0.85f, shadowMapSize = 4096, shadowTaps = 9, highRange = true,
                 maxPointLights = MAX_POINT_LIGHTS, viewRadius = 72, streamingRadius = 5, textureBudgetBytes = 160L * MB, maxTextureSize = 512,
                 groundLitter = true, atmosphereMotes = true, targetFps = 60, microDetailRadius = 48, microFarRadius = 72,
-                diorama = DioramaLook.of(tier),
+                diorama = DioramaLook.of(tier), splats = com.stratum.engine.scene.SplatMode.EXACT,
             )
         }
 

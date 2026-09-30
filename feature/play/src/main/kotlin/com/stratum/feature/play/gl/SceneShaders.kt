@@ -3,6 +3,7 @@ package com.stratum.feature.play.gl
 import com.stratum.engine.scene.ShadingModel
 import com.stratum.engine.scene.Surfel
 import com.stratum.engine.scene.SurfelLod
+import com.stratum.engine.scene.VoxelSplat
 
 /**
  * GLSL ES 3.00 ports of `ShadingModel` and the software rasteriser.
@@ -492,6 +493,275 @@ internal object SceneShaders {
             if (q > 1.0) discard;
             fragColor = vec4(vColor * (1.0 + DOME * (0.5 - q)), 1.0);
         }
+    """
+
+    /**
+     * Voxel splats ([com.stratum.engine.scene.SplatMode]): one point per
+     * surface voxel, eight bytes each. The vertex shader decodes it, lights
+     * its top and the two sides turned to the eye once each, and sizes the
+     * sprite to hold the cube; the fragment shader picks the face a pixel
+     * shows. Twin of `SceneRasterizer.splats`.
+     *
+     * [exact] false is [com.stratum.engine.scene.SplatMode.FAST]: the sprite
+     * is cut to the cube's outline and the face found by three lines
+     * through it ([com.stratum.engine.scene.SplatFaces]), six dot products
+     * a pixel; depth is the centre's, from the rasteriser, not the shader.
+     * [exact] true ray-casts the voxel's box per pixel and writes the hit's
+     * depth.
+     */
+    fun splatVertex(exact: Boolean) = """#version 300 es
+        precision highp float;
+        layout(location = 0) in uvec2 aSplat;
+        uniform mat4 uViewProj;
+        uniform mat4 uShadowViewProj;
+        uniform sampler2D uShadowMap;
+        uniform int uShadowTaps;
+        uniform vec2 uOrigin;
+        uniform float uPerMicro;
+        uniform float uPixelsPerUnit;
+        uniform vec2 uViewport;
+        uniform vec4 uReveal;
+        uniform vec3 uEye;
+        uniform vec3 uSun;
+        uniform vec3 uFill;
+        uniform float uFillStrength;
+        uniform vec3 uSunColor;
+        uniform vec3 uSky;
+        uniform vec3 uGround;
+        uniform vec3 uFog;
+        uniform float uFogStart;
+        uniform float uFogEnd;
+        uniform float uFogFloor;
+        uniform float uShadowStrength;
+        uniform float uExposure;
+        uniform int uLightCount;
+        uniform vec3 uLightPos[8];
+        uniform vec3 uLightColor[8];
+        uniform float uLightRadius[8];
+        $DIORAMA
+        flat out vec3 vTop;
+        flat out vec3 vSideX;
+        flat out vec3 vSideY;
+        ${if (exact) """
+        flat out vec3 vBoxMin;
+        flat out float vBoxSide;
+        """ else """
+        flat out vec2 vCentre;
+        flat out vec3 vLine0;
+        flat out vec3 vLine1;
+        flat out vec3 vLine2;
+        flat out vec3 vSlab0;
+        flat out vec3 vSlab1;
+        flat out vec3 vSlab2;
+        """}
+
+        const float SPRITE_SPREAD = ${f(VoxelSplat.SPRITE_SPREAD)};
+        const float EDGE_PIXELS = ${f(com.stratum.engine.scene.SplatFaces.EDGE_PIXELS)};
+        const float SHADOW_LIFT = ${f(VoxelSplat.SHADOW_LIFT)};
+        const float MIN_OCCLUSION = ${f(VoxelSplat.MIN_OCCLUSION)};
+        const float EMISSIVE_GAIN = ${f(ShadingModel.EMISSIVE_GAIN)};
+        const float TONE_GAIN = ${f(ShadingModel.TONE_GAIN)};
+        const float HEIGHT_FOG_DEPTH = ${f(ShadingModel.HEIGHT_FOG_DEPTH)};
+        const float HEIGHT_FOG_MAX = ${f(ShadingModel.HEIGHT_FOG_MAX)};
+        const float REVEAL_FEATHER = 0.9;
+        const float REVEAL_FLOOR = 0.3;
+        const float REVEAL_BODY = 1.0;
+        const float REVEAL_BEHIND = 0.6;
+
+        float untone(float v) { return -log(1.0 - clamp(v, 0.0, 0.999)) / (uExposure * TONE_GAIN); }
+        float revealCut(vec3 w) {
+            if (uReveal.w <= 0.0 || w.z <= uReveal.z + REVEAL_FLOOR) return 0.0;
+            vec3 toBody = vec3(uReveal.xy, uReveal.z + REVEAL_BODY) - uEye;
+            float len = max(length(toBody), 1e-4);
+            vec3 d = toBody / len;
+            vec3 v = w - uEye;
+            float t = dot(v, d);
+            if (t >= len - REVEAL_BEHIND) return 0.0;
+            return 1.0 - smoothstep(uReveal.w - REVEAL_FEATHER, uReveal.w, length(v - d * t));
+        }
+        float sunlit(vec3 w) {
+            if (uShadowTaps == 0) return 1.0;
+            vec4 s = uShadowViewProj * vec4(w, 1.0);
+            vec3 p = s.xyz / s.w * 0.5 + 0.5;
+            if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) return 1.0;
+            // One tap: a voxel is a few pixels across.
+            return (p.z - 0.0015 <= textureLod(uShadowMap, p.xy, 0.0).r) ? 1.0 : 0.0;
+        }
+        // ShadingModel.shade, then haze and fog, for one face.
+        vec3 shadeFace(vec3 n, vec3 w, vec3 albedo, float ao, float lit, float emissive, float dist) {
+            float skyAo = uOcclusionDepth > 0.0 ? pow(ao, 1.0 + uOcclusionDepth) : ao;
+            float sunAo = 1.0 - uOcclusionDepth * OCCLUSION_SUN_SHARE * (1.0 - ao);
+            vec3 light = mix(uGround, uSky, n.z * 0.5 + 0.5) * skyAo;
+            float ndl = max(0.0, dot(n, uSun));
+            light += uSunColor * ndl * (1.0 - uShadowStrength * (1.0 - lit)) * sunAo;
+            light += uSunColor * max(0.0, dot(n, uFill)) * uFillStrength;
+            for (int i = 0; i < 8; i++) {
+                if (i >= uLightCount) break;
+                vec3 ld = uLightPos[i] - w;
+                float len = length(ld);
+                if (len >= uLightRadius[i]) continue;
+                float facing = max(0.0, dot(n, ld / max(len, 1e-4))) * 0.7 + 0.3;
+                float fall = 1.0 - len / uLightRadius[i];
+                light += uLightColor[i] * fall * fall * facing;
+            }
+            vec3 color = light * albedo + albedo * emissive * EMISSIVE_GAIN;
+            if (uHaze) {
+                vec4 hz = haze(w, dist, uEye, uSun, uFog);
+                color = mix(color, vec3(untone(hz.r), untone(hz.g), untone(hz.b)), hz.a);
+            }
+            float fog = smoothstep(uFogStart, uFogEnd, dist);
+            if (w.z < uFogFloor) fog = max(fog, clamp((uFogFloor - w.z) / HEIGHT_FOG_DEPTH, 0.0, 1.0) * HEIGHT_FOG_MAX);
+            return mix(color, vec3(untone(uFog.r), untone(uFog.g), untone(uFog.b)), fog);
+        }
+        ${if (exact) "" else """
+        // SplatFaces.line: the line through p along a, its normal turned to b's side.
+        vec3 line(vec2 a, vec2 b, vec2 p) {
+            float side = a.x * b.y - a.y * b.x >= 0.0 ? 1.0 : -1.0;
+            vec2 n = vec2(-a.y, a.x) * side;
+            return vec3(n, dot(n, p));
+        }
+        // SplatFaces.slab: across axis a's screen direction, the cube reaches as far as b and c take it.
+        vec3 slab(vec2 a, vec2 b, vec2 c, float h) {
+            vec2 n = vec2(-a.y, a.x);
+            return vec3(n, (abs(dot(n, b)) + abs(dot(n, c))) * h + length(n) * EDGE_PIXELS);
+        }
+        """}
+        void cull() {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0;
+            vTop = vec3(0.0); vSideX = vec3(0.0); vSideY = vec3(0.0);
+            ${if (exact) "vBoxMin = vec3(0.0); vBoxSide = 0.0;" else "vCentre = vec2(0.0); vLine0 = vec3(0.0); vLine1 = vec3(0.0); vLine2 = vec3(0.0); vSlab0 = vec3(0.0); vSlab1 = vec3(0.0); vSlab2 = vec3(0.0);"}
+        }
+
+        void main() {
+            uint a = aSplat.x;
+            uint b = aSplat.y;
+            float side = float(1u << ((a >> 20u) & 3u)) * uPerMicro;
+            float half_ = side * 0.5;
+            vec3 lo = vec3(uOrigin + vec2(float(a & 63u), float((a >> 6u) & 63u)) * uPerMicro, float((a >> 12u) & 255u) * uPerMicro);
+            vec3 w = lo + half_;
+            if (revealCut(w) > 0.5) { cull(); return; }
+            vec4 clip = uViewProj * vec4(w, 1.0);
+            if (clip.w < 0.5) { cull(); return; }
+            // Half the sprite, in pixels.
+            float r = side * SPRITE_SPREAD * uPixelsPerUnit / clip.w * 0.5;
+
+            vec3 toEye = uEye - w;
+            float dist = length(toEye);
+            toEye /= dist;
+            float sx = toEye.x >= 0.0 ? 1.0 : -1.0;
+            float sy = toEye.y >= 0.0 ? 1.0 : -1.0;
+            uint faces = (a >> 22u) & 63u;
+            vec3 albedo = vec3(float((b >> 24u) & 255u), float((b >> 16u) & 255u), float((b >> 8u) & 255u)) / 255.0;
+            if (uGrain > 0.0) albedo *= voxelGrain(w, vec3(0.0));
+            float emissive = float(b & 255u) / 255.0 * (1.0 + uGlowGain);
+            float lit = sunlit(w + uSun * side * SHADOW_LIFT);
+            float ao = 1.0 - (1.0 - MIN_OCCLUSION) * float(a >> 28u) / 15.0;
+            vTop = shadeFace(vec3(0.0, 0.0, 1.0), w, albedo, ao, lit, emissive, dist);
+            // A closed side is hidden by its neighbour; shaded as top, the sprite's spill onto that neighbour keeps its colour.
+            bool xOpen = (faces & (sx > 0.0 ? 1u : 2u)) != 0u;
+            bool yOpen = (faces & (sy > 0.0 ? 4u : 8u)) != 0u;
+            vSideX = xOpen ? shadeFace(vec3(sx, 0.0, 0.0), w, albedo, 1.0, lit, emissive, dist) : vTop;
+            vSideY = yOpen ? shadeFace(vec3(0.0, sy, 0.0), w, albedo, 1.0, lit, emissive, dist) : vTop;
+            ${if (exact) """
+            vBoxMin = lo;
+            vBoxSide = side;
+            """ else """
+            // SplatFaces.lines: pixels a world unit along each axis moves the centre, then the three lines.
+            vec2 hv = uViewport * 0.5;
+            float iw2 = 1.0 / (clip.w * clip.w);
+            vec2 ax = (uViewProj[0].xy * clip.w - clip.xy * uViewProj[0].w) * iw2 * hv;
+            vec2 ay = (uViewProj[1].xy * clip.w - clip.xy * uViewProj[1].w) * iw2 * hv;
+            vec2 az = (uViewProj[2].xy * clip.w - clip.xy * uViewProj[2].w) * iw2 * hv;
+            vec2 p = (ax * sx + ay * sy + az) * half_;
+            vec2 ex = -sx * ax;
+            vec2 fy = -sy * ay;
+            vLine0 = line(ex, fy, p);
+            vLine1 = line(fy, ex, p);
+            vLine2 = line(-az, ex, p);
+            vSlab0 = slab(ax, ay, az, half_);
+            vSlab1 = slab(ay, ax, az, half_);
+            vSlab2 = slab(az, ax, ay, half_);
+            vCentre = (clip.xy / clip.w * 0.5 + 0.5) * uViewport;
+            """}
+            gl_Position = clip;
+            gl_PointSize = max(1.0, 2.0 * r);
+        }
+    """
+
+    fun splatFragment(exact: Boolean) = if (exact) """#version 300 es
+        precision highp float;
+        flat in vec3 vTop;
+        flat in vec3 vSideX;
+        flat in vec3 vSideY;
+        flat in vec3 vBoxMin;
+        flat in float vBoxSide;
+        uniform mat4 uInverseViewProj;
+        uniform mat4 uViewProj;
+        uniform vec2 uViewport;
+        out vec4 fragColor;
+        void main() {
+            // The pixel's ray, near plane to far, against the voxel's box.
+            vec2 ndc = gl_FragCoord.xy / uViewport * 2.0 - 1.0;
+            vec4 n4 = uInverseViewProj * vec4(ndc, -1.0, 1.0);
+            vec4 f4 = uInverseViewProj * vec4(ndc, 1.0, 1.0);
+            vec3 o = n4.xyz / n4.w;
+            vec3 d = f4.xyz / f4.w - o;
+            vec3 inv = 1.0 / d;
+            vec3 ta = (vBoxMin - o) * inv;
+            vec3 tb = (vBoxMin + vBoxSide - o) * inv;
+            vec3 t0 = min(ta, tb);
+            vec3 t1 = max(ta, tb);
+            float enter = max(max(t0.x, t0.y), max(t0.z, 0.0));
+            float leave = min(min(t1.x, t1.y), t1.z);
+            if (enter > leave) discard;
+            vec3 c = t0.z >= t0.x && t0.z >= t0.y ? vTop : (t0.x >= t0.y ? vSideX : vSideY);
+            vec4 hit = uViewProj * vec4(o + d * enter, 1.0);
+            gl_FragDepth = hit.z / hit.w * 0.5 + 0.5;
+            fragColor = vec4(c, 1.0);
+        }
+    """ else """#version 300 es
+        precision highp float;
+        flat in vec3 vTop;
+        flat in vec3 vSideX;
+        flat in vec3 vSideY;
+        flat in vec2 vCentre;
+        flat in vec3 vLine0;
+        flat in vec3 vLine1;
+        flat in vec3 vLine2;
+        flat in vec3 vSlab0;
+        flat in vec3 vSlab1;
+        flat in vec3 vSlab2;
+        out vec4 fragColor;
+        void main() {
+            // SplatFaces.face: outside the cube's outline, nothing; inside, which side of its three lines.
+            vec2 d = gl_FragCoord.xy - vCentre;
+            if (abs(dot(vSlab0.xy, d)) > vSlab0.z || abs(dot(vSlab1.xy, d)) > vSlab1.z || abs(dot(vSlab2.xy, d)) > vSlab2.z) discard;
+            bool top = dot(vLine0.xy, d) >= vLine0.z && dot(vLine1.xy, d) >= vLine1.z;
+            fragColor = vec4(top ? vTop : (dot(vLine2.xy, d) >= vLine2.z ? vSideY : vSideX), 1.0);
+        }
+    """
+
+    /** A splat into the sun's depth map: a square of its centre's depth, no colour. */
+    val SPLAT_SHADOW_VERTEX = """#version 300 es
+        precision highp float;
+        layout(location = 0) in uvec2 aSplat;
+        uniform mat4 uShadowViewProj;
+        uniform vec2 uOrigin;
+        uniform float uPerMicro;
+        uniform float uShadowPixelsPerUnit;
+        const float SHADOW_SPREAD = ${f(VoxelSplat.SHADOW_SPREAD)};
+        void main() {
+            uint a = aSplat.x;
+            float side = float(1u << ((a >> 20u) & 3u)) * uPerMicro;
+            vec3 w = vec3(uOrigin + vec2(float(a & 63u), float((a >> 6u) & 63u)) * uPerMicro, float((a >> 12u) & 255u) * uPerMicro) + side * 0.5;
+            gl_Position = uShadowViewProj * vec4(w, 1.0);
+            gl_PointSize = max(1.0, side * SHADOW_SPREAD * uShadowPixelsPerUnit);
+        }
+    """
+
+    val SPLAT_SHADOW_FRAGMENT = """#version 300 es
+        precision mediump float;
+        void main() {}
     """
 
     /** Decals and glows: unlit, procedurally shaped, blended. */

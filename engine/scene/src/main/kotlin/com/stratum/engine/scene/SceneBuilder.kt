@@ -111,6 +111,16 @@ class SceneFrame(
     val surfels: List<SurfelDraw> = emptyList(),
     /** Every chunk's surfels in the meshed square, drawn or not, for a backend to keep on the GPU like [residentTerrain]. */
     val residentSurfels: List<SurfelBatch> = emptyList(),
+    /**
+     * The micro-detail terrain as voxel splats, per chunk layer, that the
+     * view (widened by the shadow reach) can see; see [SplatMode]. Drawn
+     * opaque with the terrain, and into the shadow map.
+     */
+    val splats: List<SplatBatch> = emptyList(),
+    /** Every splat batch in the meshed square, for a backend to keep on the GPU like [residentTerrain]. */
+    val residentSplats: List<SplatBatch> = emptyList(),
+    /** How [splats] are drawn: [SplatMode.FAST] or [SplatMode.EXACT]. */
+    val splatMode: SplatMode = SplatMode.MESH,
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -162,7 +172,9 @@ class SceneBuilder(
 ) {
     private val chunks = ChunkMeshCache(
         TerrainMesher(scene, textures, biomeAt),
-        microTerrain?.let { MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity) },
+        microTerrain?.let {
+            MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity, splatMode = settings.splats)
+        },
         settings.microDetailRadius,
         settings.microFarRadius,
     )
@@ -199,6 +211,8 @@ class SceneBuilder(
         val bounds: FloatArray = FloatArray(0),
         /** Surfels of the detailed chunks; see [SurfelScatter]. */
         val surfels: List<SurfelBatch> = emptyList(),
+        /** Voxel splats of the detailed chunks, when the tier draws them; see [SplatMode]. */
+        val splats: List<SplatBatch> = emptyList(),
     )
 
     /** This frame's bloom gain from the night glow; 1 by day. */
@@ -400,6 +414,14 @@ class SceneBuilder(
             ) { b -> volume.intersects(b.originX.toFloat(), b.originY.toFloat(), b.minZ, b.originX + Chunk.SIZE.toFloat(), b.originY + Chunk.SIZE.toFloat(), b.maxZ) }
             else emptyList(),
             residentSurfels = terrain.surfels,
+            splats = terrain.splats.filter { b ->
+                volume.intersects(
+                    b.originX - TERRAIN_SHADOW_MARGIN, b.originY - TERRAIN_SHADOW_MARGIN, b.minZ,
+                    b.originX + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, b.originY + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, b.maxZ,
+                )
+            },
+            residentSplats = terrain.splats,
+            splatMode = settings.splatDraw,
         )
     }
 
@@ -462,6 +484,7 @@ class SceneBuilder(
                 models = modelProps(props),
                 bounds = boundsOf(meshes),
                 surfels = results.mapNotNull { it.surfels },
+                splats = results.mapNotNull { it.splats },
             )
             // Styles of props still in the square are kept; the rest are let go.
             val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)

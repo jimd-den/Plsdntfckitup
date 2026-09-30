@@ -28,6 +28,12 @@ class SceneShadersTest {
         "finish.frag" to SceneShaders.FINISH_FRAGMENT,
         "surfel.vert" to SceneShaders.SURFEL_VERTEX,
         "surfel.frag" to SceneShaders.SURFEL_FRAGMENT,
+        "splat-fast.vert" to SceneShaders.splatVertex(exact = false),
+        "splat-fast.frag" to SceneShaders.splatFragment(exact = false),
+        "splat-exact.vert" to SceneShaders.splatVertex(exact = true),
+        "splat-exact.frag" to SceneShaders.splatFragment(exact = true),
+        "splat-shadow.vert" to SceneShaders.SPLAT_SHADOW_VERTEX,
+        "splat-shadow.frag" to SceneShaders.SPLAT_SHADOW_FRAGMENT,
     )
 
     @Test

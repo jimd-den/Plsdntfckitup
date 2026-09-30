@@ -9,6 +9,9 @@ import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
 import com.stratum.engine.scene.Surfel
 import com.stratum.engine.scene.SurfelBatch
+import com.stratum.engine.scene.SplatBatch
+import com.stratum.engine.scene.SplatMode
+import com.stratum.engine.scene.VoxelSplat
 import com.stratum.engine.scene.Texture
 import com.stratum.engine.scene.TextureBudget
 import com.stratum.engine.scene.Vertex
@@ -83,6 +86,9 @@ class SceneGlRenderer(
     private var sky = 0
     private var finish = 0
     private var surfelProgram = 0
+    private var splatFast = 0
+    private var splatExact = 0
+    private var splatShadow = 0
 
     private var shadowFbo = 0
     private var shadowDepth = 0
@@ -101,6 +107,11 @@ class SceneGlRenderer(
     /** Each chunk's surfels, uploaded once like its mesh and freed when it leaves the meshed square. */
     private val surfelBuffers = IdentityHashMap<SurfelBatch, GpuPoints>()
     private val staleSurfels = ArrayList<SurfelBatch>()
+
+    /** Each chunk layer's voxel splats, uploaded once and freed like [surfelBuffers]. */
+    private val splatBuffers = IdentityHashMap<SplatBatch, GpuPoints>()
+    private val staleSplats = ArrayList<SplatBatch>()
+    private val inverseViewProj = FloatArray(16)
 
     // Point-light uniforms, filled in place each frame rather than allocated.
     private val lightPos = FloatArray(SceneFrame.MAX_LIGHTS * 3)
@@ -146,6 +157,9 @@ class SceneGlRenderer(
         sky = program(SceneShaders.SCREEN_VERTEX, SceneShaders.SKY_FRAGMENT)
         finish = program(SceneShaders.SCREEN_VERTEX, SceneShaders.FINISH_FRAGMENT)
         surfelProgram = program(SceneShaders.SURFEL_VERTEX, SceneShaders.SURFEL_FRAGMENT)
+        splatFast = program(SceneShaders.splatVertex(exact = false), SceneShaders.splatFragment(exact = false))
+        splatExact = program(SceneShaders.splatVertex(exact = true), SceneShaders.splatFragment(exact = true))
+        splatShadow = program(SceneShaders.SPLAT_SHADOW_VERTEX, SceneShaders.SPLAT_SHADOW_FRAGMENT)
         emptyVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         profile = AndroidDeviceProfiles.withGl(device)
         shadowFbo = 0
@@ -154,6 +168,7 @@ class SceneGlRenderer(
         settingsStale = true
         staticMeshes.clear()
         surfelBuffers.clear()
+        splatBuffers.clear()
         locations.clear()
         listOf(actorMesh, cutoutMesh, decalMesh, glowMesh).forEach { it.vao = 0; it.source = null }
         // A new context has none of the old one's objects: queue the last art again.
@@ -186,6 +201,7 @@ class SceneGlRenderer(
         }
         releaseStale(frame)
         releaseStaleSurfels(frame)
+        releaseStalePoints(splatBuffers, frame.residentSplats, staleSplats)
         shadowPass(frame)
         scenePass(frame)
         finishPass(frame)
@@ -233,6 +249,7 @@ class SceneGlRenderer(
         bindTextures(shadowProgram)
         GLES30.glUniform1i(loc(shadowProgram, "uCutout"), 0)
         drawOpaque(frame)
+        if (frame.splats.isNotEmpty()) drawSplatShadows(frame)
         // Sprites do not cast into the shadow map: a camera-facing card seen
         // from the sun casts a sliver or a slab. They lay their own silhouette
         // on the ground as a decal instead (Vertex.SPRITE_SHADOW).
@@ -269,6 +286,10 @@ class SceneGlRenderer(
 
         GLES30.glUniform1i(loc(lit, "uCutout"), 0)
         drawOpaque(frame)
+        if (frame.splats.isNotEmpty()) {
+            drawSplats(frame, t)
+            GLES30.glUseProgram(lit)
+        }
         // Surfels on the land they lie on: depth-tested, never depth-written, as the rasteriser draws them.
         if (frame.surfels.isNotEmpty()) {
             drawSurfels(frame, t)
@@ -419,6 +440,93 @@ class SceneGlRenderer(
             GLES30.glDeleteBuffers(1, intArrayOf(points.vbo), 0)
         }
         staleSurfels.clear()
+    }
+
+    // ---- voxel splats ------------------------------------------------------
+
+    /**
+     * The terrain's voxel splats, one draw per chunk layer, depth-tested and
+     * depth-written like the mesh they replace. See [SceneShaders.splatVertex].
+     */
+    private fun drawSplats(frame: SceneFrame, t: ShadingModel.Terms) {
+        val exact = frame.splatMode == SplatMode.EXACT
+        val p = if (exact) splatExact else splatFast
+        GLES30.glUseProgram(p)
+        lighting(p, frame, t)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shadowDepth)
+        GLES30.glUniform1i(loc(p, "uShadowMap"), 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        val reveal = frame.reveal
+        if (reveal != null) GLES30.glUniform4f(loc(p, "uReveal"), reveal.x, reveal.y, reveal.z, reveal.radius)
+        else GLES30.glUniform4f(loc(p, "uReveal"), 0f, 0f, 0f, 0f)
+        GLES30.glUniform1f(loc(p, "uPixelsPerUnit"), sceneHeight * frame.camera.projection[5] / 2f)
+        GLES30.glUniform2f(loc(p, "uViewport"), sceneWidth.toFloat(), sceneHeight.toFloat())
+        if (exact) {
+            android.opengl.Matrix.invertM(inverseViewProj, 0, frame.camera.viewProjection, 0)
+            matrix(p, "uInverseViewProj", inverseViewProj)
+        }
+        for (batch in frame.splats) {
+            val points = splatBuffers[batch] ?: GpuPoints().also { uploadSplats(it, batch); splatBuffers[batch] = it }
+            GLES30.glUniform2f(loc(p, "uOrigin"), batch.originX.toFloat(), batch.originY.toFloat())
+            GLES30.glUniform1f(loc(p, "uPerMicro"), 1f / batch.microPerBlock)
+            GLES30.glBindVertexArray(points.vao)
+            GLES30.glDrawArrays(GLES30.GL_POINTS, 0, batch.count)
+        }
+        GLES30.glBindVertexArray(0)
+    }
+
+    /** Splats into the sun's depth map as squares; the same list the scene draws, which is already widened for shadows. */
+    private fun drawSplatShadows(frame: SceneFrame) {
+        val p = splatShadow
+        GLES30.glUseProgram(p)
+        val m = frame.shadowViewProjection
+        matrix(p, "uShadowViewProj", m)
+        // The sun's map is orthographic: pixels per world unit are the same everywhere in it.
+        val rowX = kotlin.math.sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8])
+        val rowY = kotlin.math.sqrt(m[1] * m[1] + m[5] * m[5] + m[9] * m[9])
+        GLES30.glUniform1f(loc(p, "uShadowPixelsPerUnit"), maxOf(rowX, rowY) * shadowSize / 2f)
+        for (batch in frame.splats) {
+            val points = splatBuffers[batch] ?: GpuPoints().also { uploadSplats(it, batch); splatBuffers[batch] = it }
+            GLES30.glUniform2f(loc(p, "uOrigin"), batch.originX.toFloat(), batch.originY.toFloat())
+            GLES30.glUniform1f(loc(p, "uPerMicro"), 1f / batch.microPerBlock)
+            GLES30.glBindVertexArray(points.vao)
+            GLES30.glDrawArrays(GLES30.GL_POINTS, 0, batch.count)
+        }
+        GLES30.glBindVertexArray(0)
+        GLES30.glUseProgram(shadowProgram)
+    }
+
+    private fun uploadSplats(points: GpuPoints, batch: SplatBatch) {
+        val ids = IntArray(2)
+        GLES30.glGenVertexArrays(1, ids, 0)
+        GLES30.glGenBuffers(1, ids, 1)
+        points.vao = ids[0]; points.vbo = ids[1]
+        GLES30.glBindVertexArray(points.vao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, points.vbo)
+        val n = batch.count * VoxelSplat.INTS
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, n * 4, ints(batch.data, n), GLES30.GL_STATIC_DRAW)
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribIPointer(0, VoxelSplat.INTS, GLES30.GL_UNSIGNED_INT, VoxelSplat.INTS * 4, 0)
+        GLES30.glBindVertexArray(0)
+    }
+
+    /** Point buffers whose batch left [resident]: remeshed, or out of the meshed square. */
+    private fun <K> releaseStalePoints(buffers: IdentityHashMap<K, GpuPoints>, resident: List<K>, stale: ArrayList<K>) {
+        if (buffers.isEmpty()) return
+        if (buffers.size <= resident.size) {
+            var live = 0
+            for (i in resident.indices) if (buffers.containsKey(resident[i])) live++
+            if (live == buffers.size) return
+        }
+        val keep = java.util.Collections.newSetFromMap(IdentityHashMap<K, Boolean>()).apply { addAll(resident) }
+        stale.clear()
+        for (b in buffers.keys) if (b !in keep) stale += b
+        for (b in stale) buffers.remove(b)?.let { points ->
+            GLES30.glDeleteVertexArrays(1, intArrayOf(points.vao), 0)
+            GLES30.glDeleteBuffers(1, intArrayOf(points.vbo), 0)
+        }
+        stale.clear()
     }
 
     private fun finishPass(frame: SceneFrame) {

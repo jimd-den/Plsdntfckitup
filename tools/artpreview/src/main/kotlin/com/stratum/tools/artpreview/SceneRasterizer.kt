@@ -5,6 +5,10 @@ import com.stratum.engine.scene.Mat4
 import com.stratum.engine.scene.MeshBatch
 import com.stratum.engine.scene.SceneFrame
 import com.stratum.engine.scene.ShadingModel
+import com.stratum.engine.scene.SplatBatch
+import com.stratum.engine.scene.SplatFaces
+import com.stratum.engine.scene.SplatMode
+import com.stratum.engine.scene.VoxelSplat
 import com.stratum.engine.scene.Surfel
 import com.stratum.engine.scene.SurfelDraw
 import com.stratum.engine.scene.SurfelLod
@@ -17,6 +21,7 @@ import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
@@ -60,6 +65,11 @@ class SceneRasterizer(
         val surface = Surface(terms, frame, eye.x, eye.y, eye.z, lightColors, shade)
         // The land and its models open up around the player; actors and the rest never do.
         frame.opaque.forEach { rasterize(it, viewProj, surface, if (it === frame.actors) null else frame.reveal) }
+        // Voxel splats with the opaque land, depth-written like it.
+        if (frame.splats.isNotEmpty()) {
+            val inverse = Mat4.invert(viewProj) ?: FloatArray(16)
+            frame.splats.forEach { splats(it, frame.splatMode, viewProj, inverse, surface) }
+        }
         // Surfels after the opaque pass, as the GPU draws them: depth-tested against the land they lie on.
         frame.surfels.forEach { surfels(it, viewProj, surface) }
         rasterize(frame.cutout, viewProj, surface)
@@ -110,6 +120,31 @@ class SceneRasterizer(
                 }
                 fillDepth(sx, sy, sz)
                 i += 3
+            }
+        }
+        // Splats cast as squares of their centre's depth, as the GPU's shadow sprites do.
+        val row = max(
+            sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]),
+            sqrt(m[1] * m[1] + m[5] * m[5] + m[9] * m[9]),
+        ) * shadowSize / 2f
+        for (b in frame.splats) {
+            val d = b.data
+            val per = 1f / b.microPerBlock
+            for (i in 0 until b.count) {
+                val a = d[i * VoxelSplat.INTS]
+                val side = VoxelSplat.size(a) * per
+                val half = side / 2f
+                Mat4.transform(m, b.originX + VoxelSplat.x(a) * per + half, b.originY + VoxelSplat.y(a) * per + half, VoxelSplat.z(a) * per + half, clip)
+                val u = (clip[0] / clip[3] * 0.5f + 0.5f) * shadowSize
+                val v = (1f - (clip[1] / clip[3] * 0.5f + 0.5f)) * shadowSize
+                val z = clip[2] / clip[3] * 0.5f + 0.5f
+                val r = max(0.5f, side * VoxelSplat.SHADOW_SPREAD * row / 2f)
+                val x0 = max(0, (u - r).roundToInt()); val x1 = min(shadowSize - 1, (u + r).roundToInt() - 1)
+                val y0 = max(0, (v - r).roundToInt()); val y1 = min(shadowSize - 1, (v + r).roundToInt() - 1)
+                for (py in y0..y1) for (px in x0..x1) {
+                    val o = py * shadowSize + px
+                    if (z < shadow[o]) shadow[o] = z
+                }
             }
         }
     }
@@ -252,6 +287,126 @@ class SceneRasterizer(
                 // field of tiny bumps in it would ink every surfel.
             }
         }
+    }
+
+    /**
+     * One batch of voxel splats, as SPLAT_VERTEX and SPLAT_FRAGMENT draw
+     * them: each voxel's top and its two eye-facing sides lit once at its
+     * centre, then a square sprite covering the cube, split into faces by
+     * [SplatFaces] and cut to its outline ([SplatMode.FAST], depth of the centre) or ray-cast
+     * against the box per pixel ([SplatMode.EXACT], depth of the hit).
+     */
+    private fun splats(b: SplatBatch, mode: SplatMode, viewProj: FloatArray, inverse: FloatArray, s: Surface) {
+        val clip = FloatArray(4)
+        val scratch = FloatArray(4)
+        val lines = FloatArray(SplatFaces.FLOATS)
+        val cols = Array(3) { FloatArray(3) }
+        val grain = s.grain
+        val near = FloatArray(4); val far = FloatArray(4)
+        val pixelsPerUnit = h * s.frame.camera.projection[5] / 2f
+        val reveal = s.frame.reveal
+        val per = 1f / b.microPerBlock
+        val t = s.terms
+        val glow = 1f + s.look.nightGlow * s.frame.night
+        val exact = mode == SplatMode.EXACT
+        for (i in 0 until b.count) {
+            val a = b.data[i * VoxelSplat.INTS]; val c = b.data[i * VoxelSplat.INTS + 1]
+            val side = VoxelSplat.size(a) * per
+            val half = side / 2f
+            val mx = b.originX + VoxelSplat.x(a) * per; val my = b.originY + VoxelSplat.y(a) * per; val mz = VoxelSplat.z(a) * per
+            val wx = mx + half; val wy = my + half; val wz = mz + half
+            if (reveal != null && ShadingModel.revealCut(reveal, s.eyeX, s.eyeY, s.eyeZ, wx, wy, wz) > 0.5f) continue
+            Mat4.transform(viewProj, wx, wy, wz, clip)
+            if (clip[3] < NEAR_W) continue
+            val iw = 1f / clip[3]
+            val cx = (clip[0] * iw * 0.5f + 0.5f) * w
+            val cy = (1f - (clip[1] * iw * 0.5f + 0.5f)) * h
+            val cz = clip[2] * iw
+            val r = side * VoxelSplat.SPRITE_SPREAD * pixelsPerUnit * iw / 2f
+            if (cx + r < 0f || cy + r < 0f || cx - r >= w || cy - r >= h) continue
+
+            var ex = s.eyeX - wx; var ey = s.eyeY - wy; var ez = s.eyeZ - wz
+            val dist = sqrt(ex * ex + ey * ey + ez * ez)
+            ex /= dist; ey /= dist; ez /= dist
+            val sx = if (ex >= 0f) 1f else -1f; val sy = if (ey >= 0f) 1f else -1f
+            val faces = VoxelSplat.faces(a)
+            val rgb = VoxelSplat.rgb(c)
+            var ar = ((rgb shr 16) and 255) / 255f; var ag = ((rgb shr 8) and 255) / 255f; var ab = (rgb and 255) / 255f
+            if (s.look.grain > 0f) {
+                ShadingModel.voxelGrain(s.look.grain, wx, wy, wz, 0f, 0f, 0f, grain)
+                ar *= grain[0]; ag *= grain[1]; ab *= grain[2]
+            }
+            val emissive = VoxelSplat.emissive(VoxelSplat.emission(c)) * glow
+            // One shadow lookup for the voxel, just above its top towards the sun.
+            val lift = side * VoxelSplat.SHADOW_LIFT
+            val lit = sunlit(s.frame, wx + t.sun[0] * lift, wy + t.sun[1] * lift, wz + t.sun[2] * lift, 1f, scratch)
+            val xOpen = faces and (if (sx > 0f) VoxelSplat.FACE_PX else VoxelSplat.FACE_NX) != 0
+            val yOpen = faces and (if (sy > 0f) VoxelSplat.FACE_PY else VoxelSplat.FACE_NY) != 0
+            for (f in 0 until 3) {
+                // A closed side is hidden by its neighbour; shading it as top keeps a sprite's spill onto that neighbour its colour.
+                val face = when {
+                    f == SplatFaces.X_SIDE && xOpen -> 1
+                    f == SplatFaces.Y_SIDE && yOpen -> 2
+                    else -> 0
+                }
+                if (face == 0 && f != 0) { cols[0].copyInto(cols[f]); continue }
+                val nx = if (face == 1) sx else 0f; val ny = if (face == 2) sy else 0f; val nz = if (face == 0) 1f else 0f
+                val ao = if (face == 0) VoxelSplat.occlusion(VoxelSplat.ao(a)) else 1f
+                ShadingModel.shade(
+                    t, ar, ag, ab, nx, ny, nz, ao, lit, wx, wy, wz, ex, ey, ez, emissive, false,
+                    s.frame.lights, s.lightColors, s.out, occlusionDepth = s.look.occlusionDepth,
+                )
+                atmosphere(s, dist, wx, wy, wz)
+                s.out.copyInto(cols[f])
+            }
+            if (!exact) SplatFaces.lines(viewProj, clip, w / 2f, h / 2f, half, sx, sy, lines)
+
+            val minX = max(0, floor(cx - r).toInt()); val maxX = min(w - 1, ceil(cx + r).toInt() - 1)
+            val minY = max(0, floor(cy - r).toInt()); val maxY = min(h - 1, ceil(cy + r).toInt() - 1)
+            for (py in minY..maxY) for (px in minX..maxX) {
+                val o = py * w + px
+                val f: Int
+                val z: Float
+                if (exact) {
+                    // The pixel's ray, from the near plane to the far, against the voxel's box.
+                    val nxd = (px + 0.5f) / w * 2f - 1f; val nyd = 1f - (py + 0.5f) / h * 2f
+                    unproject(inverse, nxd, nyd, -1f, near); unproject(inverse, nxd, nyd, 1f, far)
+                    val dx = far[0] - near[0]; val dy = far[1] - near[1]; val dz = far[2] - near[2]
+                    var t0 = 0f; var t1 = Float.MAX_VALUE; var axis = -1
+                    var hit = true
+                    for (k in 0 until 3) {
+                        val o3 = near[k]
+                        val d3 = when (k) { 0 -> dx; 1 -> dy; else -> dz }
+                        val lo = when (k) { 0 -> mx; 1 -> my; else -> mz }
+                        if (abs(d3) < 1e-9f) { if (o3 < lo || o3 > lo + side) { hit = false; break }; continue }
+                        var ta = (lo - o3) / d3; var tb = (lo + side - o3) / d3
+                        if (ta > tb) { val sw = ta; ta = tb; tb = sw }
+                        if (ta > t0) { t0 = ta; axis = k }
+                        if (tb < t1) t1 = tb
+                    }
+                    if (!hit || t0 > t1 || axis < 0) continue
+                    Mat4.transform(viewProj, near[0] + dx * t0, near[1] + dy * t0, near[2] + dz * t0, far)
+                    z = far[2] / far[3]
+                    f = when (axis) { 0 -> SplatFaces.X_SIDE; 1 -> SplatFaces.Y_SIDE; else -> SplatFaces.TOP }
+                } else {
+                    f = SplatFaces.face(lines, px + 0.5f - cx, cy - (py + 0.5f))
+                    if (f == SplatFaces.OUTSIDE) continue
+                    z = cz
+                }
+                if (z >= depth[o]) continue
+                depth[o] = z
+                val col = cols[f]
+                val k = o * 3
+                color[k] = col[0]; color[k + 1] = col[1]; color[k + 2] = col[2]
+            }
+        }
+    }
+
+    private fun unproject(inverse: FloatArray, x: Float, y: Float, z: Float, out: FloatArray) {
+        val cw = inverse[3] * x + inverse[7] * y + inverse[11] * z + inverse[15]
+        out[0] = (inverse[0] * x + inverse[4] * y + inverse[8] * z + inverse[12]) / cw
+        out[1] = (inverse[1] * x + inverse[5] * y + inverse[9] * z + inverse[13]) / cw
+        out[2] = (inverse[2] * x + inverse[6] * y + inverse[10] * z + inverse[14]) / cw
     }
 
     private var finished: FloatArray? = null

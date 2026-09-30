@@ -36,6 +36,13 @@ class MicroDetailMesher(
      */
     private val scatterSurfels: Boolean = false,
     private val surfelDensity: Float = 1f,
+    /**
+     * [SplatMode.MESH] greedy-meshes the voxels; either splat mode instead
+     * lists the surface voxels as eight-byte splats ([SplatExtractor]) in
+     * [TerrainMesher.Result.splats], and the mesh keeps only water. Surfels
+     * are not scattered over splats: each voxel already carries its own tone.
+     */
+    private val splatMode: SplatMode = SplatMode.MESH,
 ) {
 
     private val palette: MaterialPalette get() = source.palette
@@ -48,7 +55,8 @@ class MicroDetailMesher(
         val out = MeshBuilder(MaterialKind.OPAQUE)
         val idx = IntArray(4)
         val occ = FloatArray(4)
-        val surfels = if (scatterSurfels) SurfelScatter(source.palette, surfelDensity) else null
+        val surfels = if (scatterSurfels && !splatMode.splats) SurfelScatter(source.palette, surfelDensity) else null
+        val splats = if (splatMode.splats) SplatExtractor(source.palette, source.microPerBlock) else null
     }
 
     private val work = ThreadLocal.withInitial { Work() }
@@ -75,10 +83,11 @@ class MicroDetailMesher(
         val lights = ArrayList<PointLight>()
         val changed = changedBlocks(world, pos) ?: return null
         val surfels = surfelsFor(w, pos, factor)
+        w.splats?.begin(pos.originX, pos.originY)
         var quads = 0
         for (cz in 0 until layers) quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights, surfels)
         lastQuads.set(quads)
-        return TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build())
+        return TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build(), splats = splatsOf(w))
     }
 
     /**
@@ -123,8 +132,9 @@ class MicroDetailMesher(
             val lights = ArrayList<PointLight>()
             // Surfels per layer too, so an edit rescatters only the layer it touched.
             val surfels = surfelsFor(w, pos, factor)
+            w.splats?.begin(pos.originX, pos.originY)
             quads += emitLayer(w, world, pos, cz, factor, changed[cz], props, lights, surfels)
-            out += TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build())
+            out += TerrainMesher.Result(finish(w), props, lights, surfels = surfels?.build(), splats = splatsOf(w))
         }
         lastQuads.set(quads)
         return out
@@ -133,6 +143,11 @@ class MicroDetailMesher(
     /** The worker's scatter, begun on [pos], when this tier grows surfels and [factor] is full detail. */
     private fun surfelsFor(w: Work, pos: ChunkPos, factor: Int): SurfelScatter? =
         w.surfels?.takeIf { factor == 1 }?.also { it.begin(pos.originX, pos.originY) }
+
+    private fun splatsOf(w: Work): SplatBatch? {
+        val e = w.splats ?: return null
+        return e.build().also { e.trimTo(SplatExtractor.MAX_KEPT_INTS) }
+    }
 
     private fun requireFactor(factor: Int) = require(factor == 1 || factor == 2 || factor == 4) { "level of detail $factor is 1, 2 or 4" }
 
@@ -143,7 +158,7 @@ class MicroDetailMesher(
         return built
     }
 
-    /** Emits one micro-chunk layer of a block chunk into the worker's builder; returns its quads. */
+    /** Emits one micro-chunk layer of a block chunk into the worker's builder; returns its quads (its splats, when splatting). */
     private fun emitLayer(
         w: Work, world: BlockSnapshot, pos: ChunkPos, cz: Int, factor: Int, mine: IntArray,
         props: MutableList<PropInstance>, lights: MutableList<PointLight>, surfels: SurfelScatter? = null,
@@ -153,6 +168,19 @@ class MicroDetailMesher(
         if (generated.isEmpty() && mine.isEmpty()) return 0
         val grid = if (mine.isEmpty()) generated else patched(generated, mine, pos, cz, world, props, lights)
         val neighbours = neighbours(world, mpos)
+        val splats = w.splats
+        if (splats != null) {
+            val before = splats.size
+            if (factor == 1) splats.extract(grid, neighbours, cz * MicroChunk.SIZE, 1)
+            else splats.extract(
+                com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
+                NeighborOpacity { x, y, z -> neighbours.opaque(x * factor + factor / 2, y * factor + factor / 2, z * factor + factor / 2) },
+                cz * MicroChunk.SIZE, factor,
+            )
+            water(grid, mpos)
+            lamps(grid, mpos, lights)
+            return splats.size - before
+        }
         val mesh = if (factor == 1) w.mesher.mesh(grid, neighbours, ambientOcclusion = true)
         else w.mesher.mesh(
             com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
