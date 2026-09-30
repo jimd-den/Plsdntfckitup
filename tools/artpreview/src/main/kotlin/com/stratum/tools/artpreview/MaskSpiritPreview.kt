@@ -118,6 +118,12 @@ object MaskSpiritPreview {
             }
             ImageIO.write(sheet(views, 6), "png", File(out, "igbo-emoji-${slug(e.name)}.png"))
         }
+        // A turn: the line work floats in front of the oval and slides across it.
+        val e = com.stratum.engine.model.mask.IgboEmoji.set[1]
+        val mesh = MaskSpiritMesher.build(e.genome, emoji = true)
+        val wink = com.stratum.engine.model.mask.EmojiFace.build(e.genome, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue("Love"))
+        val turn = listOf(-1.1f, -0.55f, 0f, 0.55f, 1.1f).map { yaw -> studio(mesh, 260, 300, wink, sunny = true) { it.yaw = yaw; it.glow = 0.1f } }
+        ImageIO.write(strip(turn, "${e.name} · Love, turning: line work floating over the oval"), "png", File(out, "igbo-emoji-turn.png"))
         println("wrote igbo-emoji-set.png")
     }
 

@@ -376,7 +376,11 @@ class SpiritEmitter {
      * spirit's eye channel; everything takes its hit flash.
      */
     fun emitFeatures(features: SpiritFeatures, pose: SpiritPose, out: MeshBuilder, fading: Boolean) {
+        // The line work floats: it turns a little less than the head, so it slides across the oval and lags behind it.
+        val headYaw = pose.yaw
+        pose.yaw = headYaw * FEATURE_FOLLOW
         orient(pose)
+        pose.yaw = headYaw
         val s = pose.scale
         val sz = s * pose.stretch.let { if (it.isFinite() && it > 0.2f) it else 1f }
         val sxy = s / sqrt(sz / s)
@@ -400,7 +404,7 @@ class SpiritEmitter {
                 m00 * nx + m01 * ny + m02 * nz,
                 m10 * nx + m11 * ny + m12 * nz,
                 m20 * nx + m21 * ny + m22 * nz,
-                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.CLAY, emissive,
+                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.ACTOR, emissive,
             )
         }
         val idx = features.indices
@@ -450,7 +454,10 @@ class SpiritEmitter {
         const val SHELL_EMISSIVE = 0.55f
 
         /** Self-light on a drawn expression, so it reads as graphic, not as paint in shadow. */
-        const val FEATURE_EMISSIVE = 0.18f
+        const val FEATURE_EMISSIVE = 0.45f
+
+        /** How much of the head's turn the floating line work follows. */
+        const val FEATURE_FOLLOW = 0.7f
 
         /** How emissive a fully lit channel is; the shading multiplies it by the albedo. */
         const val GLOW_EMISSIVE = 1.7f

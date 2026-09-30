@@ -223,6 +223,8 @@ object IgboMaskGenerator {
         /** The face's own outline, top to bottom: half its width at height v. */
         fun halfWidth(v: Float): Float {
             if (g.flower) return if (abs(v) >= FLOWER_R) 0f else sqrt(FLOWER_R * FLOWER_R - v * v)
+            // An emoji is an oval: the line work floating over it is the face.
+            if (bare) return if (abs(v) >= 1f) 0f else w * sqrt(1f - v * v)
             if (v <= -1f || v >= 1f) return 0f
             val a = abs(v)
             return when (g.face) {
@@ -298,7 +300,7 @@ object IgboMaskGenerator {
             // oval of the head against the disc reads better.
             if (g.crest != CrestForm.NONE && !(g.crest == CrestForm.DISC && discField == CREST)) hairCap(x, v, c)
 
-            if (inFace && bare) { nose(x, v, c); facePaint(u, x, v, c) }
+            if (inFace && bare) facePaint(u, x, v, c)
             if (bare && g.earrings != Earrings.NONE && g.ears == EarForm.NONE) smallEar(x, v, c)
             if (g.hair != HairStyle.NONE && !g.hat) hair(u, x, v, c)
             if (g.earrings != Earrings.NONE) earrings(x, v, c)
