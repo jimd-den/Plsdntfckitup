@@ -1,0 +1,6 @@
+{
+  "name": "Stratum",
+  "description": "An isometric voxel action-RPG sandbox for Android: mine, build and fight through a streamed block world with a Path of Exile style build core, staged world generation with dungeons, and content packs that AI tools can write and paint.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,147 @@
+package com.stratum.app
+
+import android.content.Context
+import java.io.File
+import com.stratum.core.data.ai.OpenRouterImageModel
+import com.stratum.core.data.ai.OpenRouterVideoModel
+import com.stratum.core.data.ai.OpenRouterLanguageModel
+import com.stratum.core.data.character.CharacterRepositoryImpl
+import com.stratum.core.data.settings.PlayerPreferencesStore
+import com.stratum.core.data.sprite.FileImageCache
+import com.stratum.core.data.sprite.VideoFrameExtractor
+import com.stratum.core.data.sprite.SpriteLibrary
+import com.stratum.core.data.sprite.PoseGuideStore
+import com.stratum.core.data.sprite.PoseLibrary
+import com.stratum.core.data.sprite.SpriteProjectStore
+import com.stratum.core.data.sprite.WeaponFitStore
+import com.stratum.core.data.sprite.WeaponLibrary
+import com.stratum.core.data.settings.ProviderSettingsStore
+import com.stratum.core.domain.character.CharacterRepository
+import com.stratum.core.domain.ai.CachingImageModel
+import com.stratum.core.domain.ai.GenerateClipRowUseCase
+import com.stratum.core.domain.ai.VideoModelPort
+import com.stratum.core.domain.ai.GenerateBasePoseUseCase
+import com.stratum.core.domain.ai.GeneratePoseFrameUseCase
+import com.stratum.core.domain.ai.GenerateSpriteSheetUseCase
+import com.stratum.core.domain.ai.GenerateWeaponUseCase
+
+/**
+ * Wires the generation use cases to a real provider.
+ *
+ * The settings store is read on every call rather than captured once, so
+ * changing the key or the model in settings takes effect on the next
+ * generation instead of the next app launch.
+ */
+class AiWiring(context: Context) {
+
+    val settings = ProviderSettingsStore(context)
+
+    /** Persists player's active character art, weapon, and class choices across app restarts. */
+    val playerPreferences = PlayerPreferencesStore(context)
+
+    val languageModel = OpenRouterLanguageModel(configProvider = settings::load)
+
+    /** Shared with the play screen, which forges world art with it. */
+    val imageModel = OpenRouterImageModel(configProvider = settings::load)
+
+    /**
+     * Draws a clip a sheet can be cut from.
+     *
+     * Reads its model from the same settings as the others, and its own field:
+     * video models are not in /models at all, so the image model's setting
+     * could not name one even if you wanted it to.
+     */
+    val videoModel: VideoModelPort = OpenRouterVideoModel(configProvider = settings::load)
+
+    /**
+     * Draws an animation as one clip and cuts its frames out.
+     *
+     * The decoder is handed in here because the domain cannot open a video
+     * container, exactly as it cannot decode a PNG.
+     */
+    val generateClipRow = GenerateClipRowUseCase(
+        videoModel = videoModel,
+        cutFrames = { clip, cuts -> VideoFrameExtractor.framesAt(clip, cuts) },
+    )
+
+    /** Generated sheets live on the device, keyed by id. */
+    val sprites = SpriteLibrary(context)
+
+    /**
+     * Hand-mapped atlases and the art they were mapped from, kept apart from
+     * the baked sheets so re-cutting one never destroys the image it came from.
+     */
+    val spriteProjects = SpriteProjectStore(context)
+
+    /**
+     * The full-size poses a character was built from, kept so a set can be
+     * resumed after a failure and re-packed at another frame size without
+     * paying for a single generation twice.
+     */
+    val poses = PoseLibrary(context).apply {
+        // Reading a set used to create its folder, and the forge probes for
+        // one on every keystroke of the subject line -- so every device that
+        // ran that build carries a folder for every prefix anyone ever typed.
+        // They list as characters with no poses. Swept once on startup rather
+        // than left for the person to delete by hand, twelve at a time.
+        forgetEmptySets()
+    }
+
+    /**
+     * Which skeletons each character was drawn against.
+     *
+     * Kept because the weapon has to be rigged against the same poses the art
+     * followed: rigging a character generated from an imported OpenPose
+     * skeleton against the built-in set hangs the sword where the drawing did
+     * not put the hand.
+     */
+    val poseGuides = PoseGuideStore(context)
+
+    /**
+     * Weapons, kept apart from the characters that swing them: one sword serves
+     * every actor in the game rather than belonging to whoever it was drawn on.
+     */
+    val weapons = WeaponLibrary(context)
+
+    /** How each character holds a weapon: its hands, not the weapon's. */
+    val weaponFits = WeaponFitStore(context)
+
+    /**
+     * Unified repository for Character aggregates, coordinating poses, sprite sheets,
+     * pose guides, and weapon fits under one reactive boundary.
+     */
+    val characterRepository: CharacterRepository = CharacterRepositoryImpl(
+        poses = poses,
+        sprites = sprites,
+        poseGuides = poseGuides,
+        weaponFits = weaponFits,
+    )
+
+    val generateSpriteSheet = GenerateSpriteSheetUseCase(imageModel)
+
+    /** The one drawing a character is built from, and the edits that animate it. */
+    val generateBasePose = GenerateBasePoseUseCase(imageModel)
+
+    /**
+     * Pose frames, answered from what was already paid for when the request is
+     * identical. A run killed between a frame arriving and it being written
+     * would otherwise buy the same frame twice; a deliberate redraw asks with
+     * a new take and is never served from here.
+     */
+    val generatePoseFrame = GeneratePoseFrameUseCase(
+        CachingImageModel(
+            delegate = imageModel,
+            cache = FileImageCache(File(context.cacheDir, "generated_images")),
+            resolvedModel = { settings.load().imageModel },
+        ),
+    )
+
+    val generateWeapon = GenerateWeaponUseCase(imageModel)
+
+    val modelCatalog = languageModel
+
+    /** Generated 3D models: their provider, their store and the pipeline that makes them usable. */
+    val models = ModelWiring(context, settings, imageModel)
+
+    fun isConfigured(): Boolean = settings.isConfigured
+}

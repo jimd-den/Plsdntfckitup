@@ -1,0 +1,37 @@
+# Build output
+build/
+.gradle
+.kotlin
+/captures
+.externalNativeBuild
+.cxx
+
+# Packaging artifacts that CI produces per pull request instead
+*.aar
+*.aab
+*.ap_
+
+# The checked-in playable build lives here by project convention
+!/apk/
+!/apk/**
+
+# IDE
+*.iml
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+
+# Local machine configuration and secrets
+local.properties
+.env
+debug.keystore
+
+# Keystores are secrets, with one deliberate exception: the CI test key below
+# is committed so every pull request produces an installable APK. Its password
+# is published in app/build.gradle.kts. It must never be used to publish.
+*.jks
+!/ci-signing.jks

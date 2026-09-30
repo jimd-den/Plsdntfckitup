@@ -1,0 +1,12 @@
+{
+  "id": "ashen.crusade",
+  "name": "The Ashen Crusade",
+  "version": "1.0.0",
+  "author": "Stratum",
+  "license": "CC-BY-4.0",
+  "description": "A grimdark lore pack written only in data: a crusading order holding ruined hives against a plague cult, with its own fortresses, war camps, warbands, rations, soldiers and studio agent.",
+  "api": 1,
+  "dependencies": [
+    { "id": "igbo", "version": "^2.0" }
+  ]
+}

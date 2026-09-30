@@ -239,10 +239,13 @@ object MicroScenePreview {
         director: StyleSheetArtDirector, textures: TextureLibrary, only: List<String>,
     ) {
         val base = hot.passes
-        for (id in only.ifEmpty { GEOLOGY_SHOTS }) {
+        // An entry is a province id, or `id@x,y` to look from a fixed block, so two builds compare like for like.
+        for (entry in only.ifEmpty { GEOLOGY_SHOTS }) {
+            val id = entry.substringBefore('@')
+            val fixed = entry.substringAfter('@', "").split(',').mapNotNull { it.trim().toIntOrNull() }.takeIf { it.size == 2 }
             val land = base.firstOrNull { it.id == "micro:terrain" } ?: com.stratum.engine.microvoxel.gen.StageSpec("micro:terrain")
             hot.retune(MicrovoxelTerrainGenerator.withStage(base, land.copy(options = land.options + mapOf("geology" to id))))?.let { error("$id: $it") }
-            val v = varied(hot.current)
+            val v = fixed?.let { it[0] to it[1] } ?: varied(hot.current)
             for ((suffix, distance) in listOf("" to 40f, "-far" to 90f)) {
                 val world = StreamingWorld(content.registry, hot, config)
                 world.focusOn(BlockPos(v.first, v.second, 0))

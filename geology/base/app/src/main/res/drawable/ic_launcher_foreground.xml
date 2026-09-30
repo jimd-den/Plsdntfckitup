@@ -1,0 +1,60 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Bronze Sun Ring with Ray Spokes -->
+    <path
+        android:pathData="M54,26 L54,30 M54,78 L54,82 M26,54 L30,54 M78,54 L82,54 M34,34 L37,37 M74,74 L71,71 M34,74 L37,71 M74,34 L71,37"
+        android:strokeColor="#FFC837"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+
+    <!-- Sacred Igbo-Ukwu Bronze Medallion Disc -->
+    <path android:pathData="M54,54m-23,0a23,23 0 1,1 46,0a23,23 0 1,1 -46,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="45"
+                android:startColor="#FFDF79"
+                android:centerColor="#D48B28"
+                android:endColor="#80430A"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+
+    <!-- Concentric Roped Circle Accent -->
+    <path
+        android:pathData="M54,54m-18,0a18,18 0 1,1 36,0a18,18 0 1,1 -36,0"
+        android:strokeColor="#FAF6EE"
+        android:strokeWidth="1.8" />
+
+    <!-- Ikenga Horns & Sacred Ofo Blade Silhouette -->
+    <!-- Central Blade / Scepter -->
+    <path
+        android:pathData="M52,35 L56,35 L55,68 L53,68 Z"
+        android:fillColor="#FAF6EE" />
+    <path
+        android:pathData="M48,65 L60,65 L54,73 Z"
+        android:fillColor="#FFC837" />
+
+    <!-- Curved Ikenga Ram Horns of Strength (Uli style curves) -->
+    <path
+        android:pathData="M54,49 C47,44 40,46 39,38 C38,32 45,34 49,42"
+        android:strokeColor="#FAF6EE"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M54,49 C61,44 68,46 69,38 C70,32 63,34 59,42"
+        android:strokeColor="#FAF6EE"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- Nsibidi Symbol of Power & Unity in the Center -->
+    <path
+        android:pathData="M50,54 L58,54 M54,50 L54,58"
+        android:strokeColor="#2B1408"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+</vector>
