@@ -21,6 +21,8 @@ object MaskCodec {
         "c" to g.crest.name, "ch" to f(g.crestHeight), "cc" to g.crestCount.toString(), "ea" to g.ears.name,
         "tu" to (if (g.tusks) "1" else "0"), "be" to g.beard.name, "p" to g.palette.toString(), "s" to (if (g.symmetric) "1" else "0"),
         "o" to f(g.ornament), "r" to f(g.relief), "fe" to f(g.features),
+        "hs" to g.hair.name, "fp" to g.paint.name, "er" to g.earrings.name,
+        "ht" to (if (g.hat) "1" else "0"), "sh" to (if (g.shades) "1" else "0"), "cn" to (if (g.chain) "1" else "0"), "fl" to (if (g.flower) "1" else "0"),
     ).joinToString(";") { (k, v) -> "$k=$v" }
 
     /** The genome in [text], or null when it is not one. [name] is carried separately: names are free text. */
@@ -42,6 +44,8 @@ object MaskCodec {
                 tusks = map["tu"] == "1", beard = enumOr(map["be"], d.beard), palette = map["p"]?.toIntOrNull() ?: d.palette,
                 symmetric = map["s"] != "0", ornament = map["o"]?.toFloatOrNull() ?: d.ornament,
                 relief = map["r"]?.toFloatOrNull() ?: d.relief, features = map["fe"]?.toFloatOrNull() ?: d.features,
+                hair = enumOr(map["hs"], d.hair), paint = enumOr(map["fp"], d.paint), earrings = enumOr(map["er"], d.earrings),
+                hat = map["ht"] == "1", shades = map["sh"] == "1", chain = map["cn"] == "1", flower = map["fl"] == "1",
             ).normalised()
         }.getOrNull()
     }

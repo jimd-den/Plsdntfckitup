@@ -339,6 +339,7 @@ class SpiritEmitter {
         val opacity = if (fading) pose.opacity.finite().coerceIn(0f, 1f) else 1f
         val p = mesh.positions; val n = mesh.normals
         val first = out.vertexCount
+        val material = if (mesh.face != null) Vertex.CLAY else Vertex.ACTOR
         for (i in 0 until mesh.vertexCount) {
             val o = i * 3
             val lx = p[o] * sxy; val ly = p[o + 1] * sxy; val lz = p[o + 2] * sz
@@ -358,7 +359,7 @@ class SpiritEmitter {
                 m00 * nx + m01 * ny + m02 * nz,
                 m10 * nx + m11 * ny + m12 * nz,
                 m20 * nx + m21 * ny + m22 * nz,
-                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.ACTOR, emissive,
+                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, material, emissive,
             )
         }
         val idx = mesh.indices
@@ -399,7 +400,7 @@ class SpiritEmitter {
                 m00 * nx + m01 * ny + m02 * nz,
                 m10 * nx + m11 * ny + m12 * nz,
                 m20 * nx + m21 * ny + m22 * nz,
-                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.ACTOR, emissive,
+                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.CLAY, emissive,
             )
         }
         val idx = features.indices
@@ -410,7 +411,44 @@ class SpiritEmitter {
         }
     }
 
+    /**
+     * The sticker's edge: the mesh again, swollen by [width] model units
+     * along its normals and pushed [push] of them away from the eye along
+     * ([ax], [ay], [az]), in flat [color]. The head covers all of it but a
+     * clean border round its outline, whatever way it turns -- the white
+     * die-cut edge of an emoji sticker.
+     */
+    fun emitShell(mesh: SpiritMesh, pose: SpiritPose, out: MeshBuilder, ax: Float, ay: Float, az: Float, width: Float, push: Float, color: Int) {
+        orient(pose)
+        val s = pose.scale
+        val sz = s * pose.stretch.let { if (it.isFinite() && it > 0.2f) it else 1f }
+        val sxy = s / sqrt(sz / s)
+        val p = mesh.positions; val n = mesh.normals
+        val first = out.vertexCount
+        val c = color.toLong() and 0xFFFFFFFFL
+        for (i in 0 until mesh.vertexCount) {
+            val o = i * 3
+            val nx = n[o]; val ny = n[o + 1]; val nz = n[o + 2]
+            val lx = p[o] * sxy + nx * width * s; val ly = p[o + 1] * sxy + ny * width * s; val lz = p[o + 2] * sz + nz * width * s
+            out.vertex(
+                pose.x + m00 * lx + m01 * ly + m02 * lz + ax * push * s,
+                pose.y + m10 * lx + m11 * ly + m12 * lz + ay * push * s,
+                pose.z + m20 * lx + m21 * ly + m22 * lz + az * push * s,
+                -ax, -ay, -az, c, 1f, 0f, 0f, Vertex.ACTOR, SHELL_EMISSIVE,
+            )
+        }
+        val idx = mesh.indices
+        var t = 0
+        while (t < idx.size) {
+            out.triangle(first + idx[t], first + idx[t + 1], first + idx[t + 2])
+            t += 3
+        }
+    }
+
     companion object {
+        /** Enough self-light that a white sticker edge stays white in any light. */
+        const val SHELL_EMISSIVE = 0.55f
+
         /** Self-light on a drawn expression, so it reads as graphic, not as paint in shadow. */
         const val FEATURE_EMISSIVE = 0.18f
 

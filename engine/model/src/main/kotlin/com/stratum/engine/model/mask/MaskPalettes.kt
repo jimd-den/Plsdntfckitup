@@ -59,6 +59,10 @@ object MaskPalettes {
     const val ROSE_MIDNIGHT = 8
     const val LAPIS = 9
     const val EMBER = 10
+    const val CAMWOOD = 11
+    const val KAOLIN_CAMWOOD = 12
+    const val OCHRE = 13
+    const val POPPY = 14
 
     val all: List<MaskPalette> = listOf(
         // The maiden's own: whitened with nzu, lined in lampblack, lips of camwood red.
@@ -77,6 +81,11 @@ object MaskPalettes {
         MaskPalette("Lapis & brass", face = "#2C4F9E", ink = "#F1E4C8", crest = "#14204A", second = "#F1E4C8", accent = "#D6A53A", ivory = "#F7EEDC"),
         // Mgbedike: dark, dangerous, one ember of red.
         MaskPalette("Ember", face = "#2C2220", ink = "#F0E3CC", crest = "#7E2A22", second = "#E3B544", accent = "#E4492C", ivory = "#F0E3CC"),
+        // The emoji palettes: camwood (uhie) red, kaolin (nzu) white, ochre, dark hair and gold.
+        MaskPalette("Camwood", face = "#8E2C2F", ink = "#2A1616", crest = "#3B2320", second = "#E8B33A", accent = "#E9B640", ivory = "#F4EEE3"),
+        MaskPalette("Kaolin & camwood", face = "#F4EEE3", ink = "#2A1616", crest = "#3B2320", second = "#8E2C2F", accent = "#E9B640", ivory = "#F4EEE3"),
+        MaskPalette("Ochre", face = "#EDB63C", ink = "#2A1616", crest = "#3B2320", second = "#8E2C2F", accent = "#F2CC5C", ivory = "#F4EEE3"),
+        MaskPalette("Poppy", face = "#2B1718", ink = "#F4EEE3", crest = "#E2313B", second = "#B81F2B", accent = "#E9B640", ivory = "#F4EEE3"),
     )
 
     /** Schemes whose face is pale: the maiden's whitened face and its kin. */

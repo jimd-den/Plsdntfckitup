@@ -45,6 +45,7 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "strips") MaskSpiritShots.strips(out)
         if (only == null || only == "all" || only == "world") MaskSpiritShots.fight(out)
         if (only == null || only == "all" || only == "emoji") emoji(out)
+        if (only == null || only == "all" || only == "stickers") stickers(out)
     }
 
     private fun turntables(out: File) {
@@ -76,16 +77,16 @@ object MaskSpiritPreview {
      * same things, plus a turn of one expression to show it rides the face.
      */
     private fun emoji(out: File) {
-        val feelings = listOf("Calm", "Joy", "Laugh", "Anger", "Shout", "Surprise", "Hurt", "Sorrow", "Focus", "Radiant", "Dazed", "Rest")
+        val feelings = listOf("Calm", "Smile", "Wink", "Laugh", "Cheeky", "Love", "Star", "Surprise", "Anger", "Hurt", "Sad", "Sleep")
         val grid = ArrayList<BufferedImage>()
-        val pick = listOf("Joy", "Anger", "Surprise", "Hurt", "Radiant", "Rest")
+        val pick = listOf("Calm", "Smile", "Wink", "Laugh", "Love", "Surprise")
         MaskGenome.presets.forEachIndexed { i, g ->
             val mesh = MaskSpiritMesher.build(g, emoji = true)
             val face = mesh.face ?: error("${g.name} has no emoji face")
             val t0 = System.nanoTime()
             val views = feelings.map { f ->
                 val features = com.stratum.engine.model.mask.EmojiFace.build(g, face, com.stratum.engine.model.mask.EmojiFace.presets.getValue(f))
-                f to studio(mesh, 240, 290, features) { it.yaw = 0.22f; it.glow = 0.5f; it.eyes = 0.3f }
+                f to studio(mesh, 240, 290, features, sunny = true) { it.yaw = 0.22f; it.glow = 0.1f; it.eyes = 0f }
             }
             val ms = (System.nanoTime() - t0) / 1e6 / feelings.size
             ImageIO.write(sheet(views.map { (f, img) -> caption(img, f) }, 6), "png", File(out, "emoji-%02d-%s.png".format(i + 1, slug(g.name))))
@@ -96,9 +97,28 @@ object MaskSpiritPreview {
         // One feeling, turned: the drawn face rides the 3D head.
         val g = MaskGenome.presets[1]
         val mesh = MaskSpiritMesher.build(g, emoji = true)
-        val features = com.stratum.engine.model.mask.EmojiFace.build(g, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue("Joy"))
-        val turn = listOf(-1.0f, -0.5f, 0f, 0.5f, 1.0f).map { yaw -> studio(mesh, 260, 320, features) { it.yaw = yaw; it.glow = 0.5f; it.eyes = 0.3f } }
-        ImageIO.write(strip(turn, "${g.name} · Joy, turning: a drawn face on a 3D mask"), "png", File(out, "emoji-turn.png"))
+        val features = com.stratum.engine.model.mask.EmojiFace.build(g, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue("Wink"))
+        val turn = listOf(-1.0f, -0.5f, 0f, 0.5f, 1.0f).map { yaw -> studio(mesh, 260, 320, features, sunny = true) { it.yaw = yaw; it.glow = 0.1f; it.eyes = 0f } }
+        ImageIO.write(strip(turn, "${g.name} · Wink, turning: a drawn face on a 3D mask"), "png", File(out, "emoji-turn.png"))
+    }
+
+    /** The Igbo emoji set as a sticker sheet, each in its own feeling, and each one showing every feeling. */
+    private fun stickers(out: File) {
+        val cards = com.stratum.engine.model.mask.IgboEmoji.set.map { e ->
+            val mesh = MaskSpiritMesher.build(e.genome, emoji = true)
+            val features = com.stratum.engine.model.mask.EmojiFace.build(e.genome, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue(e.feeling))
+            caption(studio(mesh, 260, 300, features, sunny = true) { it.yaw = 0.12f; it.glow = 0.1f; it.eyes = 0f }, e.name)
+        }
+        ImageIO.write(sheet(cards, 6), "png", File(out, "igbo-emoji-set.png"))
+        val feelings = listOf("Calm", "Smile", "Wink", "Laugh", "Cheeky", "Love", "Star", "Surprise", "Anger", "Hurt", "Sad", "Sleep")
+        for (e in com.stratum.engine.model.mask.IgboEmoji.set.take(4)) {
+            val mesh = MaskSpiritMesher.build(e.genome, emoji = true)
+            val views = feelings.map { f ->
+                caption(studio(mesh, 220, 260, com.stratum.engine.model.mask.EmojiFace.build(e.genome, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue(f)), sunny = true) { it.yaw = 0.12f; it.glow = 0.1f }, f)
+            }
+            ImageIO.write(sheet(views, 6), "png", File(out, "igbo-emoji-${slug(e.name)}.png"))
+        }
+        println("wrote igbo-emoji-set.png")
     }
 
     private fun caption(img: BufferedImage, text: String): BufferedImage {
@@ -116,6 +136,7 @@ object MaskSpiritPreview {
     /** A mask alone in a studio: a Deco backdrop, a key light, the pose set by [setup]. */
     fun studio(
         mesh: SpiritMesh, width: Int, height: Int, features: com.stratum.engine.scene.SpiritFeatures? = null,
+        sunny: Boolean = false,
         setup: (com.stratum.engine.scene.SpiritPose) -> Unit,
     ): BufferedImage {
         val spirit = SpiritInstance(mesh)
@@ -123,7 +144,7 @@ object MaskSpiritPreview {
         spirit.pose.scale = 2.1f
         setup(spirit.pose)
         val camera = SceneCamera(target = Vec3(0f, 0f, 0f), pitch = 8f, yaw = 270f, distance = 6f, fovY = 26f, aspect = width.toFloat() / height, near = 1f, far = 30f)
-        val lighting = studioLight()
+        val lighting = if (sunny) sunnyLight() else studioLight()
         val solid = MeshBuilder(MaterialKind.OPAQUE); val fading = MeshBuilder(MaterialKind.CUTOUT); val glows = MeshBuilder(MaterialKind.GLOW)
         val lights = ArrayList<PointLight>()
         SpiritStage().draw(listOf(spirit), camera, solid, fading, glows, lights)
@@ -143,6 +164,21 @@ object MaskSpiritPreview {
         val m = com.stratum.engine.scene.Mat4
         val view = m.lookAt(target + sun * 20f, target, if (kotlin.math.abs(sun.z) > 0.95f) Vec3(0f, 1f, 0f) else Vec3.UP)
         return m.multiply(m.orthographic(-extent, extent, -extent, extent, 1f, 40f), view)
+    }
+
+    /** A bright village afternoon: warm sun, a pale blue sky, soft light everywhere -- the sticker sheet's. */
+    private fun sunnyLight(): SceneLighting {
+        val base = director.lightingFor(null, WorldTime(dayFraction = 0.4f))
+        val sx = 0.35f; val sy = 0.8f; val sz = 0.7f
+        val l = kotlin.math.sqrt(sx * sx + sy * sy + sz * sz)
+        return base.copy(
+            sunX = sx / l, sunY = sy / l, sunZ = sz / l,
+            fogStart = 100f, fogEnd = 200f, fogFloor = -100f,
+            skyTop = 0xFF9FD6EE, skyBottom = 0xFFF6E7C8, vignette = 0.1f,
+            sunColor = 0xFFFFF1DC, skyAmbient = 0xFFDCEBF5, groundAmbient = 0xFFF2D9BE,
+            ambientIntensity = base.ambientIntensity * 1.35f, sunIntensity = base.sunIntensity * 1.1f,
+            shadowStrength = 0.4f, saturation = base.saturation * 1.1f,
+        )
     }
 
     private fun studioLight(): SceneLighting {

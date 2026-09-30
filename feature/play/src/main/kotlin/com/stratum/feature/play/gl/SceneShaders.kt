@@ -325,6 +325,13 @@ internal object SceneShaders {
                 float edge = 1.0 - max(0.0, dot(n, toEye));
                 color += uRim * edge * edge;
             }
+            // Glossy clay (ShadingModel.clay): a studio highlight and a rim sheen.
+            if (vLayer < -2.5) {
+                vec3 h = normalize(uSun + toEye);
+                color += uSunColor * pow(max(0.0, dot(n, h)), ${f(ShadingModel.CLAY_SHINE)}) * ${f(ShadingModel.CLAY_SPEC)} * (0.3 + 0.7 * lit);
+                float f = 1.0 - max(0.0, dot(n, toEye));
+                color += uSky * f * f * f * ${f(ShadingModel.CLAY_SHEEN)};
+            }
             if (uHaze) {
                 vec4 hz = haze(vWorld, dist, uEye, uSun, uFog);
                 color = mix(color, vec3(untone(hz.r), untone(hz.g), untone(hz.b)), hz.a);

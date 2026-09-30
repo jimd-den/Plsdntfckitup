@@ -329,6 +329,26 @@ object ShadingModel {
 
     const val EMISSIVE_GAIN = 1.6f
 
+    /** How tight a clay highlight is, and how bright; the rim sheen's strength. */
+    const val CLAY_SHINE = 36f
+    const val CLAY_SPEC = 0.55f
+    const val CLAY_SHEEN = 0.35f
+
+    /**
+     * The glossy clay finish ([Vertex.CLAY]) added to [out] after [shade]:
+     * a Blinn highlight from the sun, dimmed in shadow, and a sheen of sky
+     * light round the rim. Twin of the clay block in `LIT_FRAGMENT`.
+     */
+    fun clay(t: Terms, nx: Float, ny: Float, nz: Float, ex: Float, ey: Float, ez: Float, lit: Float, out: FloatArray) {
+        var hx = t.sun[0] + ex; var hy = t.sun[1] + ey; var hz = t.sun[2] + ez
+        val hl = sqrt(hx * hx + hy * hy + hz * hz).coerceAtLeast(1e-5f)
+        hx /= hl; hy /= hl; hz /= hl
+        val spec = Math.pow(max(0f, nx * hx + ny * hy + nz * hz).toDouble(), CLAY_SHINE.toDouble()).toFloat() * CLAY_SPEC * (0.3f + 0.7f * lit)
+        val facing = max(0f, nx * ex + ny * ey + nz * ez)
+        val sheen = (1f - facing).let { it * it * it } * CLAY_SHEEN
+        for (k in 0 until 3) out[k] += t.sunColor[k] * spec + t.sky[k] * sheen
+    }
+
     const val DETILE_COS = 0.8253356f   // cos(0.6)
     const val DETILE_SIN = 0.5646425f   // sin(0.6)
     const val DETILE_SCALE = 0.71f

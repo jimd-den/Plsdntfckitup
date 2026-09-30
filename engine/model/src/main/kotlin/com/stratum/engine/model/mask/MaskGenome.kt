@@ -103,6 +103,14 @@ enum class EarForm(val label: String) { NONE("None"), SMALL("Small"), ELEPHANT("
 
 enum class BeardForm(val label: String) { NONE("None"), STRIPED("Striped"), POINTED("Pointed") }
 
+/** Hair on an emoji head, in the crest's colour: a close cap, a ring of afro puffs, a bun, a crown banded in zigzag, cornrow braids. */
+enum class HairStyle(val label: String) { NONE("None"), CAP("Cap"), PUFFS("Puffs"), BUN("Bun"), CROWN("Zigzag crown"), BRAIDS("Braids") }
+
+/** Face paint in the second colour: half the face, an ochre T over brow and nose, the brow, the chin, a band across the eyes. */
+enum class FacePaint(val label: String) { NONE("None"), HALF("Half"), T_ZONE("T-zone"), BROW("Brow"), CHIN("Chin"), EYE_BAND("Eye band") }
+
+enum class Earrings(val label: String) { NONE("None"), HOOPS("Hoops"), DROPS("Drops") }
+
 /**
  * Everything that makes one mask different from another: a few dozen plain
  * values the studio's dials edit and [IgboMaskGenerator] turns into voxels.
@@ -151,6 +159,18 @@ data class MaskGenome(
     val relief: Float = 0.5f,
     /** Where the features sit: 0 low in the face (a tall brow), 1 high (a long chin). */
     val features: Float = 0.5f,
+    /** Emoji dress: hair, face paint and what is worn. The carved masks ignore them. */
+    val hair: HairStyle = HairStyle.NONE,
+    val paint: FacePaint = FacePaint.NONE,
+    val earrings: Earrings = Earrings.NONE,
+    /** A bucket hat, cream, an uli knot on its front. */
+    val hat: Boolean = false,
+    /** Dark glasses over the eyes. */
+    val shades: Boolean = false,
+    /** A gold chain under the chin. */
+    val chain: Boolean = false,
+    /** Not a face at all: a poppy, its dark heart the face. */
+    val flower: Boolean = false,
 ) {
     init {
         require(height in MIN_HEIGHT..MAX_HEIGHT) { "a mask is $MIN_HEIGHT..$MAX_HEIGHT voxels tall, not $height" }

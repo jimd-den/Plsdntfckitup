@@ -134,6 +134,9 @@ object IgboMaskGenerator {
      */
     internal class Cell { var h = 0f; var slot = 0; var glow = 0 }
 
+    /** The poppy's heart, its face, in face units. */
+    internal const val FLOWER_R = 0.46f
+
     internal const val GLOW_EYES = 1
     internal const val GLOW_LINES = 2
     internal const val GLOW_CREST = 3
@@ -165,7 +168,8 @@ object IgboMaskGenerator {
 
         // ---- Proportions -------------------------------------------------
         /** Half the face's width at its widest. */
-        private val w = 0.5f + 0.32f * g.width * (if (g.face == FaceShape.LONG) 0.85f else 1f) * (if (g.face == FaceShape.ROUND) 1.12f else 1f)
+        private val w = (if (bare) 0.7f + 0.16f * g.width else 0.5f + 0.32f * g.width) *
+            (if (g.face == FaceShape.LONG) 0.85f else 1f) * (if (g.face == FaceShape.ROUND) 1.12f else 1f)
 
         /** Feature heights, all derived from the eye line so they move together. */
         private val ey = 0.1f + 0.18f * (g.features - 0.5f)
@@ -174,7 +178,7 @@ object IgboMaskGenerator {
         private val my = ey - 0.72f
 
         /** Where the features sit, in face units: half the face's width, the eye line, the eyes' spread, the mouth line. */
-        val plan: FloatArray get() = floatArrayOf(w, ey, ex, my)
+        val plan: FloatArray get() = if (g.flower) floatArrayOf(FLOWER_R, 0.06f, 0.17f, -0.2f) else floatArrayOf(w, ey, ex, my)
 
         /** Relief multiplier: how far features stand from the face. */
         private val k = 0.6f + 0.8f * g.relief
@@ -218,6 +222,7 @@ object IgboMaskGenerator {
 
         /** The face's own outline, top to bottom: half its width at height v. */
         fun halfWidth(v: Float): Float {
+            if (g.flower) return if (abs(v) >= FLOWER_R) 0f else sqrt(FLOWER_R * FLOWER_R - v * v)
             if (v <= -1f || v >= 1f) return 0f
             val a = abs(v)
             return when (g.face) {
@@ -259,6 +264,7 @@ object IgboMaskGenerator {
 
         fun sample(u: Float, v: Float, c: Cell) {
             c.h = 0f; c.slot = 0; c.glow = 0
+            if (g.flower) { poppy(u, v, c); return }
             // Everything bilateral is drawn at |u|; only the deliberately
             // one-sided ornaments look at the sign.
             val x = abs(u)
@@ -287,11 +293,17 @@ object IgboMaskGenerator {
             val hw = halfWidth(v)
             val inFace = x < hw
             if (inFace) set(c, faceHeight(x, v, hw), FACE)
+            if (inFace && !bare) facePaint(u, x, v, c)
             // A disc the same colour as the hair would swallow it; there the bare
             // oval of the head against the disc reads better.
             if (g.crest != CrestForm.NONE && !(g.crest == CrestForm.DISC && discField == CREST)) hairCap(x, v, c)
 
-            if (inFace && bare) nose(x, v, c)
+            if (inFace && bare) { nose(x, v, c); facePaint(u, x, v, c) }
+            if (bare && g.earrings != Earrings.NONE && g.ears == EarForm.NONE) smallEar(x, v, c)
+            if (g.hair != HairStyle.NONE && !g.hat) hair(u, x, v, c)
+            if (g.earrings != Earrings.NONE) earrings(x, v, c)
+            if (g.hat) hat(x, v, c)
+            if (g.chain) chain(x, v, c)
             if (inFace && !bare) {
                 brows(x, v, c)
                 eyes(x, v, left, c)
@@ -475,6 +487,120 @@ object IgboMaskGenerator {
             if (g.ornament > 0.25f && v - hairline < line * 2.2f && p.second != p.crest) {
                 paint(c, SECOND)
             }
+        }
+
+        // ---- Emoji dress ----------------------------------------------------
+
+        /** Hair in the crest colour, framing the face lower than a mask's hairline, like a head of hair. */
+        private fun hair(u: Float, x: Float, v: Float, c: Cell) {
+            val hairline = 0.46f + 0.26f * (x / w).pow(2)
+            val puffs = g.hair == HairStyle.PUFFS
+            if (v >= hairline && ellipse(x, v, 0f, 0.28f, w * 1.1f, 0.98f) < 0f) {
+                val hw = halfWidth(v.coerceAtMost(0.99f)).coerceAtLeast(0.001f)
+                val under = if (x < hw) faceHeight(x, v, hw) else rim
+                set(c, max(under + 0.05f, rim + 0.16f), CREST)
+                when (g.hair) {
+                    HairStyle.CROWN -> {
+                        // A gold band over the hairline, maroon zigzags standing in it.
+                        val band = v - hairline
+                        if (band < 0.16f) {
+                            val phase = (((u + 10f) / 0.14f) % 1f)
+                            val tooth = 0.16f * (1f - abs(2f * phase - 1f))
+                            paint(c, if (band < tooth) SECOND else ACCENT)
+                        }
+                    }
+                    HairStyle.BRAIDS -> {
+                        // Cornrows running back from the brow, over a band at the hairline.
+                        if (v - hairline < 0.07f) paint(c, SECOND)
+                        else if (((u + 10f) % 0.13f) < 0.062f) lift(c, 0.035f, CREST)
+                    }
+                    else -> Unit
+                }
+            }
+            if (puffs) {
+                // A ring of afro puffs round the crown, each a soft ball.
+                for (i in 0 until 7) {
+                    val a = (PI * (0.1 + 0.8 * i / 6.0)).toFloat()
+                    val px = abs(cos(a) * w * 1.04f); val pv = 0.34f + sin(a) * 0.8f
+                    val r = 0.2f
+                    val d = len(x - px, v - pv)
+                    if (d < r) raise(c, rim + 0.22f + 0.16f * sqrt(1f - (d / r) * (d / r)), CREST)
+                }
+            }
+            if (g.hair == HairStyle.BUN) {
+                val d = len(x, v - 1.12f)
+                if (d < 0.3f) raise(c, rim + 0.25f + 0.2f * sqrt(1f - (d / 0.3f) * (d / 0.3f)), CREST)
+                if (abs(v - 0.86f) < 0.04f && x < 0.22f) raise(c, rim + 0.3f, ACCENT)
+            }
+        }
+
+        /** Face paint in the second colour. */
+        private fun facePaint(u: Float, x: Float, v: Float, c: Cell) {
+            val on = when (g.paint) {
+                FacePaint.NONE -> false
+                FacePaint.HALF -> u < 0f
+                FacePaint.T_ZONE -> v > ey + 0.3f || (x < 0.085f && v > noseBottom - 0.02f)
+                FacePaint.BROW -> v > ey + 0.3f
+                FacePaint.CHIN -> v < my + 0.12f
+                FacePaint.EYE_BAND -> abs(v - ey) < 0.17f
+            }
+            if (on) paint(c, SECOND)
+        }
+
+        /** Gold hoops or drops hanging from the ears. */
+        private fun earrings(x: Float, v: Float, c: Cell) {
+            val cx = halfWidth(ey - 0.05f) + 0.05f
+            when (g.earrings) {
+                Earrings.HOOPS -> {
+                    val d = len(x - cx, v - (ey - 0.46f))
+                    if (abs(d - 0.11f) < 0.032f) raise(c, rim + 0.14f, ACCENT)
+                }
+                Earrings.DROPS -> {
+                    val top = len(x - cx, v - (ey - 0.33f))
+                    val drop = len((x - cx) * 1.1f, v - (ey - 0.47f))
+                    if (top < 0.045f) raise(c, rim + 0.14f, ACCENT)
+                    if (drop < 0.08f) raise(c, rim + 0.12f + 0.08f * sqrt(1f - (drop / 0.08f).let { it * it }), ACCENT)
+                }
+                Earrings.NONE -> Unit
+            }
+        }
+
+        /** A cream bucket hat: a soft crown and a brim that stands forward, an uli knot on the front. */
+        private fun hat(x: Float, v: Float, c: Cell) {
+            val crown = ellipse(x, v, 0f, 0.8f, w * 0.98f, 0.52f)
+            if (crown < 0f && v > 0.5f) {
+                raise(c, rim + 0.32f + 0.14f * min(1f, -crown / 0.3f), IVORY)
+                // The knot: a ring crossed by a bar.
+                val k = len(x, v - 0.9f)
+                if (abs(k - 0.075f) < 0.02f || (k < 0.075f && abs(v - 0.9f) < 0.016f)) paint(c, INK)
+            }
+            if (ellipse(x, v, 0f, 0.46f, w * 1.45f, 0.14f) < 0f) raise(c, rim + 0.36f, IVORY)
+        }
+
+        /** A gold chain hung under the chin, bead by bead. */
+        private fun chain(x: Float, v: Float, c: Cell) {
+            for (i in 0..12) {
+                val t = i / 12f
+                val bx = abs((t * 2f - 1f) * w * 0.72f); val bv = -1.02f - 0.15f * (1f - (2f * t - 1f).let { it * it })
+                val d = len(x - bx, v - bv)
+                if (d < 0.048f) raise(c, rim + 0.08f + 0.05f * sqrt(1f - (d / 0.048f).let { it * it }), ACCENT)
+            }
+        }
+
+        /** The poppy: six petals round a dark heart that is its face. */
+        private fun poppy(u: Float, v: Float, c: Cell) {
+            val x = abs(u)
+            for (i in 0 until 6) {
+                val a = (PI / 2 + i * PI / 3).toFloat()
+                val px = cos(a) * 0.6f; val pv = sin(a) * 0.6f
+                // Mirror so a petal and its twin across the middle are the same shape.
+                val d = len(x - abs(px), v - pv)
+                val r = 0.5f
+                if (d < r) raise(c, 0.1f + 0.2f * sqrt(1f - (d / r) * (d / r)) + 0.04f * (len(x, v) / 1.1f), CREST)
+            }
+            val core = len(x, v)
+            if (core < FLOWER_R + 0.06f && c.h > 0f) paint(c, SECOND)
+            if (core < FLOWER_R) set(c, 0.32f + 0.16f * sqrt(1f - (core / FLOWER_R).let { it * it }), FACE)
         }
 
         // ---- Ears ---------------------------------------------------------

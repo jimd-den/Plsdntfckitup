@@ -76,6 +76,13 @@ object Vertex {
         15f / 16, 7f / 16, 13f / 16, 5f / 16,
     )
     const val ACTOR = -2f
+
+    /**
+     * Glossy clay: a character lit like the actors, plus a soft studio
+     * highlight and a sheen at the rim -- the vinyl-toy finish of a 3D
+     * emoji. See [ShadingModel.clay].
+     */
+    const val CLAY = -3f
     const val DISC = 0f
     const val RING = 1f
 

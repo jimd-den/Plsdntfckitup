@@ -638,6 +638,7 @@ class SceneRasterizer(
                     s.frame.lights, s.lightColors, s.out,
                     occlusionDepth = if (kind == MaterialKind.OPAQUE) s.look.occlusionDepth else 0f,
                 )
+                if (layer < Vertex.CLAY + 0.5f) ShadingModel.clay(s.terms, nx, ny, nz, ex, ey, ez, lit, s.out)
                 atmosphere(s, dist, wx, wy, wz)
                 val c = o * 3
                 color[c] = s.out[0]; color[c + 1] = s.out[1]; color[c + 2] = s.out[2]

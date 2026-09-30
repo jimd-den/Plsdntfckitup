@@ -29,7 +29,10 @@ import kotlin.math.sqrt
  * Allocation-free: the camera's axes are read into fields once per frame and
  * every quad is written straight into the builders.
  */
-class SpiritStage {
+class SpiritStage(
+    /** Draw emoji heads with a white sticker edge. */
+    var sticker: Boolean = true,
+) {
     private val emitter = SpiritEmitter()
     private val scratch = FloatArray(6)
     /** A pose reused for a spirit's hands and charms. */
@@ -71,6 +74,8 @@ class SpiritStage {
 
         if (opacity > 0.02f) {
             val body = if (opacity < 0.999f) fading else solid
+            // An emoji head wears the white die-cut edge of a sticker.
+            if (mesh.face != null && opacity > 0.9f && sticker) emitter.emitShell(mesh, pose, body, -tx, -ty, -tz, STICKER_WIDTH, STICKER_PUSH, STICKER_WHITE)
             emitter.emit(mesh, pose, body, fading = opacity < 0.999f)
             spirit.features?.let { emitter.emitFeatures(it, pose, body, fading = opacity < 0.999f) }
             if (pose.fringeRibbons > 0 && pose.fringePoints > 1) fringe(mesh, pose, body, opacity)
@@ -259,5 +264,9 @@ class SpiritStage {
         const val SHARDS = 12
         const val FLARE_LIGHT = 1.6f
         const val HOT = 0xFFFFF6E6L
+        /** The sticker edge: how far the white shell swells past the head, how far it sits behind it, and its white. */
+        const val STICKER_WIDTH = 0.07f
+        const val STICKER_PUSH = 0.35f
+        const val STICKER_WHITE = 0xFFFFFCF6.toInt()
     }
 }
