@@ -185,6 +185,8 @@ class MaskCharacters(
         body.impact = if (impact.isFinite()) impact.coerceIn(0f, 1f) else 0f
         if (aimX.isFinite() && aimY.isFinite()) body.aim(aimX, aimY, body.trueZ + 1f) else body.clearAim()
 
+        // Out of death under the same id (the hero respawned): the mask comes back, rising in.
+        if (s.state == AnimationState.DIE && state != AnimationState.DIE) body.revive()
         if (state != s.state) {
             when (state) {
                 AnimationState.ATTACK -> body.strike()

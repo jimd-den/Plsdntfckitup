@@ -184,6 +184,19 @@ class MotionBody {
 
     val deathDone: Boolean get() = dying && deathAge >= profile.death
 
+    /**
+     * Back from the dead: the same body, whole again, rising in as it did
+     * when it first appeared. For a character the game brings back under the
+     * same id -- the hero after a respawn -- whose body would otherwise stay
+     * a finished death, drawn as nothing, for the rest of the run.
+     */
+    fun revive() {
+        if (!dying) return
+        deathAge = -1f
+        strikeAge = -1f; castAge = -1f; hitAge = -1f; critAge = -1f; blockAge = -1f
+        spawnAge = 0f
+    }
+
     // ---- Time ----------------------------------------------------------------
 
     /** Advances everything by [dt] seconds; see the class notes for why any [dt] is safe. */
