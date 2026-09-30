@@ -39,7 +39,7 @@ import kotlin.random.Random
  */
 object EmojiMask {
 
-    enum class FaceShape(val label: String) { OVAL("Oval"), ROUND("Round"), LONG("Long"), HEART("Heart") }
+    enum class FaceShape(val label: String) { OVAL("Oval"), ROUND("Round"), LONG("Long"), HEART("Heart"), SHIELD("Shield"), BLADE("Blade"), SQUARE("Square jaw") }
     enum class Hairline(val label: String) { PEAK("Peaked"), HIGH("High dome"), SCALLOP("Scalloped"), LOW("Low"), BALD("None") }
     enum class Crest(val label: String) {
         NONE("None"), COMBS("Combs"), LOBES("Lobes"), RIDGES("Ridges"), KNOTS("Knots"), CONE("Cone"), HORNS("Horns"), TIERS("Tiers"), PLUMES("Plumes"),
@@ -57,7 +57,7 @@ object EmojiMask {
     /** What makes a mask this mask. Colours are [AfricanMaskArt.PIGMENTS] indices. */
     data class Look(
         val name: String = "Mask",
-        val shape: FaceShape = FaceShape.OVAL,
+        val shape: FaceShape = FaceShape.SHIELD,
         /** 0 narrow .. 1 wide. */
         val width: Float = 0.5f,
         val ground: Int = CAMWOOD,
@@ -183,35 +183,35 @@ object EmojiMask {
     /** Masks after the carvers' own: maidens, spirits, the brave. */
     /** Igbo masks after the carvers': maidens and spirits of the masquerade, titled elders, the old bronzes. */
     val presets: List<Look> = listOf(
-        Look("Agbogho Mmuo", ground = CAMWOOD, wood = BLACKWOOD, accent = KAOLIN, shape = FaceShape.LONG, width = 0.4f, crestColour = BLACKWOOD, crestCount = 3, crestSize = 0.6f,
+        Look("Agbogho Mmuo", ground = CAMWOOD, wood = BLACKWOOD, accent = KAOLIN, shape = FaceShape.SHIELD, width = 0.4f, crestColour = BLACKWOOD, crestCount = 3, crestSize = 0.6f,
             hairline = Hairline.HIGH, marks = setOf(Mark.LINE, Mark.STAR, Mark.TEMPLE), paint = setOf(Paint.SPIRALS)),
-        Look("Okoroshi Mma", finish = Finish.CARVED, shape = FaceShape.LONG, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = OCHRE, width = 0.35f,
+        Look("Okoroshi Mma", finish = Finish.CARVED, shape = FaceShape.BLADE, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = OCHRE, width = 0.35f,
             hairline = Hairline.BALD, crest = Crest.RIDGES, crestCount = 1, crestSize = 0.6f, crestColour = BLACKWOOD, eyes = EyeStyle.SLIT, brows = BrowStyle.NONE,
             paint = setOf(Paint.HEART), marks = setOf(Mark.LINE)),
-        Look("Okoroshi Ojo", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = LAMPBLACK, accent = KAOLIN, accent2 = GOLD, hairline = Hairline.LOW,
+        Look("Okoroshi Ojo", finish = Finish.CARVED, shape = FaceShape.SQUARE, ground = BLACKWOOD, wood = BLACKWOOD, hair = LAMPBLACK, accent = KAOLIN, accent2 = GOLD, hairline = Hairline.LOW,
             crest = Crest.NONE, eyes = EyeStyle.ROUND, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, mouth = MouthStyle.TEETH, marks = setOf(Mark.ICHI), width = 0.7f),
-        Look("Mgbedike", finish = Finish.CARVED, shape = FaceShape.ROUND, ground = MAHOGANY, wood = MAHOGANY, hair = BLACKWOOD, accent = KAOLIN, accent2 = GOLD, crestColour = BONE,
+        Look("Mgbedike", finish = Finish.CARVED, shape = FaceShape.SQUARE, ground = MAHOGANY, wood = MAHOGANY, hair = BLACKWOOD, accent = KAOLIN, accent2 = GOLD, crestColour = BONE,
             hairline = Hairline.BALD, crest = Crest.HORNS, crestSize = 0.8f, eyes = EyeStyle.TUBE, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, mouth = MouthStyle.TEETH,
             ears = Ears.SMALL, marks = setOf(Mark.CHEEK), beard = true, width = 0.8f),
-        Look("Ikenga", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN, crestColour = UMBER,
+        Look("Ikenga", finish = Finish.CARVED, shape = FaceShape.SQUARE, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN, crestColour = UMBER,
             hairline = Hairline.BALD, crest = Crest.HORNS, crestSize = 1f, eyes = EyeStyle.BEAN, brows = BrowStyle.RIDGE, mouth = MouthStyle.WIDE,
             marks = setOf(Mark.ICHI, Mark.TEMPLE), beard = true, width = 0.6f),
         Look("Igbo-Ukwu Bronze", finish = Finish.BRASS, ground = BRASS, wood = BRASS, hair = BRASS, crest = Crest.NONE, hairline = Hairline.HIGH, braids = true,
             cowries = true, eyes = EyeStyle.BEAN, brows = BrowStyle.NONE, marks = setOf(Mark.ICHI, Mark.TEMPLE, Mark.CHEEK), accent = CORAL, accent2 = CORAL,
-            shape = FaceShape.OVAL, width = 0.55f),
-        Look("Ijele", ground = OCHRE, wood = MAHOGANY, accent = VERMILION, accent2 = JADE, crestColour = JADE, crest = Crest.TIERS, hairline = Hairline.HIGH,
+            shape = FaceShape.HEART, width = 0.55f),
+        Look("Ijele", shape = FaceShape.SHIELD, ground = OCHRE, wood = MAHOGANY, accent = VERMILION, accent2 = JADE, crestColour = JADE, crest = Crest.TIERS, hairline = Hairline.HIGH,
             marks = setOf(Mark.ICHI), paint = setOf(Paint.SPIRALS), cowries = true),
-        Look("Afikpo Okumkpa", finish = Finish.CARVED, shape = FaceShape.LONG, ground = IROKO, wood = IROKO, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN,
+        Look("Afikpo Okumkpa", finish = Finish.CARVED, shape = FaceShape.BLADE, ground = IROKO, wood = IROKO, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN,
             hairline = Hairline.BALD, crest = Crest.NONE, paint = setOf(Paint.EYE_BAND), marks = setOf(Mark.ICHI), width = 0.25f, brows = BrowStyle.THIN, eyes = EyeStyle.SLIT),
         Look("Ogbodo Enyi", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = LAMPBLACK, hairline = Hairline.LOW, crest = Crest.KNOTS, crestCount = 1,
             crestColour = CAMWOOD, eyes = EyeStyle.ROUND, mouth = MouthStyle.TEETH, ears = Ears.ELEPHANT, accent = KAOLIN, marks = setOf(Mark.ICHI),
             shape = FaceShape.ROUND, width = 0.8f),
-        Look("Mbari Nne", ground = OCHRE, wood = UMBER, hair = LAMPBLACK, crest = Crest.CONE, crestColour = CAMWOOD, crestSize = 0.8f, accent = OCHRE, accent2 = CAMWOOD,
+        Look("Mbari Nne", shape = FaceShape.HEART, ground = OCHRE, wood = UMBER, hair = LAMPBLACK, crest = Crest.CONE, crestColour = CAMWOOD, crestSize = 0.8f, accent = OCHRE, accent2 = CAMWOOD,
             hairline = Hairline.HIGH, marks = setOf(Mark.LINE, Mark.KELOID), paint = setOf(Paint.SPIRALS, Paint.CHIN), earrings = true),
         Look("Uli Maiden", finish = Finish.CARVED, ground = CAMWOOD, wood = CAMWOOD, hair = BLACKWOOD, crest = Crest.LOBES, crestCount = 3, crestColour = BLACKWOOD,
             accent = KAOLIN, accent2 = GOLD, paint = setOf(Paint.SPIRALS), marks = setOf(Mark.STAR, Mark.TEMPLE), cowries = true, shape = FaceShape.HEART),
         Look("Ichi Elder", finish = Finish.CARVED, ground = UMBER, wood = UMBER, hair = BLACKWOOD, accent = KAOLIN, hairline = Hairline.BALD, crest = Crest.NONE,
-            eyes = EyeStyle.BEAN, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, marks = setOf(Mark.ICHI, Mark.TEMPLE, Mark.CHEEK), beard = true, shape = FaceShape.LONG, width = 0.5f),
+            eyes = EyeStyle.BEAN, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, marks = setOf(Mark.ICHI, Mark.TEMPLE, Mark.CHEEK), beard = true, shape = FaceShape.SHIELD, width = 0.5f),
     )
 
     /**
@@ -239,7 +239,7 @@ object EmojiMask {
         val eyes = one(listOf(EyeStyle.BEAN, EyeStyle.BEAN, EyeStyle.BEAN, EyeStyle.TUBE, EyeStyle.TUBE, EyeStyle.ROUND, EyeStyle.ROUND, EyeStyle.SLIT, EyeStyle.ALMOND))
         return Look(
             name = name,
-            shape = one(FaceShape.entries),
+            shape = one(listOf(FaceShape.SHIELD, FaceShape.SHIELD, FaceShape.BLADE, FaceShape.BLADE, FaceShape.SQUARE, FaceShape.SQUARE, FaceShape.HEART, FaceShape.HEART, FaceShape.LONG, FaceShape.ROUND)),
             width = 0.2f + r.nextFloat() * 0.6f,
             ground = ground,
             hair = if (finish == Finish.BRASS) BRASS else one(listOf(LAMPBLACK, BLACKWOOD, BLACKWOOD, INDIGO, wood)),
@@ -299,8 +299,8 @@ object EmojiMask {
 
     private class Rig(val cv: VectorCanvas, val look: Look, val f: Face, val yaw: Float, val t: Float, blink: Boolean) {
         // ---- the head's form -------------------------------------------------------
-        val rx = (0.74f + 0.16f * look.width) * when (look.shape) { FaceShape.ROUND -> 1.08f; FaceShape.LONG -> 0.88f; FaceShape.HEART -> 1.02f; FaceShape.OVAL -> 1f }
-        val ry = when (look.shape) { FaceShape.LONG -> 1.1f; FaceShape.ROUND -> 0.95f; else -> 1f }
+        val rx = (0.74f + 0.16f * look.width) * when (look.shape) { FaceShape.ROUND -> 1.08f; FaceShape.LONG -> 0.88f; FaceShape.HEART -> 1.02f; FaceShape.OVAL -> 1f; FaceShape.SHIELD -> 0.98f; FaceShape.BLADE -> 0.74f; FaceShape.SQUARE -> 0.96f }
+        val ry = when (look.shape) { FaceShape.LONG -> 1.1f; FaceShape.ROUND -> 0.95f; FaceShape.SHIELD -> 1.05f; FaceShape.BLADE -> 1.16f; FaceShape.SQUARE -> 0.97f; else -> 1f }
         val headY = -0.2f + 0.018f * sin(t * 1.7f)
         val squash = f.bounce * 0.045f * sin(t * 9f)
         val roll = f.tilt + 0.025f * sin(t * 0.9f)
@@ -341,6 +341,10 @@ object EmojiMask {
             val a = abs(v).coerceAtMost(1f)
             return when (look.shape) {
                 FaceShape.ROUND -> (1f - a.pow(2.4f)).coerceAtLeast(0f).pow(1f / 2.4f)
+                // A carved mask's outline: a broad, squared brow, cheeks that fall away, a chin that narrows to a point.
+                FaceShape.SHIELD -> if (v >= 0f) (1f - a.pow(4f)).coerceAtLeast(0f).pow(0.25f) else (1f - a.pow(1.6f)).coerceAtLeast(0f).pow(0.8f) * (1f - 0.38f * a)
+                FaceShape.BLADE -> if (v >= 0f) (1f - a.pow(3f)).coerceAtLeast(0f).pow(1f / 3f) else (1f - a.pow(1.4f)).coerceAtLeast(0f).pow(0.9f) * (1f - 0.5f * a)
+                FaceShape.SQUARE -> (1f - a.pow(4.5f)).coerceAtLeast(0f).pow(1f / 4.5f) * (if (v < 0f) 1f - 0.16f * a else 1f)
                 FaceShape.HEART -> sqrt(1f - a * a) * (if (v < 0f) 1f - 0.3f * a.pow(1.6f) else 1f)
                 else -> sqrt(1f - a * a)
             }
@@ -420,7 +424,10 @@ object EmojiMask {
             val v = (hy / ry).coerceIn(-1f, 1f)
             val wv = w(v)
             val s = if (wv > 1e-3f) (hx / (rx * wv)).coerceIn(-1f, 1f) else 0f
-            val nx = s * wv; val ny = v; val nz = sqrt(max(0f, 1f - nx * nx - ny * ny))
+            // A mask is a carved board, not a ball: flat across its face, turning sharply at the rim.
+            val fs = if (gloss) s else Math.copySign(abs(s).pow(2.3f), s)
+            val fv = if (gloss) v else Math.copySign(abs(v).pow(2f), v)
+            val nx = fs * wv; val ny = fv; val nz = sqrt(max(0f, 1f - nx * nx - ny * ny))
             // Where on the head this is, so grain and wear stay put as it turns.
             val th = asin(s) - yaw
             var col = texture(shade(m, nx, ny, nz), th, v, nz)
@@ -851,7 +858,7 @@ object EmojiMask {
                 EyeKind.SPIRAL -> {
                     val pts = FloatArray(90)
                     for (i in 0 until 45) { val k = i / 44f; val a = k * 5.2f * PI.toFloat() * sd + t * 5f * sd; val r = 0.01f + 0.14f * k; pts[i * 2] = cu + cos(a) * r; pts[i * 2 + 1] = v + sin(a) * r }
-                    cv.stroke(onFace(pts), 0.038f, eyeLine)
+                    if (gloss) cv.stroke(onFace(pts), 0.038f, eyeLine) else glowLine(onFace(pts), 0.026f, sd, 1f)
                     return
                 }
                 EyeKind.NORMAL -> Unit
@@ -859,42 +866,80 @@ object EmojiMask {
             val open = (if (sd < 0) f.eyeOpenL else f.eyeOpenR) * blinkK
             val smile = f.eyeSmile.coerceIn(0f, 1f)
             val lidCol = if (Paint.LIDS in look.paint) hairMat else material(mix(pigment(look.ground), c(0x3A2028), 0.16f), 0.4f)
-            if (open < 0.12f || (st == EyeStyle.BEAN && open < 0.3f && smile < 0.45f)) { closedEye(cu, v, ew, sd, smile, lidCol); return }
+            if (gloss) { emojiEye(cu, v, ew, eh, sd, st, open, smile, lidCol, fc); return }
+            if (open < 0.12f) { closedEye(cu, v, ew, sd, smile, lidCol); return }
+            // A mask's eye: a hole cut level through the wood, no lid, no pupil, lit from inside.
             val o = open.coerceAtMost(1.4f)
             val lift = if (st == EyeStyle.TUBE) 0.05f else 0f
-            // Level or drooping at the outer corner, as the carvers cut them -- never slanting up.
-            val tilt = when (st) { EyeStyle.SLIT -> -0.012f; EyeStyle.ALMOND -> -0.02f; else -> 0f }
+            // Cut wide enough for the light to show, whatever the feeling.
+            val hh = max(when (st) { EyeStyle.SLIT, EyeStyle.BEAN -> 0.03f; EyeStyle.ALMOND -> 0.04f; else -> 0.06f },
+                when (st) { EyeStyle.SLIT, EyeStyle.BEAN -> 0.7f; EyeStyle.ALMOND -> 0.85f; else -> 1f } * eh * o)
+            val ix = cu - sd * ew; val ox = cu + sd * ew
+            val uv = when (st) {
+                EyeStyle.ROUND, EyeStyle.TUBE -> Shapes.ellipse(cu, v, ew * 0.85f, hh * 1.1f + 0.02f, 32)
+                else -> {
+                    // A level lens; a smile bends its floor up into a crescent.
+                    val upper = Shapes.quad(ix, v, cu, v + 2f * hh * (1f + 0.3f * smile), ox, v, 18)
+                    val lower = Shapes.quad(ox, v, cu, v + 2f * hh * (-(1f - smile) + 0.75f * smile), ix, v, 18)
+                    upper + lower.copyOfRange(2, lower.size - 2)
+                }
+            }
+            glowHole(onFace(uv, lift), fc, sd)
+        }
+
+        /** What lights the mask from inside: ember, redder in anger, pale and cold in grief. */
+        fun glowColour(): Int {
+            var g = if (metal) c(0xFFC860) else c(0xFFA23A)
+            g = mix(g, c(0xFF3418), f.anger.coerceIn(0f, 1f) * 0.8f)
+            g = mix(g, c(0x9CD2FF), (f.tears * 0.7f + max(0f, -f.mouthSmile) * 0.3f).coerceIn(0f, 0.8f))
+            return g
+        }
+
+        fun pulse(sd: Float): Float = 0.82f + 0.18f * sin(t * 2.3f + sd * 0.7f) * (0.6f + 0.4f * sin(t * 7.1f))
+
+        /** A hole through the mask with light behind it: a spill on the wood round it, a dark cut edge, a burning core. */
+        fun glowHole(shape: FloatArray, fc: Float, sd: Float) {
+            val b = bounds(shape)
+            val cx = (b[0] + b[2]) / 2f; val cy = (b[1] + b[3]) / 2f
+            val rw = (b[2] - b[0]) / 2f + 1e-3f; val rh = (b[3] - b[1]) / 2f + 1e-3f
+            val g = glowColour(); val k = pulse(sd)
+            soft(cx, cy, rw * 2.2f + 0.06f, rh * 3f + 0.08f, g, 0.32f * k * fc)
+            cv.stroke(shape, 0.03f, c(0x0A0404), closed = true)
+            val core = mix(g, c(0xFFF4D8), 0.55f)
+            cv.fill(shape, VectorCanvas.Paint { x, y ->
+                val r = sqrt(((x - cx) / rw).let { it * it } + ((y - cy) / rh).let { it * it }).coerceIn(0f, 1f)
+                val inner = (1f - r).pow(1.3f) * k
+                if (inner > 0.55f) mix(g, core, ((inner - 0.55f) / 0.45f).coerceIn(0f, 1f)) else mix(c(0x160404), g, (inner / 0.55f).coerceIn(0f, 1f))
+            })
+        }
+
+        /** A burning line: the glow through a closed eye or round a laugh. */
+        fun glowLine(pts: FloatArray, width: Float, sd: Float, dim: Float) {
+            val g = glowColour(); val k = pulse(sd) * dim
+            cv.stroke(pts, width * 2.6f, g, opacity = 0.18f * k)
+            cv.stroke(pts, width * 1.35f, c(0x0A0404))
+            cv.stroke(pts, width * 0.6f, mix(g, c(0xFFF4D8), 0.35f), opacity = k)
+        }
+
+        /** The glossy emoji's eye: an open eye with a shine, lids and a lash line. */
+        fun emojiEye(cu: Float, v: Float, ew: Float, eh: Float, sd: Float, st: EyeStyle, open: Float, smile: Float, lidCol: Material, fc: Float) {
+            if (open < 0.12f) { closedEye(cu, v, ew, sd, smile, lidCol); return }
+            val o = open.coerceAtMost(1.4f)
+            val lift = if (st == EyeStyle.TUBE) 0.05f else 0f
             val ix = cu - sd * ew; val ox = cu + sd * ew
             val up = v + 2f * eh * o * (1f + 0.2f * smile)
             val low = v + 2f * eh * o * (-(1f - smile) + 0.8f * smile)
-            val upper = Shapes.quad(ix, v, cu, up, ox, v + tilt, 18)
-            val lower = Shapes.quad(ox, v + tilt, cu, low, ix, v, 18)
-            val uv = upper + lower.copyOfRange(2, lower.size - 2)
-            val shape = onFace(uv, lift)
+            val upper = Shapes.quad(ix, v, cu, up, ox, v, 18)
+            val lower = Shapes.quad(ox, v, cu, low, ix, v, 18)
+            val shape = onFace(upper + lower.copyOfRange(2, lower.size - 2), lift)
             val b = bounds(shape)
             rim(shape)
             cv.fill(shape, linear(0f, b[3], EYE_DARK, 0f, b[1], EYE_WARM))
             cv.clipped(shape) {
                 val g = point(cu - sd * 0.25f * ew + f.lookX * 0.05f - 0.03f, v + eh * o * 0.5f + f.lookY * 0.03f, lift)
                 val gr = 0.048f * (0.6f + 0.4f * min(1f, o))
-                // A glossy emoji's eyes shine; a carved mask's are dark openings, with only a dull warmth where they catch the light.
-                if (gloss) {
-                    cv.fill(Shapes.ellipse(g[0], g[1], gr * (0.5f + 0.5f * fc), gr, 18), c(0xFFFFFF))
-                    val g2 = point(cu + sd * 0.3f * ew + f.lookX * 0.05f, v - eh * o * 0.25f + f.lookY * 0.03f, lift)
-                    cv.fill(Shapes.ellipse(g2[0], g2[1], 0.022f, 0.022f, 12), c(0xFFFFFF), 0.8f)
-                } else {
-                    soft(g[0], g[1] - 0.01f, gr * 2.2f, gr * 1.2f, c(0x6A3A22), 0.35f)
-                }
-                if (f.tears > 0.15f) {
-                    // Welling tears: a bright wet line along the lower lid.
-                    cv.fill(onFace(Shapes.ellipse(cu, low * 0.6f + v * 0.4f, ew, eh * 0.9f, 24), lift), c(0x7FC8FF), 0.55f * min(1f, f.tears * 1.5f))
-                }
-            }
-            // The heavy upper lid of the carvers, and the crisp line under it.
-            if (st == EyeStyle.SLIT || st == EyeStyle.ALMOND) {
-                val lidTop = Shapes.quad(ox + sd * 0.025f, v + tilt + 0.012f, cu, up + 0.075f + (if (st == EyeStyle.SLIT) 0.03f else 0f), ix - sd * 0.025f, v + 0.012f, 18)
-                val lid = onFace(upper + lidTop, lift)
-                cv.fill(lid, headPaint(lidCol))
+                cv.fill(Shapes.ellipse(g[0], g[1], gr * (0.5f + 0.5f * fc), gr, 18), c(0xFFFFFF))
+                if (f.tears > 0.15f) cv.fill(onFace(Shapes.ellipse(cu, low * 0.6f + v * 0.4f, ew, eh * 0.9f, 24), lift), c(0x7FC8FF), 0.55f * min(1f, f.tears * 1.5f))
             }
             cv.stroke(onFace(upper, lift), 0.034f, EYE_DARK)
         }
@@ -910,9 +955,14 @@ object EmojiMask {
         }
 
         fun closedEye(cu: Float, v: Float, ew: Float, sd: Float, smile: Float, lidCol: Material) {
-            if (look.eyes == EyeStyle.BEAN && smile <= 0.45f) {
-                // The bean's slit: a straight cut across the mound.
-                cv.stroke(onFace(floatArrayOf(cu - sd * ew * 0.95f, v + 0.005f, cu, v - 0.004f, cu + sd * ew * 0.95f, v + 0.005f), 0.036f), 0.034f, if (darkGround) c(0x0C0606) else EYE_DARK)
+            if (!gloss) {
+                if (smile > 0.45f) {
+                    // A laugh: the light bends into an arch.
+                    glowLine(onFace(Shapes.quad(cu - sd * ew * 0.85f, v - 0.04f, cu, v + 0.15f, cu + sd * ew * 0.85f, v - 0.04f, 16), 0.02f), 0.04f, sd, 1f)
+                } else {
+                    // Closed or sleeping: a thin line of light still burning in the cut.
+                    glowLine(onFace(floatArrayOf(cu - sd * ew * 0.9f, v, cu, v - 0.006f, cu + sd * ew * 0.9f, v), 0.02f), 0.034f, sd, 0.6f)
+                }
                 return
             }
             if (smile > 0.45f) {
@@ -941,7 +991,12 @@ object EmojiMask {
                 val (w0, w1) = when (look.brows) { BrowStyle.ARCH -> 0.085f to 0.035f; BrowStyle.RIDGE -> 0.13f to 0.07f; BrowStyle.THIN -> 0.04f to 0.022f; BrowStyle.NONE -> 0f to 0f }
                 val shape = onFace(Shapes.taper(ax, ay, mx, my, bx, by, w0, w1, 16), 0.01f)
                 val b = bounds(shape)
-                val m = if (look.brows == BrowStyle.RIDGE) material(mix(pigment(look.ground), pigment(look.hair), 0.55f), 0.5f) else hairMat
+                // On wood and brass a brow is carved: a ridge in the mask's own material, a shade deeper.
+                val m = when {
+                    !gloss -> moody(material(mix(pigment(look.ground), c(0x1A0E0C), 0.35f), sheen))
+                    look.brows == BrowStyle.RIDGE -> material(mix(pigment(look.ground), pigment(look.hair), 0.55f), 0.5f)
+                    else -> hairMat
+                }
                 cv.fill(shape, blobPaint(m, (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f + 0.01f, (b[3] - b[1]) / 2f + 0.01f))
             }
         }
