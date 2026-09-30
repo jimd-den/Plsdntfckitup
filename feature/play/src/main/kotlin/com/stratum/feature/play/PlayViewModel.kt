@@ -114,6 +114,10 @@ class PlayViewModel(
     quality: QualityTier? = null,
     /** Keeps a new graphics choice for next time. Supplied by the composition root. */
     private val saveQuality: (QualityTier?) -> Unit = {},
+    /** How the land is drawn when the run began (mesh or voxel splats); null lets the tier decide. */
+    terrain: com.stratum.engine.scene.SplatMode? = null,
+    /** Keeps a new terrain choice for next time. */
+    private val saveTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     /** Keeps the world style for next time, so a painted style is still worn after a restart. */
     private val saveStyle: (String) -> Unit = {},
     /** The character carried in from earlier play, or null for a new one. */
@@ -124,6 +128,8 @@ class PlayViewModel(
     private val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
     /** Structures made from generated models, which the build tray can raise. */
     private val blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+    /** The model studio's microvoxel models, which the build tray can place. */
+    private val microModels: List<com.stratum.core.domain.micro.MicroModel> = emptyList(),
     /** A saved world to resume, or null to make a new one from [config] and [hero]. */
     resume: WorldSave? = null,
     /** Where this world is kept, or null for a run with no save slot (the hero is still kept). */
@@ -137,9 +143,19 @@ class PlayViewModel(
     saveScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /** Ids for worlds this screen starts itself: a new run, or a tier opened. */
     private val newWorldId: () -> String = { java.util.UUID.randomUUID().toString() },
+    /** The mask the hero wears as a mask spirit, as a genome code; null for the first preset. */
+    private val heroMask: String? = null,
+    /** Characters drawn as floating mask spirits (true) or as their sprites (false). */
+    maskCharacters: Boolean = true,
+    /** Keeps the masks-or-sprites choice for next time. */
+    private val saveMaskCharacters: (Boolean) -> Unit = {},
 ) : ViewModel() {
 
+    private val initialMaskCharacters = maskCharacters
+
     private val initialQuality = quality
+
+    private val initialTerrain = terrain
 
     /** The hero class this run plays: a resumed world's own, else the one asked for. */
     private val heroClassId: String? = resume?.heroClassId ?: heroClassId
@@ -269,6 +285,21 @@ class PlayViewModel(
         saveQuality(tier)
     }
 
+    /** Draws the land as a greedy mesh or as voxel splats; null goes back to the tier's choice. */
+    fun chooseTerrain(mode: com.stratum.engine.scene.SplatMode?) {
+        _state.value = _state.value.copy(terrain = mode)
+        saveTerrain(mode)
+    }
+
+    /**
+     * Draws the characters as floating mask spirits, or as their sprite art.
+     * Presentation only: nothing about the fight changes.
+     */
+    fun chooseMaskCharacters(on: Boolean) {
+        _state.value = _state.value.copy(maskCharacters = on)
+        saveMaskCharacters(on)
+    }
+
     /**
      * Paints this style's textures, the part of the world the lighting
      * restyle cannot change. Runs in the background while the player plays;
@@ -311,6 +342,95 @@ class PlayViewModel(
 
     fun toggleStyle() {
         _state.value = _state.value.copy(styleOpen = !_state.value.styleOpen)
+    }
+
+    // ---- shaping the world ---------------------------------------------------
+
+    /** Counts requests to reshape the land, so only the newest one lands when several overlap. */
+    private var shapeTicket = 0
+
+    /** Opens or closes the World panel. Like the anvil, the world keeps running behind it. */
+    fun toggleWorldShaper() {
+        val panel = _state.value.worldShaper
+        _state.value = _state.value.copy(worldShaper = shaperPanel().copy(open = !panel.open))
+        publish()
+    }
+
+    /** One knob of one stage, applied now. */
+    fun setTerrainOption(stageId: String, key: String, value: String) {
+        val hot = session.hotTerrain ?: return
+        val stage = hot.passes.firstOrNull { it.id == stageId } ?: com.stratum.engine.microvoxel.gen.StageSpec(stageId)
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, stage.copy(options = stage.options + (key to value))))
+    }
+
+    /** The land stage's options replaced by a whole shape at once: plains, hills, terraces. */
+    fun shapeLand(options: Map<String, String>) {
+        val hot = session.hotTerrain ?: return
+        val land = hot.passes.firstOrNull { it.id == LAND_STAGE } ?: return
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, land.copy(options = land.options + options)))
+    }
+
+    /**
+     * The whole scene from words, laid over the land as it stands: the
+     * province, the relief, the towns and their buildings, the growth. What
+     * the words say about danger waits for the next world; the rules of this
+     * one are the ones it was begun with.
+     */
+    fun describeScene(text: String) {
+        val hot = session.hotTerrain ?: return publish(message = "Only a microvoxel world can be reshaped")
+        val scene = com.stratum.engine.microbridge.ScenePrompt.read(text)
+        if (scene.isEmpty) return publish(message = "Nothing there names a land: try a place, a people, a climate or a mood")
+        reshape(scene.passes(hot.passes))
+        publish(message = scene.notes.take(3).joinToString(" · ") { it.substringAfter("→ ") })
+    }
+
+    /** Switches a stage on (with its defaults) or off. */
+    fun toggleTerrainStage(stageId: String, enabled: Boolean) {
+        val hot = session.hotTerrain ?: return
+        reshape(
+            if (enabled) com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, com.stratum.engine.microvoxel.gen.StageSpec(stageId))
+            else hot.passes.filter { it.id != stageId },
+        )
+    }
+
+    /** A stage back to its defaults. */
+    fun resetTerrainStage(stageId: String) {
+        val hot = session.hotTerrain ?: return
+        reshape(com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.withStage(hot.passes, com.stratum.engine.microvoxel.gen.StageSpec(stageId)))
+    }
+
+    /**
+     * Builds the new land on a worker, then swaps it in between frames: the
+     * slow part (every stage set up, a chunk generated to prove it works)
+     * never stalls the game, and the game thread only regenerates what is
+     * near. A request overtaken by a newer one is dropped.
+     */
+    private fun reshape(passes: List<com.stratum.engine.microvoxel.gen.StageSpec>) {
+        val target = session
+        val hot = target.hotTerrain ?: return
+        val ticket = ++shapeTicket
+        _state.value = _state.value.copy(worldShaper = _state.value.worldShaper.copy(busy = true))
+        viewModelScope.launch {
+            val prepared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hot.prepare(passes) }
+            if (ticket != shapeTicket || target !== session) return@launch
+            val problem = target.installTerrain(prepared)
+            _state.value = _state.value.copy(worldShaper = shaperPanel().copy(open = _state.value.worldShaper.open, busy = false))
+            if (problem == null) persist(SaveReason.AUTOSAVE)
+            publish(message = problem ?: "The land reshapes around you")
+        }
+    }
+
+    /** The panel as the live generator describes it. */
+    private fun shaperPanel(): WorldShaperPanel {
+        val hot = session.hotTerrain ?: return WorldShaperPanel()
+        val running = hot.passes.associateBy { it.id }
+        return WorldShaperPanel(
+            available = true,
+            stages = hot.catalogue().map { info ->
+                ShaperStage(info.id, info.title, info.summary, info.id in running, info.params, running[info.id]?.options.orEmpty())
+            },
+            revision = hot.revision,
+        )
     }
 
     // ---- survival ----------------------------------------------------------
@@ -679,12 +799,23 @@ class PlayViewModel(
         propModels = propModels,
         blueprints = blueprints.map { BlueprintChoice(it.id, it.name, it.filledCount) },
         onRaiseBlueprint = ::raiseBlueprint,
+        buildActions = BuildActions(
+            height = ::changeBuildHeight, undo = ::undoBuild, redo = ::redoBuild, tap = ::setBuildTap,
+            brush = { r, m -> changeBrush(r, m) }, turnModel = ::turnModel, placeModel = ::placeModel,
+        ),
         quality = initialQuality,
+        terrain = initialTerrain,
+        maskCharacters = initialMaskCharacters,
+        heroMask = heroMask,
+        masks = MaskLooks.of(content),
         checks = content.checks,
         // A lambda rather than a bound reference: starting a fresh world
         // replaces the session, and a captured reference would keep answering
         // for the world the player just left.
         biomeAt = { x, y -> session.biomeAt(x, y) },
+        // The world's quarter-block detail, when it was generated in microvoxels.
+        microTerrain = session.microTerrain,
+        worldShaper = shaperPanel(),
     )
 
     /**
@@ -826,13 +957,21 @@ class PlayViewModel(
     }
 
     fun previewBuild(from: BlockPos, to: BlockPos) {
+        // The single-block tool with the place tap paints: blocks go down as the finger moves.
+        if (session.buildTool == BuildTool.SINGLE && _state.value.build.tap == BuildTap.PLACE) return paint(from, to)
         val preview = session.previewBuild(from, to)
         _state.value = _state.value.copy(buildAffordable = preview.affordable)
         publish()
     }
 
     fun commitBuild() {
-        when (val result = session.commitBuild()) {
+        stroke?.let { done ->
+            stroke = null
+            return publish(message = if (done.laid > 1) "Laid ${done.laid}" else null)
+        }
+        val result = session.commitBuild()
+        if (result is BuildResult.Built || result is BuildResult.Erased || result is BuildResult.Painted) tick()
+        when (result) {
             is BuildResult.Built ->
                 publish(
                     message = if (result.short > 0) {
@@ -845,6 +984,89 @@ class PlayViewModel(
             BuildResult.NothingSelected -> publish(message = "Nothing selected to build with")
             BuildResult.NothingToBuild -> publish()
             is BuildResult.Erased -> publish(message = "Cleared ${result.removed}")
+            is BuildResult.Painted -> publish(message = if (result.short > 0) "Painted ${result.painted}, ${result.short} short" else "Painted ${result.painted}")
+        }
+    }
+
+    /**
+     * The studio's models as the tray lists them. A function, not a property:
+     * [publish] runs from `init`, before a property declared this far down
+     * would have been set, and read it as null.
+     */
+    private fun modelChoices(): List<ModelChoice> = microModels.map { m ->
+        val (bx, by, bz) = m.blocks()
+        ModelChoice(m.id, m.name, m.filledCount, "$bx×$by×$bz")
+    }
+
+    fun changeBuildHeight(delta: Int) {
+        session.setBuildHeight(session.buildHeight + delta)
+        publish(message = "Height ${session.buildHeight}")
+    }
+
+    fun undoBuild() {
+        when (val r = session.undo()) {
+            is com.stratum.engine.world.UndoResult.Undone -> { tick(); publish(message = "Undid ${r.what}") }
+            else -> publish(message = "Nothing to undo")
+        }
+    }
+
+    fun redoBuild() {
+        when (val r = session.redo()) {
+            is com.stratum.engine.world.UndoResult.Redone -> { tick(); publish(message = "Redid ${r.what}") }
+            else -> publish(message = "Nothing to redo")
+        }
+    }
+
+    fun setBuildTap(tap: BuildTap) {
+        val usable = if ((tap == BuildTap.CHISEL || tap == BuildTap.HEAP) && !session.canSculpt) BuildTap.DIG else tap
+        _state.value = _state.value.copy(build = _state.value.build.copy(tap = usable))
+        publish(message = if (usable != tap) "Only a microvoxel world can be sculpted" else null)
+    }
+
+    fun changeBrush(radiusDelta: Int = 0, material: String? = null) {
+        val b = session.sculptBrush
+        session.setSculptBrush(b.copy(radius = b.radius + radiusDelta, material = material ?: b.material))
+        publish()
+    }
+
+    fun turnModel() {
+        _state.value = _state.value.copy(build = _state.value.build.copy(modelTurns = (_state.value.build.modelTurns + 1) % 4))
+        publish()
+    }
+
+    /** Sets a studio model on the ground in front of the player, in full microvoxel detail. */
+    fun placeModel(id: String) {
+        val model = microModels.firstOrNull { it.id == id } ?: return
+        when (val r = session.placeModel(model, _state.value.build.modelTurns)) {
+            is com.stratum.engine.world.SculptResult.Shaped -> publish(message = "Placed ${model.name} — undo takes it back")
+            com.stratum.engine.world.SculptResult.NotMicrovoxel -> publish(message = "Models stand in microvoxel worlds")
+            com.stratum.engine.world.SculptResult.NoRoom -> publish(message = "No room for ${model.name} here")
+        }
+    }
+
+    /**
+     * A tap on the world. Outside build mode, and with the dig tap in build
+     * mode, it digs; the build tray can make it pick a block, chisel the
+     * land at a quarter block, or heap material onto it.
+     */
+    fun tapBlock(target: BlockPos) {
+        val s = _state.value
+        if (!s.buildMode) return beginMining(target)
+        when (s.build.tap) {
+            BuildTap.PLACE -> place(target)
+            BuildTap.DIG -> beginMining(target)
+            BuildTap.PICK -> {
+                val picked = session.pickBlock(target)
+                publish(message = picked?.let { "Holding ${displayName(it)}" } ?: "You have none of that to place")
+            }
+            BuildTap.CHISEL, BuildTap.HEAP -> {
+                miningJob?.cancel()
+                when (val r = session.sculpt(target, carve = s.build.tap == BuildTap.CHISEL)) {
+                    is com.stratum.engine.world.SculptResult.Shaped ->
+                        publish(message = r.gathered.entries.joinToString { "+${it.value} ${displayName(it.key)}" }.ifBlank { null })
+                    else -> publish(message = "Only a microvoxel world can be sculpted")
+                }
+            }
         }
     }
 
@@ -860,9 +1082,66 @@ class PlayViewModel(
         // here and would otherwise keep calling mine() on the old target.
         miningJob?.cancel()
         when (val result = session.place(target)) {
-            is PlaceResult.Placed -> publish(message = "Placed ${result.block.displayName}")
+            is PlaceResult.Placed -> { tick(); publish(message = "Placed ${result.block.displayName}") }
             is PlaceResult.Rejected -> publish(message = placeRejectionMessage(result.reason))
         }
+    }
+
+    /** Counts a build that landed, for the screen's haptic tick; see [BuildPanel.ticks]. */
+    private fun tick() {
+        _state.value = _state.value.copy(build = _state.value.build.copy(ticks = _state.value.build.ticks + 1))
+    }
+
+    /**
+     * A stroke of the single-block tool: the finger laying blocks as it
+     * moves, one course high, at the level of the first block it laid.
+     *
+     * Tap-by-tap is how you place one block; a fence, a path or the first
+     * course of a wall is a stroke. The level is held because every block
+     * laid becomes the thing under the finger -- without it, a stroke piles a
+     * tower where it started. Cells the finger skips over between two
+     * events are filled in, so a quick swipe leaves no gaps.
+     */
+    private var stroke: Stroke? = null
+
+    private class Stroke(var lastX: Int, var lastY: Int, val z: Int, var laid: Int)
+
+    private fun paint(from: BlockPos, to: BlockPos) {
+        val world = session.world
+        val current = stroke
+        if (current == null) {
+            val cell = session.placementPreviewFor(from) ?: return
+            if (session.place(from) is PlaceResult.Placed) {
+                stroke = Stroke(cell.x, cell.y, cell.z, 1)
+                tick()
+            }
+            publish()
+            return
+        }
+        var laid = 0
+        for ((x, y) in cellsBetween(current.lastX, current.lastY, to.x, to.y).take(MAX_STROKE_STEP)) {
+            val cell = BlockPos(x, y, current.z)
+            val below = BlockPos(x, y, current.z - 1)
+            // Only onto something: a stroke across a dip leaves the dip rather than floating a block over it.
+            if (!world.blockAt(cell).isAir || world.blockAt(below).isAir) continue
+            if (session.place(below) is PlaceResult.Placed) laid++ else break
+        }
+        current.lastX = to.x; current.lastY = to.y
+        if (laid > 0) {
+            current.laid += laid
+            tick()
+            publish()
+        }
+    }
+
+    /** The cells a straight line from one column to another passes through, the first left out. */
+    private fun cellsBetween(x0: Int, y0: Int, x1: Int, y1: Int): List<Pair<Int, Int>> {
+        val steps = maxOf(kotlin.math.abs(x1 - x0), kotlin.math.abs(y1 - y0))
+        if (steps == 0) return emptyList()
+        return (1..steps).map { i ->
+            val t = i.toFloat() / steps
+            Math.round(x0 + (x1 - x0) * t) to Math.round(y0 + (y1 - y0) * t)
+        }.distinct()
     }
 
     fun dismissMessage() {
@@ -898,6 +1177,11 @@ class PlayViewModel(
             spriteFor = spriteResolver,
             buildPreview = snapshot.buildPreview,
             buildTool = snapshot.buildTool,
+            build = _state.value.build.copy(
+                height = session.buildHeight, canUndo = session.canUndo, canRedo = session.canRedo,
+                canSculpt = session.canSculpt, brushRadius = session.sculptBrush.radius, brushMaterial = session.sculptBrush.material,
+                models = modelChoices(),
+            ),
             skills = snapshot.skills,
             activeBoons = snapshot.activeBoons,
             checkCooldowns = content.checks.associate { it.id to session.checkCooldown(it.id) },
@@ -1268,6 +1552,8 @@ class PlayViewModel(
         /** Between a world's name and the tier a waystone or the tier list opened it at. */
         private const val TIER_SEPARATOR = ", tier "
         private const val SANDBOX_REFRESH_SECONDS = 0.25f
+        /** Most blocks one move of a painting finger lays: a wild swipe across the screen is not a wall. */
+        private const val MAX_STROKE_STEP = 16
 
         fun factory(
             content: AssembledContent,
@@ -1279,6 +1565,8 @@ class PlayViewModel(
             kitOverlays: List<File> = emptyList(),
             quality: QualityTier? = null,
             saveQuality: (QualityTier?) -> Unit = {},
+            terrain: com.stratum.engine.scene.SplatMode? = null,
+            saveTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
             /** Read only when the view model is created, so a recomposition does not touch the disk. */
             loadHero: () -> HeroSave? = { null },
             saveHero: (HeroSave) -> Unit = {},
@@ -1286,21 +1574,26 @@ class PlayViewModel(
             saveStyle: (String) -> Unit = {},
             propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
             blueprints: List<com.stratum.core.domain.content.VoxelBlueprint> = emptyList(),
+            microModels: List<com.stratum.core.domain.micro.MicroModel> = emptyList(),
             /** A saved world to resume. Its seed, rules, hero class and hero win over [config], [heroClassId] and [loadHero]. */
             resume: WorldSave? = null,
             /** Where worlds are kept; null plays without a world slot, as before world saving. */
             worlds: WorldSaveRepository? = null,
             /** The slot a new world saves into, from the world library; ignored when resuming. */
             slot: WorldIdentity? = null,
+            heroMask: String? = null,
+            maskCharacters: Boolean = true,
+            saveMaskCharacters: (Boolean) -> Unit = {},
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
-                quality = quality, saveQuality = saveQuality, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
+                quality = quality, saveQuality = saveQuality, terrain = terrain, saveTerrain = saveTerrain, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
-                propModels = propModels, blueprints = blueprints,
+                propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
+                heroMask = heroMask, maskCharacters = maskCharacters, saveMaskCharacters = saveMaskCharacters,
             ) as T
         }
     }
@@ -1352,6 +1645,8 @@ data class PlayUiState(
     val buildPreview: List<BlockPos> = emptyList(),
     val buildTool: BuildTool = BuildTool.SINGLE,
     val buildAffordable: Boolean = true,
+    /** Height, undo, the eyedropper, sculpting and placed models: the rest of the build tray. */
+    val build: BuildPanel = BuildPanel(),
     val skills: List<SkillDefinition> = emptyList(),
     /** Advances every tick so the canvas redraws while the fight is moving. */
     val frame: Int = 0,
@@ -1359,6 +1654,10 @@ data class PlayUiState(
     val artDirector: WorldArtDirector = StyleSheetArtDirector(),
     val worldTime: WorldTime = WorldTime(),
     val biomeAt: (Int, Int) -> BiomeDefinition? = { _, _ -> null },
+    /** Microvoxel detail behind the blocks, for worlds generated that way; null draws blocks only. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
+    /** The World panel: the terrain's stages, live-editable in microvoxel worlds. */
+    val worldShaper: WorldShaperPanel = WorldShaperPanel(),
     /** What the player last asked for, so the field can show it back to them. */
     val stylePrompt: String = "",
     /** What the game understood by it, which is how a player learns the vocabulary. */
@@ -1370,6 +1669,14 @@ data class PlayUiState(
     val kitOverlays: List<File> = emptyList(),
     /** The graphics tier the player chose; null is the device's own. */
     val quality: QualityTier? = null,
+    /** How the land is drawn, mesh or voxel splats; null is the tier's own. */
+    val terrain: com.stratum.engine.scene.SplatMode? = null,
+    /** Characters drawn as floating mask spirits; false draws their sprites. */
+    val maskCharacters: Boolean = true,
+    /** The hero's mask, a genome code; null wears the first preset. */
+    val heroMask: String? = null,
+    /** What the packs say about monsters' masks and motion. */
+    val masks: MaskLooks = MaskLooks(),
     /** Tabletop checks the loaded plugins offer. */
     val checks: List<SkillCheck> = emptyList(),
     /** Seconds until each check can be rolled again; 0 when ready. */
@@ -1401,6 +1708,7 @@ data class PlayUiState(
     /** Blueprints the build tray offers to raise. */
     val blueprints: List<BlueprintChoice> = emptyList(),
     val onRaiseBlueprint: (String) -> Unit = {},
+    val buildActions: BuildActions = BuildActions(),
     /** Skills cost life rather than resource: a keystone or a piece of gear says so. */
     val lifePaysCosts: Boolean = false,
     /** The paper doll and the bag, compared against the whole character. */
@@ -1453,3 +1761,48 @@ private const val DEFAULT_RARITY_TINT = 0xFFB0BEC5L
 
 /** A blueprint as the build tray lists it. */
 data class BlueprintChoice(val id: String, val name: String, val blocks: Int)
+
+/** What a tap on the world does in build mode. */
+enum class BuildTap(val label: String, val glyph: String) {
+    PLACE("Place", "▣"),
+    DIG("Dig", "⛏"),
+    PICK("Pick block", "◉"),
+    CHISEL("Chisel", "◖"),
+    HEAP("Heap", "◗"),
+}
+
+/** What the build tray's extra controls call. */
+data class BuildActions(
+    val height: (Int) -> Unit = {},
+    val undo: () -> Unit = {},
+    val redo: () -> Unit = {},
+    val tap: (BuildTap) -> Unit = {},
+    /** Radius change, and a new material or null to keep it. */
+    val brush: (Int, String?) -> Unit = { _, _ -> },
+    val turnModel: () -> Unit = {},
+    val placeModel: (String) -> Unit = {},
+)
+
+/** The model studio's model, as the build tray lists it. */
+data class ModelChoice(val id: String, val name: String, val voxels: Int, val blocks: String)
+
+/** The build tray beyond shapes and blocks. */
+data class BuildPanel(
+    val height: Int = 3,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
+    /** What a tap does in build mode. Placing, by default: in a sandbox, a tap on the world should build. */
+    val tap: BuildTap = BuildTap.PLACE,
+    /**
+     * Bumped every time a build lands -- a block laid, a drag committed, an
+     * undo or a redo -- so the screen can answer each with a haptic tick.
+     */
+    val ticks: Int = 0,
+    /** Whether the world has microvoxels to chisel and heap, and models to place. */
+    val canSculpt: Boolean = false,
+    val brushRadius: Int = 3,
+    val brushMaterial: String = "#8A6A4A",
+    val models: List<ModelChoice> = emptyList(),
+    /** Quarter turns a placed model is given. */
+    val modelTurns: Int = 0,
+)

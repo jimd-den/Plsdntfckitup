@@ -266,7 +266,8 @@ fun ClassForgeScreenContent(
                 ) {
                     items(state.sheets, key = SpriteSheet::id) { sheet ->
                         StratumChip(
-                            label = sheet.name,
+                            label = if (com.stratum.core.domain.sprite.SpriteNamespace.servesHero(sheet.id)) sheet.name
+                            else "${sheet.name} · ${com.stratum.core.domain.sprite.SpriteNamespace.kindOf(sheet.id)}",
                             selected = sheet.id == draft.spriteSetId,
                             onClick = { onSelectSprite(sheet.id) },
                         )

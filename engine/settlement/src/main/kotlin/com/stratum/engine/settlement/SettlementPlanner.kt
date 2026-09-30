@@ -32,6 +32,8 @@ class SettlementPlanner(
     private val density: Float = 1f,
     /** Which recipes are safe to begin in. By default, towns with nobody guarding them against the player. */
     private val welcoming: (SettlementRecipe) -> Boolean = { it.garrison.isEmpty() },
+    /** How the starting town is shaped, when a player has changed it; the default leaves it to the seed. */
+    private val home: HomeTown = HomeTown(),
 ) : SettlementAtlas {
 
     private val plans = ConcurrentHashMap<Long, Any>()
@@ -55,15 +57,18 @@ class SettlementPlanner(
     }
 
     private fun plan(cellX: Int, cellY: Int): SettlementPlan? {
-        val random = Random(seed * PRIME_A + cellX * PRIME_B + cellY * PRIME_C)
         val starting = startingTown && cellX == 0 && cellY == 0
+        val random = Random(seed * PRIME_A + cellX * PRIME_B + cellY * PRIME_C + if (starting) home.variant * PRIME_A else 0L)
         // The starting town sits on the corner of its cell rather than inside
         // it, so its neighbours stay empty to guarantee nothing touches it.
         if (startingTown && !starting && kotlin.math.abs(cellX) <= 1 && kotlin.math.abs(cellY) <= 1) return null
         val centerX = if (starting) 0 else cellX * CELL + MARGIN + random.nextInt(CELL - 2 * MARGIN)
         val centerY = if (starting) 0 else cellY * CELL + MARGIN + random.nextInt(CELL - 2 * MARGIN)
-        val recipe = chooseRecipe(biomeAt(centerX, centerY), random, starting) ?: return null
-        val radius = recipe.minRadius + random.nextInt(recipe.maxRadius - recipe.minRadius + 1)
+        val chosen = (if (starting) home.recipeId?.let { id -> recipes.firstOrNull { it.id == id } } else null)
+            ?: chooseRecipe(biomeAt(centerX, centerY), random, starting) ?: return null
+        val recipe = if (starting) home.applyTo(chosen) else chosen
+        val rolled = recipe.minRadius + random.nextInt(recipe.maxRadius - recipe.minRadius + 1)
+        val radius = if (starting) home.radiusFor(rolled) else rolled
         val site = SettlementSite(centerX, centerY, groundLevel(centerX, centerY, recipe), radius)
         val layout = layouts.layoutFor(recipe.layoutId).arrange(site, recipe, random)
         val name = recipe.names.takeIf { it.isNotEmpty() }?.random(random) ?: recipe.name
@@ -116,4 +121,36 @@ class SettlementPlanner(
         private const val PRIME_C = 2862933555777941757L
         private val NONE = Any()
     }
+}
+
+/**
+ * The player's say over their home town, which otherwise follows the seed
+ * like any other town. Everything here is optional: null or the neutral
+ * value keeps what the seed would have built.
+ */
+data class HomeTown(
+    /** Which recipe the home town follows, by id; null picks a welcoming one as usual. */
+    val recipeId: String? = null,
+    /** Scales the town's radius, 0.5 (a hamlet) to 2 (a city), within the recipe's legal range. */
+    val size: Float = 1f,
+    /** The street pattern, by layout id; null keeps the recipe's. */
+    val layoutId: String? = null,
+    /** Whether the town has its wall; null keeps the recipe's. */
+    val walled: Boolean? = null,
+    /** Another roll of the same town: moves every house while keeping its kind and size. */
+    val variant: Int = 0,
+) {
+    fun applyTo(recipe: SettlementRecipe): SettlementRecipe {
+        var r = recipe
+        layoutId?.let { r = r.copy(layoutId = it) }
+        when (walled) {
+            false -> r = r.copy(wallBlockId = null)
+            true -> if (r.wallBlockId == null) r = r.copy(wallBlockId = r.foundationBlockId)
+            null -> Unit
+        }
+        return r
+    }
+
+    fun radiusFor(rolled: Int): Int =
+        (rolled * size).toInt().coerceIn(SettlementRecipe.MIN_RADIUS, SettlementRecipe.MAX_RADIUS)
 }

@@ -107,6 +107,8 @@ internal data class WorldSchema(
     val chunkFile: String? = null,
     val realm: RealmSchema = RealmSchema(),
     val consumedMarkers: List<String> = emptyList(),
+    val microModels: List<com.stratum.core.data.micro.MicroModelSchema> = emptyList(),
+    val stamps: List<com.stratum.core.data.micro.MicroStampSchema> = emptyList(),
 ) {
     fun toDomain(chunks: List<SavedChunk>) = WorldSave(
         identity = WorldIdentity(id, name, createdAt, presetName, packIds, heroName),
@@ -121,6 +123,8 @@ internal data class WorldSchema(
         chunks = chunks,
         realm = realm.toDomain(),
         consumedMarkers = consumedMarkers.toSet(),
+        microModels = microModels.map { it.toDomain() },
+        stamps = stamps.map { it.toDomain() },
     )
 
     companion object {
@@ -129,6 +133,8 @@ internal data class WorldSchema(
             s.lastPlayedAt, s.playSeconds, ConfigSchema.of(s.config), s.difficulty.tier, s.difficulty.mods.map(WaystoneModSchema::of),
             HeroSchema.of(s.hero), PlayerSchema.of(s.player), s.clockSeconds, s.blockIds, chunkFile, RealmSchema.of(s.realm),
             s.consumedMarkers.sorted(),
+            s.microModels.map(com.stratum.core.data.micro.MicroModelSchema::of),
+            s.stamps.map(com.stratum.core.data.micro.MicroStampSchema::of),
         )
     }
 }
@@ -142,13 +148,24 @@ internal data class ConfigSchema(
     val caveDensity: Float = DEFAULT_CONFIG.caveDensity,
     val oreRichness: Float = DEFAULT_CONFIG.oreRichness,
     val rules: RulesSchema = RulesSchema(),
+    /** The terrain as tuned in the World panel; absent in saves from before it, and for untuned worlds. */
+    val terrainPasses: List<PassSchema>? = null,
 ) {
-    fun toDomain() = WorldConfig(seed, simulationRadius, seaLevel, surfaceVariation, caveDensity, oreRichness, rules.toDomain())
+    fun toDomain() = WorldConfig(
+        seed, simulationRadius, seaLevel, surfaceVariation, caveDensity, oreRichness, rules.toDomain(),
+        terrainPasses?.map { com.stratum.core.domain.world.PassSpec(it.id, it.options) },
+    )
 
     companion object {
-        fun of(c: WorldConfig) = ConfigSchema(c.seed, c.simulationRadius, c.seaLevel, c.surfaceVariation, c.caveDensity, c.oreRichness, RulesSchema.of(c.rules))
+        fun of(c: WorldConfig) = ConfigSchema(
+            c.seed, c.simulationRadius, c.seaLevel, c.surfaceVariation, c.caveDensity, c.oreRichness, RulesSchema.of(c.rules),
+            c.terrainPasses?.map { PassSchema(it.id, it.options) },
+        )
     }
 }
+
+@Serializable
+internal data class PassSchema(val id: String, val options: Map<String, String> = emptyMap())
 
 /** World rules by name and value; a survival mode a later build added and this one lacks reads as the default. */
 @Serializable
@@ -164,18 +181,25 @@ internal data class RulesSchema(
     val deathPenalty: Float = DEFAULT_RULES.deathPenalty,
     val combat: CombatRulesSchema = CombatRulesSchema(),
     val sandbox: Boolean = false,
+    /** Absent in saves from before it: then it follows the monster dial, so an old calm world is calm. */
+    val enemyDamage: Float? = null,
+    val enemyAlertness: Float? = null,
 ) {
-    fun toDomain() = WorldRules(
-        survival = SurvivalMode.entries.firstOrNull { it.name == survival } ?: DEFAULT_RULES.survival,
-        townDensity = townDensity, startInTown = startInTown, monsterDensity = monsterDensity, raids = raids,
-        dayLengthMinutes = dayLengthMinutes, lootMultiplier = lootMultiplier, experienceMultiplier = experienceMultiplier,
-        deathPenalty = deathPenalty, combat = combat.toDomain(), sandbox = sandbox,
-    )
+    fun toDomain(): WorldRules {
+        val rules = WorldRules(
+            survival = SurvivalMode.entries.firstOrNull { it.name == survival } ?: DEFAULT_RULES.survival,
+            townDensity = townDensity, startInTown = startInTown, monsterDensity = monsterDensity, raids = raids,
+            dayLengthMinutes = dayLengthMinutes, lootMultiplier = lootMultiplier, experienceMultiplier = experienceMultiplier,
+            deathPenalty = deathPenalty, combat = combat.toDomain(), sandbox = sandbox,
+        )
+        val dialled = rules.withMonsters(monsterDensity)
+        return rules.copy(enemyDamage = enemyDamage ?: dialled.enemyDamage, enemyAlertness = enemyAlertness ?: dialled.enemyAlertness)
+    }
 
     companion object {
         fun of(r: WorldRules) = RulesSchema(
             r.survival.name, r.townDensity, r.startInTown, r.monsterDensity, r.raids, r.dayLengthMinutes, r.lootMultiplier,
-            r.experienceMultiplier, r.deathPenalty, CombatRulesSchema.of(r.combat), r.sandbox,
+            r.experienceMultiplier, r.deathPenalty, CombatRulesSchema.of(r.combat), r.sandbox, r.enemyDamage, r.enemyAlertness,
         )
     }
 }

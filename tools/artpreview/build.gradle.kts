@@ -5,8 +5,10 @@ dependencies {
   implementation(project(":engine:world"))
   implementation(project(":engine:render"))
   implementation(project(":engine:scene"))
+  implementation(project(":engine:model"))
   implementation(project(":content:igbo"))
   implementation(project(":plugins"))
+  implementation(project(":importer:common"))
 }
 
 /**
@@ -37,6 +39,23 @@ tasks.register<JavaExec>("scenePreview") {
     layout.buildDirectory.dir("scene-preview").get().asFile.absolutePath,
     rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
   )
+  maxHeapSize = "3g"
+}
+
+/**
+ * A microvoxel world through the game's renderer, blocks vs detail, and a
+ * per-tier benchmark, into build/micro-scene-preview.
+ */
+tasks.register<JavaExec>("microScenePreview") {
+  group = "verification"
+  description = "Renders a microvoxel world with the game's scene pipeline and benchmarks it per quality tier."
+  mainClass.set("com.stratum.tools.artpreview.MicroScenePreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  args = listOf(
+    layout.buildDirectory.dir("micro-scene-preview").get().asFile.absolutePath,
+    rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
+  )
+  jvmArgs("-Djava.awt.headless=true")
   maxHeapSize = "3g"
 }
 
@@ -94,4 +113,77 @@ tasks.register<JavaExec>("packPlugin") {
   mainClass.set("com.stratum.tools.artpreview.PackPlugin")
   classpath = sourceSets["main"].runtimeClasspath
   workingDir = rootProject.projectDir
+}
+
+/** Plays the shipped world for a few minutes on a phone-sized heap; see Soak. */
+tasks.register<JavaExec>("soak") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.Soak")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  maxHeapSize = System.getenv("SOAK_HEAP") ?: "256m"
+}
+
+/**
+ * Lays and undoes 50 blocks in quick taps in a microvoxel world, in real time,
+ * and reports the frames around each edit, with pictures; see PlacementBench.
+ * The label names the run, so a before and an after chart side by side:
+ *   ./gradlew :tools:artpreview:placementBench -Pbench=after
+ */
+tasks.register<JavaExec>("placementBench") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.PlacementBench")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  maxHeapSize = "2g"
+  args = listOf(
+    "docs/screenshots/build-feel",
+    (project.findProperty("bench") as String?) ?: "after",
+    rootProject.layout.projectDirectory.dir("content/igbo/src/main/resources/forge").asFile.absolutePath,
+  )
+}
+
+/**
+ * Mask spirits through the scene pipeline -- turntables, motion strips and an
+ * in-world fight -- into docs/screenshots/mask-spirits:
+ *   ./gradlew :tools:artpreview:maskSpiritPreview
+ */
+tasks.register<JavaExec>("maskSpiritPreview") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.MaskSpiritPreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  maxHeapSize = "1500m"
+  args = listOf(
+    (project.findProperty("out") as String?) ?: "docs/screenshots/mask-spirits",
+    (project.findProperty("only") as String?) ?: "all",
+  )
+}
+
+/**
+ * The masks as turning cartoon art.
+ *   ./gradlew :tools:artpreview:maskArtPreview
+ */
+tasks.register<JavaExec>("maskArtPreview") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.MaskArtPreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  args = listOf((project.findProperty("out") as String?) ?: "docs/screenshots/mask-art")
+}
+
+/**
+ * Igbo emoji characters as sprite sheets, drawn by the image model when
+ * OPENROUTER_API_KEY is set (an offline stand-in otherwise).
+ *   ./gradlew :tools:artpreview:emojiForge --args="build/emoji-forge Maiden Poppy"
+ */
+tasks.register<JavaExec>("emojiForge") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.EmojiForge")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
 }

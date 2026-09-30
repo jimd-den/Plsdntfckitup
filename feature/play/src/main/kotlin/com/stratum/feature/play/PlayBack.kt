@@ -18,6 +18,7 @@ internal fun closeOpenPanel(state: PlayUiState, viewModel: PlayViewModel): Boole
         state.anvilOpen -> viewModel.toggleAnvil()
         state.satchelOpen -> viewModel.toggleSatchel()
         state.realmOpen -> viewModel.toggleRealm()
+        state.worldShaper.open -> viewModel.toggleWorldShaper()
         state.campOpen -> viewModel.toggleCamp()
         state.styleOpen -> viewModel.toggleStyle()
         state.tableOpen -> viewModel.toggleTable()

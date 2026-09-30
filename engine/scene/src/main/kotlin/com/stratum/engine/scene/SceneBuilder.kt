@@ -50,6 +50,26 @@ data class SceneActor(
  * rasteriser both take exactly this, which is what makes a screenshot from a
  * build machine evidence about the game rather than a mock-up of it.
  */
+/**
+ * The see-through cylinder around the player: everything in front of them
+ * and above their feet within [radius] of the line from the camera is cut
+ * away (dithered at the rim), so a hill, a roof or a wall never covers the
+ * hero. See [ShadingModel.revealCut].
+ */
+data class Reveal(val x: Float, val y: Float, val z: Float, val radius: Float) {
+    companion object {
+        /** Blocks. Wide enough for the hero and what they are fighting next to them. */
+        const val DEFAULT_RADIUS = 2.6f
+        const val FEATHER = 0.9f
+        /** Surfaces this far above the feet are kept: the floor underfoot, the kerb beside it. */
+        const val FLOOR_CLEARANCE = 0.3f
+        /** The line runs to the body's middle, not the feet. */
+        const val BODY_CENTRE = 1.0f
+        /** How close in front of the player's centre the cut stops, so the wall behind them stays. */
+        const val BEHIND_MARGIN = 0.6f
+    }
+}
+
 class SceneFrame(
     val camera: SceneCamera,
     val lighting: SceneLighting,
@@ -81,6 +101,32 @@ class SceneFrame(
      * again.
      */
     val residentTerrain: List<MeshBatch> = terrain,
+    /** Where the world is cut open so the player is never hidden; null cuts nothing. Applies to [terrain] and [models], never to actors. */
+    val reveal: Reveal? = null,
+    /** Which ingredients of the handcrafted finish to draw; see [DioramaLook]. */
+    val look: com.stratum.engine.scene.quality.DioramaLook = com.stratum.engine.scene.quality.DioramaLook.OFF,
+    /** 0 at noon, 1 at midnight, eased: how far lit windows and lamps are into their night glow. */
+    val night: Float = 0f,
+    /** Surfels near the focus, per chunk, as thinned for this frame; see [SurfelLod]. Drawn opaque, after the terrain. */
+    val surfels: List<SurfelDraw> = emptyList(),
+    /** Every chunk's surfels in the meshed square, drawn or not, for a backend to keep on the GPU like [residentTerrain]. */
+    val residentSurfels: List<SurfelBatch> = emptyList(),
+    /**
+     * The micro-detail terrain as voxel splats, per chunk layer, that the
+     * view (widened by the shadow reach) can see; see [SplatMode]. Drawn
+     * opaque with the terrain, and into the shadow map.
+     */
+    val splats: List<SplatBatch> = emptyList(),
+    /** Every splat batch in the meshed square, for a backend to keep on the GPU like [residentTerrain]. */
+    val residentSplats: List<SplatBatch> = emptyList(),
+    /** How [splats] are drawn: [SplatMode.FAST] or [SplatMode.EXACT]. */
+    val splatMode: SplatMode = SplatMode.MESH,
+    /**
+     * How many of [lights], from the front, move: the hero's and the
+     * impacts'. The rest are the land's own lamps, which splats carry
+     * already baked in ([VoxelLight]) and so do not shade again.
+     */
+    val dynamicLights: Int = lights.size,
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -123,8 +169,42 @@ class SceneBuilder(
      * shadowed and fogged exactly like the terrain.
      */
     private val propModels: (String) -> PropModel? = { null },
+    /**
+     * The microvoxels behind the world, when it was generated from them:
+     * chunks within [RenderSettings.microDetailRadius] of the camera are drawn
+     * from these instead of from blocks.
+     */
+    microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
 ) {
-    private val chunks = ChunkMeshCache(TerrainMesher(scene, textures, biomeAt))
+    private val chunks = ChunkMeshCache(
+        TerrainMesher(scene, textures, biomeAt),
+        microTerrain?.let {
+            MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity, splatMode = settings.splats, voxelLight = settings.voxelLight)
+        },
+        settings.microDetailRadius,
+        settings.microFarRadius,
+    )
+
+    /** Where a placed block's pop takes its colour from, so it matches the detail it becomes. */
+    private val microSource = microTerrain
+
+    /** Blocks just placed or removed near the camera, drawn as a pop or a puff of dust; see [BuildPulses]. */
+    private val pulses = BuildPulses()
+
+    /** Cells animating a placement or removal in the last frame; what a test or a tool checks. */
+    val activePulses: List<BuildPulses.Pulse> get() = pulses.active
+
+    /** Chunks drawn from microvoxels in the last frame, for profiling. */
+    val detailedChunksLastFrame: Int get() = chunks.detailedLastCall
+
+    /** Microvoxel chunk meshes still being made in the background. */
+    val detailPending: Int get() = chunks.detailPending
+
+    /** Chunks that fell from microvoxels back to blocks in the last frame: a visible pop, zero when edits are patched. */
+    val detailPopsLastFrame: Int get() = chunks.poppedLastCall
+
+    /** Microvoxel layers an edit remeshed during the last frame; see [ChunkMeshCache]. */
+    val editLayersLastFrame: Int get() = chunks.editLayersLastCall
 
     /** The chunks' meshes, props, lights and litter gathered into lists, redone only when a chunk changes. */
     private class Terrain(
@@ -135,7 +215,14 @@ class SceneBuilder(
         val models: MeshBatch? = null,
         /** Each mesh's box, six floats apiece (min x, y, z, max x, y, z), for culling against the view. */
         val bounds: FloatArray = FloatArray(0),
+        /** Surfels of the detailed chunks; see [SurfelScatter]. */
+        val surfels: List<SurfelBatch> = emptyList(),
+        /** Voxel splats of the detailed chunks, when the tier draws them; see [SplatMode]. */
+        val splats: List<SplatBatch> = emptyList(),
     )
+
+    /** This frame's bloom gain from the night glow; 1 by day. */
+    private var nightSwell = 1f
 
     private var terrain = Terrain(emptyList(), emptyList(), emptyList(), emptyList())
     private var terrainGeneration = Long.MIN_VALUE
@@ -159,11 +246,17 @@ class SceneBuilder(
     private val glows = MeshBuilder(MaterialKind.GLOW)
     private val actorMesh = MeshBuilder(MaterialKind.OPAQUE)
 
+    /** Draws floating mask spirits: their smooth bodies, auras, trails and shields. */
+    private val spiritStage = SpiritStage()
+
     /** Arrays for the per-frame batches; the backend returns them through [SceneFrame.release]. */
     private val recycler = MeshRecycler()
 
     // This frame's sun on the ground: which way shadows fall, how long they
     // are per unit of height, and how dark. Set at the start of build().
+    /** How wide the see-through cut around the player is, in blocks; 0 turns it off. See [Reveal]. */
+    var revealRadius: Float = Reveal.DEFAULT_RADIUS
+
     private var shadowDirX = 0f
     private var shadowDirY = 1f
     private var shadowReach = 0.7f
@@ -194,6 +287,8 @@ class SceneBuilder(
         effects: List<ActiveEffect> = emptyList(),
         /** Projectiles in flight, pulsing ground and wind-ups; see [CombatMark]. */
         marks: List<CombatMark> = emptyList(),
+        /** Floating mask spirits, posed by whoever animates them; see [SpiritStage]. */
+        spirits: List<SpiritInstance> = emptyList(),
     ): SceneFrame {
         val cx = floor(camera.target.x).toInt()
         val cy = floor(camera.target.y).toInt()
@@ -217,6 +312,8 @@ class SceneBuilder(
         // through as a black staircase; fog is total before the meshed edge,
         // and the sky leans towards the fog colour, so the boundary dissolves.
         val edge = camera.distance + radius * EDGE_FOG_SHARE
+        val night = nightOf(time)
+        nightSwell = 1f + settings.diorama.nightGlow * night * NIGHT_BLOOM_SWELL
         val lighting = styled.copy(
             fogFloor = camera.target.z - FOG_FLOOR_DEPTH,
             fogStart = minOf(styled.fogStart + camera.distance, edge - MIN_FOG_SPAN),
@@ -229,7 +326,7 @@ class SceneBuilder(
             val toEye = (camera.eye - camera.target).let { Vec3(it.x, it.y, 0f).normalized() }
             val fill = Vec3(toEye.x, toEye.y, FILL_LIFT).normalized()
             lit.copy(fillX = fill.x, fillY = fill.y, fillZ = fill.z)
-        }
+        }.let { lit -> moonlit(lit, night * settings.diorama.nightGrade) }
 
         cutout.clear(); decals.clear(); glows.clear(); actorMesh.clear()
         run {
@@ -261,9 +358,13 @@ class SceneBuilder(
             if (!volume.mayShow(light.x, light.y, light.z, BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength))) return@forEach
             // A light you can see the source of. Point lights colour the ground;
             // the bloom is what tells the eye where the fire actually is.
-            glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength), light.color, BLOOM_OPACITY)
+            // At night the bloom swells with the glow, so a lamp reads from across the square.
+            val swell = nightSwell
+            glow(camera, light.x, light.y, light.z + BLOOM_LIFT, BLOOM_RADIUS * (0.6f + light.strength) * swell, light.color, BLOOM_OPACITY * swell)
         }
         actors.forEach { actor(it, camera, eyeLevel) }
+        pulses.update(world, cx, cy, worldRevision, time.elapsedSeconds)
+        pulses.active.forEach { pulse(world, it, time.elapsedSeconds) }
         val palette = director.direction.palette
         ghosts.forEach { cell ->
             // A pending build glows where it will stand, in the hero's colour,
@@ -278,6 +379,7 @@ class SceneBuilder(
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
         marks.forEach { mark(it, camera, flashes, time.elapsedSeconds) }
+        if (spirits.isNotEmpty()) spiritStage.draw(spirits, camera, actorMesh, cutout, glows, flashes)
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
             ?.takeIf { lighting.heroLight > 0f }
@@ -308,7 +410,61 @@ class SceneBuilder(
             decals = decals.build(recycler),
             glows = glows.build(recycler),
             models = listOfNotNull(terrain.models),
+            reveal = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
+                ?.takeIf { revealRadius > 0f }
+                ?.let { Reveal(it.x, it.y, it.z, revealRadius) },
+            look = settings.diorama,
+            night = night,
+            surfels = if (settings.diorama.surfels) SurfelLod.select(
+                terrain.surfels, camera.target.x, camera.target.y, settings.diorama.surfelRadius, settings.diorama.surfelBudget,
+            ) { b -> volume.intersects(b.originX.toFloat(), b.originY.toFloat(), b.minZ, b.originX + Chunk.SIZE.toFloat(), b.originY + Chunk.SIZE.toFloat(), b.maxZ) }
+            else emptyList(),
+            residentSurfels = terrain.surfels,
+            splats = terrain.splats.filter { b ->
+                volume.intersects(
+                    b.originX - TERRAIN_SHADOW_MARGIN, b.originY - TERRAIN_SHADOW_MARGIN, b.minZ,
+                    b.originX + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, b.originY + Chunk.SIZE + TERRAIN_SHADOW_MARGIN, b.maxZ,
+                )
+            },
+            residentSplats = terrain.splats,
+            splatMode = settings.splatDraw,
+            dynamicLights = if (settings.splats.splats && settings.voxelLight) minOf(nearest.size, (if (hero != null) 1 else 0) + bursts.size) else nearest.size,
         )
+    }
+
+    /**
+     * How far into the night it is, for the glow of windows and lamps: 0
+     * through the day, rising through dusk to 1 at midnight. The same
+     * noon-to-midnight triangle the art director darkens the sun by, eased
+     * so the windows only come on once the light has really gone.
+     */
+    /**
+     * The night grade ([com.stratum.engine.scene.quality.DioramaLook.nightGrade]):
+     * sun and sky dimmed and cooled towards moonlight by [n], fog and sky
+     * deepened, lamps and the hero's light strengthened. [n] 0 returns
+     * [lit] itself.
+     */
+    private fun moonlit(lit: com.stratum.core.domain.art.SceneLighting, n: Float): com.stratum.core.domain.art.SceneLighting {
+        if (n <= 0f) return lit
+        return lit.copy(
+            sunIntensity = lit.sunIntensity * (1f - MOON_SUN_LOSS * n),
+            sunColor = Tint.mix(lit.sunColor, MOONLIGHT, MOON_TINT * n),
+            ambientIntensity = lit.ambientIntensity * (1f - MOON_AMBIENT_LOSS * n),
+            skyAmbient = Tint.mix(lit.skyAmbient, MOON_SKY, MOON_TINT * n),
+            groundAmbient = Tint.mix(lit.groundAmbient, MOON_GROUND, MOON_TINT * n * 0.6f),
+            fogColor = Tint.mix(lit.fogColor, MOON_FOG, MOON_TINT * n),
+            skyTop = Tint.mix(lit.skyTop, MOON_SKY_TOP, MOON_TINT * n),
+            skyBottom = Tint.mix(lit.skyBottom, MOON_FOG, MOON_TINT * n),
+            saturation = lit.saturation * (1f - MOON_DESATURATE * n),
+            pointLightGain = lit.pointLightGain * (1f + MOON_LAMP_GAIN * n),
+            heroLight = lit.heroLight * (1f + MOON_LAMP_GAIN * 0.5f * n),
+        )
+    }
+
+    private fun nightOf(time: WorldTime): Float {
+        val phase = ((time.dayFraction % 1f) + 1f) % 1f
+        val dark = (abs(phase - 0.5f) / 0.5f).coerceIn(0f, 1f)
+        return ShadingModel.smoothstep(NIGHT_GLOW_START, 1f, dark)
     }
 
     private fun terrainAround(
@@ -334,6 +490,8 @@ class SceneBuilder(
                 details = results.flatMap { it.details },
                 models = modelProps(props),
                 bounds = boundsOf(meshes),
+                surfels = results.mapNotNull { it.surfels },
+                splats = results.mapNotNull { it.splats },
             )
             // Styles of props still in the square are kept; the rest are let go.
             val kept = java.util.IdentityHashMap<PropInstance, PropStyle?>(props.size)
@@ -479,7 +637,7 @@ class SceneBuilder(
             silhouette(camera, baseX, baseY, baseZ, style, opacity)
         }
         if (Tint.alpha(style.glow) > 0) {
-            glow(camera, baseX, baseY, baseZ + style.scale * 0.8f, style.scale * 1.6f, style.glow, Tint.alpha(style.glow) / 255f)
+            glow(camera, baseX, baseY, baseZ + style.scale * 0.8f, style.scale * 1.6f * nightSwell, style.glow, Tint.alpha(style.glow) / 255f * nightSwell)
         }
     }
 
@@ -658,6 +816,88 @@ class SceneBuilder(
             val idx = c.map { p -> out.vertex(p[0], p[1], p[2], n[0], n[1], n[2], color, 1f, 0f, 0f, Vertex.ACTOR) }
             out.quad(idx[0], idx[1], idx[2], idx[3])
         }
+    }
+
+    /**
+     * A block just placed or removed: the placed one pops in and kicks up a
+     * little dust at its foot; the removed one leaves a puff where it stood.
+     *
+     * The pop is also what makes an edit show on the frame it happens. A
+     * chunk drawn in microvoxels gets its new mesh from a worker a frame or
+     * two later ([ChunkMeshCache.awaiting]); until then the pop stands in for
+     * the block, at full size once its animation is over. It is a hair larger
+     * than a block, so once the real one lands beneath it the two never fight
+     * over the same pixels.
+     */
+    private fun pulse(world: World, p: BuildPulses.Pulse, now: Float) {
+        val age = now - p.born
+        val registry = world.registry
+        if (p.placed) {
+            val block = registry.typeOf(p.block)
+            val (top, side) = pulseColours(registry, p.block)
+            val t = age / BuildPulses.POP_SECONDS
+            val solid = block.glyph == null && block.shape == com.stratum.core.domain.world.BlockShape.CUBE
+            if (solid && (t < 1f || p.chunk in chunks.awaiting)) {
+                val s = BuildPulses.popScale(t) * PULSE_SIZE
+                cube(actorMesh, p.x + 0.5f, p.y + 0.5f, p.z + 0.5f, s, top, side)
+            }
+            if (age < BuildPulses.DUST_SECONDS) dust(p, age / BuildPulses.DUST_SECONDS, side, grains = PLACE_GRAINS, rise = 0.15f)
+        } else if (p.was != com.stratum.core.domain.world.BlockRegistry.AIR_INDEX && age < BuildPulses.DUST_SECONDS) {
+            dust(p, age / BuildPulses.DUST_SECONDS, pulseColours(registry, p.was).second, grains = BREAK_GRAINS, rise = 0.5f)
+        }
+    }
+
+    /** A block's top and side colours as the detail mesher will draw it, or as the block mesher does. */
+    private fun pulseColours(registry: com.stratum.core.domain.world.BlockRegistry, index: Int): Pair<Long, Long> {
+        val micro = microSource
+        if (micro != null) {
+            val rgb = runCatching { micro.palette[micro.materialForBlock(index)].color }.getOrNull()
+            if (rgb != null) {
+                val c = Tint.OPAQUE or (rgb.toLong() and 0xFFFFFF)
+                return c to Tint.scale(c, PULSE_SIDE_SHADE)
+            }
+        }
+        val block = registry.typeOf(index.coerceAtLeast(0))
+        return block.topColor to block.sideColor
+    }
+
+    /**
+     * Grains of the block flung out from its cell and falling back, with a
+     * faint scuff on the ground: small, quick and cheap -- a few boxes in the
+     * per-frame actor batch -- because a build makes dozens of these.
+     */
+    private fun dust(p: BuildPulses.Pulse, t: Float, block: Long, grains: Int, rise: Float) {
+        val fade = 1f - t
+        // Dust is the block ground fine: paler than the block, or it vanishes against ground of the same stuff.
+        val color = Tint.mix(block, DUST_LIGHT, DUST_PALER)
+        val baseZ = if (p.placed) p.z.toFloat() else p.z + 0.5f
+        decal(p.x + 0.5f, p.y + 0.5f, p.z.toFloat(), 0.45f + 0.45f * t, color, fade * fade * DUST_SCUFF_OPACITY, Vertex.DISC)
+        for (i in 0 until grains) {
+            val a = unit(hash(p.x * 31 + i, p.y * 17 + p.z), i) * TAU
+            val reach = 0.35f + 0.55f * t * (0.6f + 0.4f * unit(p.x + i, p.y - i))
+            val lift = rise * (0.5f + unit(p.y + i, p.x)) * t * (1.6f - t) * 2f - 0.35f * t * t
+            val size = DUST_GRAIN * fade * (0.6f + 0.6f * unit(i, p.z))
+            if (size <= 0.01f) continue
+            cube(actorMesh, p.x + 0.5f + cos(a) * reach, p.y + 0.5f + sin(a) * reach, baseZ + 0.08f + lift, size, color, color)
+        }
+    }
+
+    /** An axis-aligned cube of edge [size] centred on a point: top and four sides, flat-coloured like microvoxel ground. */
+    private fun cube(out: MeshBuilder, cx: Float, cy: Float, cz: Float, size: Float, top: Long, side: Long) {
+        val h = size / 2
+        val x0 = cx - h; val x1 = cx + h; val y0 = cy - h; val y1 = cy + h; val z0 = cz - h; val z1 = cz + h
+        fun face(nx: Float, ny: Float, nz: Float, color: Long, vararg c: Float) {
+            val a = out.vertex(c[0], c[1], c[2], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val b = out.vertex(c[3], c[4], c[5], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val d = out.vertex(c[6], c[7], c[8], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            val e = out.vertex(c[9], c[10], c[11], nx, ny, nz, color, 1f, 0f, 0f, Vertex.FLAT)
+            out.quad(a, b, d, e)
+        }
+        face(0f, 0f, 1f, top, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1)
+        face(1f, 0f, 0f, side, x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1)
+        face(-1f, 0f, 0f, side, x0, y1, z0, x0, y0, z0, x0, y0, z1, x0, y1, z1)
+        face(0f, 1f, 0f, side, x1, y1, z0, x0, y1, z0, x0, y1, z1, x1, y1, z1)
+        face(0f, -1f, 0f, side, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1)
     }
 
     /** A piece of ground litter, lying flat and turned its own way. */
@@ -988,6 +1228,21 @@ class SceneBuilder(
     companion object {
         /** Blocks meshed around the camera target in each direction. */
         const val REGION_STEP = 6
+        /** How dark (0 noon, 1 midnight) it must be before windows start to glow. */
+        const val NIGHT_GLOW_START = 0.45f
+        /** Bloom radius and opacity gained per unit of night glow at midnight. */
+        const val NIGHT_BLOOM_SWELL = 0.15f
+        // The night grade: moonlight a pale blue-white, the sky and fog deep blue.
+        const val MOONLIGHT = 0xFFA4B8F0L
+        const val MOON_SKY = 0xFF5068A8L
+        const val MOON_GROUND = 0xFF22263CL
+        const val MOON_FOG = 0xFF1B2340L
+        const val MOON_SKY_TOP = 0xFF0C1026L
+        const val MOON_TINT = 0.75f
+        const val MOON_SUN_LOSS = 0.6f
+        const val MOON_AMBIENT_LOSS = 0.35f
+        const val MOON_DESATURATE = 0.15f
+        const val MOON_LAMP_GAIN = 0.8f
         /** How far past a chunk's edge its shadow may reach into view, in blocks. */
         const val TERRAIN_SHADOW_MARGIN = 8f
         /** Off-screen chunks meshed per frame; see [ChunkMeshCache]. */
@@ -1084,6 +1339,18 @@ class SceneBuilder(
         const val HERO_LIGHT_HEIGHT = 1.8f
         const val GHOST_RADIUS = 0.62f
         const val GHOST_OPACITY = 0.45f
+
+        /** A placed block's pop, as a share of a block: a hair over, so it covers the real block when that lands. */
+        const val PULSE_SIZE = 1.03f
+        /** Sides of a microvoxel-coloured pop, darkened as the detail's sides read under the sun. */
+        const val PULSE_SIDE_SHADE = 0.82f
+        /** Grains of dust a placed block kicks up, and a removed one leaves. */
+        const val PLACE_GRAINS = 5
+        const val BREAK_GRAINS = 9
+        const val DUST_GRAIN = 0.2f
+        const val DUST_SCUFF_OPACITY = 0.35f
+        const val DUST_LIGHT = 0xFFF2E6D0
+        const val DUST_PALER = 0.4f
         const val HIGHLIGHT_RADIUS = 0.7f
         const val HIGHLIGHT_OPACITY = 0.9f
 

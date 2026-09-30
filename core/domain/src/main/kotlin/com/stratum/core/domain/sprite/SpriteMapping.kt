@@ -378,4 +378,17 @@ object SpriteNamespace {
 
     fun isCharacter(sheetId: String): Boolean =
         servesHero(sheetId) || servesMonster(sheetId)
+
+    /**
+     * What a sheet was made as, for a picker to say beside its name. A
+     * player may wear any look they choose -- a monster's included -- and
+     * the label is what tells them that is what they are choosing.
+     */
+    fun kindOf(sheetId: String): String = when {
+        sheetId.startsWith(HERO) -> "Hero"
+        sheetId.startsWith(MONSTER) -> "Monster"
+        sheetId.startsWith(POSE) -> "Character"
+        sheetId.startsWith(ACTION) -> "Action"
+        else -> "Pack art"
+    }
 }

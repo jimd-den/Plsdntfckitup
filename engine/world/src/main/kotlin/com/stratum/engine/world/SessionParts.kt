@@ -30,7 +30,8 @@ import kotlin.random.Random
  */
 internal class SessionParts(
     val content: AssembledContent,
-    val config: WorldConfig,
+    /** Changes only when the player retunes the terrain; everything else about a world is fixed at its start. */
+    var config: WorldConfig,
     heroClassId: String?,
     terrainGenerator: TerrainGenerator?,
     val difficulty: Difficulty,
@@ -41,6 +42,12 @@ internal class SessionParts(
     /** The terrain as its generator made it, before towns are laid over it: what can say where it marked things. */
     private val landscape: TerrainGenerator = terrainGenerator ?: StratumTerrain.create(content.terrainContext(config).copy(welcoming = ::welcoming))
     private val generator: TerrainGenerator = terrainGenerator ?: withTowns(landscape)
+
+    /** The microvoxels behind the blocks, when the terrain was made of them; renderers draw the fine version from it. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = landscape as? com.stratum.engine.microvoxel.MicroTerrainSource
+
+    /** The terrain, when it can be retuned while played; see [WorldSession.retuneTerrain]. */
+    val hotTerrain: com.stratum.engine.microbridge.HotTerrain? = landscape as? com.stratum.engine.microbridge.HotTerrain
 
     /** Only generators that claim to know about biomes are asked; one that does not leaves the region unnamed. */
     val biomeSource: BiomeSource? = generator as? BiomeSource
@@ -59,7 +66,11 @@ internal class SessionParts(
     private val lootRoller = LootRoller.of(content)
     val ground = GroundItems()
     private val workbench = Workbench(content, ItemCrafter(lootRoller), config.rules.combat)
-    private val directorConfig = DirectorConfig(maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1))
+    private val directorConfig = DirectorConfig(
+        maxAlive = (DirectorConfig().maxAlive * config.rules.monsterDensity).roundToInt().coerceAtLeast(1),
+        alertness = config.rules.enemyAlertness,
+        markerShare = config.rules.monsterDensity.coerceAtMost(1f),
+    )
     private val director = EnemyDirector(world, content.enemies, config = directorConfig, difficulty = difficulty, packs = content.enemyPacks)
     private val survivalRules = SurvivalSystem(content, config.rules.survival, world, roomScanner)
 
@@ -67,7 +78,10 @@ internal class SessionParts(
     val profile = PlayerProfile(content, table, survivalRules::modifiers, workbench::linkedTo)
     val survival = SurvivalFacade(state, content, survivalRules, profile::maxHealth)
     val gear = GearSystem(state, content, workbench, ground, lootRoller, cues, random, profile)
-    val building = BuildingSystem(state, world, content.registry, motion, survivalRules, roomScanner, cues, random, content::insert)
+    /** Models and carvings laid over the land, when it is made of microvoxels. */
+    val stampSurface: com.stratum.core.domain.micro.MicroStampSurface? = landscape as? com.stratum.core.domain.micro.MicroStampSurface
+
+    val building = BuildingSystem(state, world, content.registry, motion, survivalRules, roomScanner, cues, random, content::insert, microTerrain, stampSurface)
     val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert, profile)
     val politics = PoliticsSystem(state, content, generator as? SettlementAtlas, director, RealmSystem(content, config.rules.raids), cues, random)
 
@@ -75,6 +89,7 @@ internal class SessionParts(
     val combat = CombatSystem(
         content, config.rules.combat, world, director, cues, flashes, impacts, random, profile,
         playerSkill = { id -> content.skill(id)?.let(gear::tuned) },
+        incomingDamage = config.rules.enemyDamage,
     )
     val encounters: EncounterSystem = EncounterSystem(
         state, content, config.seed, director, directorConfig, world, landscape, { x, y -> biomeSource?.biomeAt(x, y)?.id },
@@ -92,16 +107,22 @@ internal class SessionParts(
      * the origin column happens to be unsuitable, so a spawn is never inside rock.
      */
     fun spawnPoint(): WorldPoint {
+        // Standing ground first: a column topped with water or a sprite is a
+        // surface, but not one to arrive on. Any surface at all is the fallback.
+        var fallback: WorldPoint? = null
         for (radius in 0..SPAWN_SEARCH_RADIUS) {
             for (y in -radius..radius) {
                 for (x in -radius..radius) {
                     if (maxOf(abs(x), abs(y)) != radius) continue
                     val surface = world.surfaceAt(x, y)
-                    if (surface in 1 until Chunk.HEIGHT - 2) return WorldPoint(x + 0.5f, y + 0.5f, (surface + 1).toFloat())
+                    if (surface !in 1 until Chunk.HEIGHT - 2) continue
+                    val point = WorldPoint(x + 0.5f, y + 0.5f, (surface + 1).toFloat())
+                    if (world.isSolid(com.stratum.core.domain.world.BlockPos(x, y, surface))) return point
+                    if (fallback == null) fallback = point
                 }
             }
         }
-        return WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
+        return fallback ?: WorldPoint(0.5f, 0.5f, (config.seaLevel + 1).toFloat())
     }
 
     /**

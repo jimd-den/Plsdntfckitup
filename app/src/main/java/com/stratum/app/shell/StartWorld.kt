@@ -22,6 +22,8 @@ internal fun startNewWorld(
     rules: WorldRules,
     seed: Long,
     described: InstantWorld? = null,
+    /** The scene the words (or a model reading them) asked for: the land, the towns and the danger. */
+    scene: com.stratum.engine.microbridge.SceneSpec? = null,
 ) {
     val content = app.game.content.value
     val heroId = heroClassId ?: app.game.selectedHeroClassId()
@@ -36,7 +38,9 @@ internal fun startNewWorld(
         queueWorldCrew(app, described.prompt, identity.name) { pack -> app.deliver(pack) }
     }
     app.game.chooseHeroClass(heroId)
-    val launch = WorldLaunch.New(identity, heroId, rules, seed)
+    val base = com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.basePasses(content.terrain)
+    val passes = scene?.takeIf { !it.isEmpty && base.isNotEmpty() }?.passSpecs(base)
+    val launch = WorldLaunch.New(identity, heroId, scene?.rules(rules) ?: rules, seed, passes)
     // Replaced rather than pushed from a flow's last step: leaving the world
     // goes back to the hub, not to the step that started it.
     val stack = app.backStack

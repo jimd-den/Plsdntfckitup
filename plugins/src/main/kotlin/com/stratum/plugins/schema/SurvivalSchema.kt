@@ -103,17 +103,30 @@ internal data class RulesSchema(
     val deathPenalty: Float = RULES.deathPenalty,
     val combat: CombatRulesSchema? = null,
     val sandbox: Boolean = RULES.sandbox,
+    /** How hard monsters hit and how far they notice; absent follows [monsterDensity], as the calm dial does. */
+    val enemyDamage: Float? = null,
+    val enemyAlertness: Float? = null,
 ) {
-    fun toDomain() = WorldRules(
-        SchemaValues.enum<SurvivalMode>(survival, "rules survival"), townDensity, startInTown, monsterDensity, raids, dayLengthMinutes,
-        lootMultiplier, experienceMultiplier, deathPenalty, combat?.toDomain() ?: com.stratum.core.domain.combat.CombatRules(), sandbox,
-    )
+    fun toDomain(): WorldRules {
+        val paced = WorldRules().withMonsters(monsterDensity)
+        return WorldRules(
+            survival = SchemaValues.enum<SurvivalMode>(survival, "rules survival"), townDensity = townDensity, startInTown = startInTown,
+            monsterDensity = monsterDensity, enemyDamage = enemyDamage ?: paced.enemyDamage, enemyAlertness = enemyAlertness ?: paced.enemyAlertness,
+            raids = raids, dayLengthMinutes = dayLengthMinutes, lootMultiplier = lootMultiplier, experienceMultiplier = experienceMultiplier,
+            deathPenalty = deathPenalty, combat = combat?.toDomain() ?: com.stratum.core.domain.combat.CombatRules(), sandbox = sandbox,
+        )
+    }
 
     companion object {
-        fun of(r: WorldRules) = RulesSchema(
-            SchemaValues.name(r.survival), r.townDensity, r.startInTown, r.monsterDensity, r.raids, r.dayLengthMinutes,
-            r.lootMultiplier, r.experienceMultiplier, r.deathPenalty,
-            r.combat.takeIf { it != com.stratum.core.domain.combat.CombatRules() }?.let(CombatRulesSchema::of), r.sandbox,
-        )
+        fun of(r: WorldRules): RulesSchema {
+            val paced = WorldRules().withMonsters(r.monsterDensity)
+            return RulesSchema(
+                SchemaValues.name(r.survival), r.townDensity, r.startInTown, r.monsterDensity, r.raids, r.dayLengthMinutes,
+                r.lootMultiplier, r.experienceMultiplier, r.deathPenalty,
+                r.combat.takeIf { it != com.stratum.core.domain.combat.CombatRules() }?.let(CombatRulesSchema::of), r.sandbox,
+                enemyDamage = r.enemyDamage.takeIf { it != paced.enemyDamage },
+                enemyAlertness = r.enemyAlertness.takeIf { it != paced.enemyAlertness },
+            )
+        }
     }
 }

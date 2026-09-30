@@ -30,6 +30,8 @@ data class StudioStatus(
     val paintedStyle: String? = null,
     /** Creation jobs still queued or running, from the job centre. */
     val running: Int = 0,
+    /** Microvoxel models the player has kept in the model studio. */
+    val microModelCount: Int = 0,
 )
 
 /** Every way into the studio's tools. */
@@ -43,6 +45,7 @@ data class CreateHubActions(
     val onLore: () -> Unit = {},
     val onSprites: () -> Unit = {},
     val onModels: () -> Unit = {},
+    val onVoxels: () -> Unit = {},
     val onCrew: () -> Unit = {},
     val onMapper: () -> Unit = {},
     val onSettings: () -> Unit = {},
@@ -109,6 +112,14 @@ fun CreateHubScreen(
             links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accentAlt,
+        )
+        HubCard(
+            glyph = "🧱", title = "Model studio", promise = "Microvoxel assets by hand, from a picture, or rolled from the building generator",
+            onClick = actions.onVoxels,
+            status = if (status.microModelCount > 0) "${status.microModelCount} kept" else "Ready",
+            statusTone = if (status.microModelCount > 0) StatusTone.NEUTRAL else StatusTone.READY,
+            modifier = Modifier.fillMaxWidth(),
+            tint = StratumTheme.colors.accent,
         )
         val advanced = ai("Every step on the record" to StatusTone.NEUTRAL)
         HubCard(

@@ -29,7 +29,25 @@ data class NewWorldDraft(
      * the look the words suggest, and the crew writes the rest while it does.
      */
     val prompt: String = "",
+    /** A language model's reading of [prompt], when the player asked for one: its values win over the words'. */
+    val modelScene: Map<String, String> = emptyMap(),
+    val modelNotes: List<String> = emptyList(),
+    /** For the prompt the model read, so an edited prompt drops a stale reading. */
+    val modelSceneFor: String = "",
+    val readingScene: Boolean = false,
 ) {
+    /**
+     * The scene the words describe: the land, its towns, its buildings and
+     * its danger, read at once from the words and refined by a model's reading
+     * when there is one for this exact prompt.
+     */
+    val scene: com.stratum.engine.microbridge.SceneSpec
+        get() {
+            val words = com.stratum.engine.microbridge.ScenePrompt.read(prompt)
+            if (modelSceneFor != prompt.trim() || modelScene.isEmpty()) return words
+            return com.stratum.engine.microbridge.ScenePrompt.merge(words, com.stratum.engine.microbridge.SceneSpec(modelScene, modelNotes))
+        }
+
     /** The described world, read at once and without a model; null when nothing was described. */
     val described: InstantWorld? get() = prompt.trim().takeIf { it.isNotEmpty() }?.let { InstantWorld.from(it, name) }
 

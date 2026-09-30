@@ -59,7 +59,7 @@ internal object WorldDials {
         "Monsters",
         listOf(Step("Calm", 0.6f), Step("Normal", 1f), Step("Swarming", 1.6f)),
         { it.monsterDensity },
-        { r, v -> r.copy(monsterDensity = v) },
+        { r, v -> r.withMonsters(v) },
     )
     val day = Dial(
         "Day length",

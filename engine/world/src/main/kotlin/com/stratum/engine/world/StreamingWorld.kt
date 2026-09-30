@@ -193,6 +193,25 @@ class StreamingWorld(
         }
     }
 
+    /**
+     * Throws away every chunk the generator can remake and makes it again --
+     * after the generator itself has changed (a retuned [com.stratum.engine.microbridge.HotTerrain]).
+     * Chunks within [urgentRadius] of the focus are made now; the rest of the
+     * window is queued for [pump]. Chunks the player has edited are kept as
+     * they are: a retune never undoes a wall someone built. Returns how many
+     * chunks were dropped.
+     */
+    fun regenerate(urgentRadius: Int = 1): Int {
+        val stale = chunks.keys.filterNot(editedPositions::contains)
+        stale.forEach { chunks.remove(it) }
+        if (stale.isNotEmpty()) residency++
+        forgetLookup()
+        val centre = focus
+        focus = ChunkPos(Int.MIN_VALUE, Int.MIN_VALUE)
+        focusOn(centre, urgentRadius)
+        return stale.size
+    }
+
     /** Drops an existing chunk in, bypassing generation. Used when loading a save. */
     fun installChunk(chunk: Chunk, markEdited: Boolean = true) {
         chunks[chunk.pos] = chunk

@@ -2,6 +2,7 @@ package com.stratum.app
 
 import android.content.Context
 import com.stratum.core.data.settings.GraphicsSettingsStore
+import com.stratum.engine.scene.SplatMode
 import com.stratum.engine.scene.quality.DeviceClassifier
 import com.stratum.engine.scene.quality.QualityTier
 import com.stratum.engine.scene.quality.RenderSettings
@@ -25,6 +26,15 @@ class GraphicsWiring(private val context: Context) {
         store.save(tier?.name)
     }
 
+    /** How the land is drawn; null is the tier's own choice. */
+    var terrain: SplatMode? = store.loadTerrain()?.let { name -> SplatMode.entries.firstOrNull { it.name == name } }
+        private set
+
+    fun chooseTerrain(mode: SplatMode?) {
+        terrain = mode
+        store.saveTerrain(mode?.name)
+    }
+
     /** Settings from what the OS knows about this device, for decisions made before rendering starts. */
-    fun startingSettings(): RenderSettings = DeviceClassifier.settingsFor(AndroidDeviceProfiles.fromContext(context), chosen)
+    fun startingSettings(): RenderSettings = DeviceClassifier.settingsFor(AndroidDeviceProfiles.fromContext(context), chosen).withTerrain(terrain)
 }

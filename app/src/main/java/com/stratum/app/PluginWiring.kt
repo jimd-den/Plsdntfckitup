@@ -47,6 +47,25 @@ class PluginWiring(private val context: Context, sprites: SpriteLibrary) {
         builtIn = listOf(builtIn),
     )
 
+    /**
+     * Installs the plugins that ship inside the APK (`assets/plugins/`), the
+     * microvoxel realms among them. Each is installed once per version of
+     * its file: a player who uninstalls one is not overruled on the next
+     * launch, and a new build's copy upgrades the old. Call before the first
+     * [PluginRepository.refresh].
+     */
+    suspend fun installBundled() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val names = context.assets.list(BUNDLED)?.filter { it.endsWith(".${PluginArchive.EXTENSION}") }.orEmpty()
+        val marks = context.getSharedPreferences(BUNDLED, Context.MODE_PRIVATE)
+        for (name in names) {
+            val bytes = context.assets.open("$BUNDLED/$name").use { it.readBytes() }
+            val stamp = java.util.zip.CRC32().apply { update(bytes) }.value
+            if (marks.getLong(name, -1L) == stamp) continue
+            repository.install(name, bytes)
+            marks.edit().putLong(name, stamp).apply()
+        }
+    }
+
     /** Installed plugins' textures, for the 3D view to lay over its kit. Read fresh, since installs add folders. */
     fun textureDirectories(): List<File> = store.textureDirectories()
 
@@ -162,5 +181,8 @@ class PluginWiring(private val context: Context, sprites: SpriteLibrary) {
     private companion object {
         /** Distinct from the player's own classes and creations, so an installed share never collides with either. */
         const val CREATIONS_ID = "shared.creations"
+
+        /** Where the APK keeps the plugins it ships with, in its assets. */
+        const val BUNDLED = "plugins"
     }
 }

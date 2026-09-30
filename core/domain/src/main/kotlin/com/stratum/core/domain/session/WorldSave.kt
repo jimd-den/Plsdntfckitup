@@ -59,6 +59,10 @@ data class WorldSave(
     val realm: RealmSave = RealmSave(),
     /** Generated-world markers already peopled, so a cleared dungeon stays cleared. */
     val consumedMarkers: Set<String> = emptySet(),
+    /** The microvoxel models this world's stamps name: kept with the world, so a statue outlives its library entry. */
+    val microModels: List<com.stratum.core.domain.micro.MicroModel> = emptyList(),
+    /** Models, sculpting and chiselling laid over the land, oldest first. */
+    val stamps: List<com.stratum.core.domain.micro.MicroStamp> = emptyList(),
 ) {
     val id: String get() = identity.id
     val name: String get() = identity.name

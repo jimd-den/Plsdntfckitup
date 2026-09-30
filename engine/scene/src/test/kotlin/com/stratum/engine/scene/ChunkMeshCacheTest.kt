@@ -98,11 +98,59 @@ class ChunkMeshCacheTest {
         val cache = cache()
         cache.around(world, 0, 0, radius = 40, worldRevision = 0)
 
-        // The corner of chunk (1, 1): its edge and corner neighbours all read this cell.
+        // The south-west corner of chunk (1, 1): read by the chunks west, south and south-west of it, and no others.
         world.set(BlockPos(16, 16, 3), BlockRegistry.AIR_INDEX)
         cache.around(world, 0, 0, radius = 40, worldRevision = 1)
 
-        assertEquals(9, cache.meshedLastCall)
+        assertEquals(4, cache.meshedLastCall)
+    }
+
+    @Test
+    fun `placing and removing blocks raises pulses, and streaming ground in does not`() {
+        val world = ChunkWorld(span = 3, grass)
+        val pulses = BuildPulses()
+        pulses.update(world, 8, 8, worldRevision = 0, now = 1f)
+        kotlin.test.assertTrue(pulses.active.isEmpty(), "first sight of the ground is not an edit")
+
+        val grassIndex = world.registry.indexOf(grass.id)
+        world.set(BlockPos(9, 9, 4), grassIndex)
+        world.set(BlockPos(16, 3, 3), BlockRegistry.AIR_INDEX)
+        pulses.update(world, 8, 8, worldRevision = 1, now = 1.1f)
+        assertEquals(2, pulses.active.size)
+        val placed = pulses.active.single { it.placed }
+        assertEquals(BlockPos(9, 9, 4), BlockPos(placed.x, placed.y, placed.z))
+        val removed = pulses.active.single { !it.placed }
+        assertEquals(grassIndex, removed.was)
+
+        pulses.update(world, 8, 8, worldRevision = 1, now = 1.1f + BuildPulses.LIFETIME + 0.1f)
+        kotlin.test.assertTrue(pulses.active.isEmpty(), "pulses outlived their animation")
+    }
+
+    @Test
+    fun `a placed block pops from over half size, overshoots a little and settles at full size`() {
+        assertEquals(0.55f, BuildPulses.popScale(0f), 1e-4f)
+        val peak = (0..100).maxOf { BuildPulses.popScale(it / 100f) }
+        kotlin.test.assertTrue(peak in 1.02f..1.15f, "overshoot $peak")
+        assertEquals(1f, BuildPulses.popScale(1f))
+        assertEquals(1f, BuildPulses.popScale(3f))
+    }
+
+    @Test
+    fun `building along one side remeshes only the neighbour across it`() {
+        val world = ChunkWorld(span = 3, grass)
+        val cache = cache()
+        cache.around(world, 0, 0, radius = 40, worldRevision = 0)
+
+        // Chunk (1, 1)'s west column: the chunk to the west reads it, the ones east, north and south do not.
+        for ((i, y) in (18..28).withIndex()) {
+            world.set(BlockPos(16, y, 4), world.registry.indexOf(grass.id))
+            cache.around(world, 0, 0, radius = 40, worldRevision = 1 + i)
+            assertEquals(2, cache.meshedLastCall, "block at y $y")
+        }
+        // A block in the middle of a side is not a corner: the diagonal neighbours never remesh.
+        world.set(BlockPos(31, 24, 4), world.registry.indexOf(grass.id))
+        cache.around(world, 0, 0, radius = 40, worldRevision = 99)
+        assertEquals(2, cache.meshedLastCall, "the east side of (1, 1) and the chunk east of it")
     }
 
     @Test

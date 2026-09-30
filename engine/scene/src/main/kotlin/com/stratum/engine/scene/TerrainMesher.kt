@@ -47,6 +47,10 @@ class TerrainMesher(
         val props: List<PropInstance>,
         val lights: List<PointLight>,
         val details: List<GroundDetail> = emptyList(),
+        /** Sub-microvoxel grain, tufts and pebbles for a detailed chunk near the camera; see [SurfelScatter]. Purely visual. */
+        val surfels: SurfelBatch? = null,
+        /** The detail as voxel splats instead of quads, when the tier draws them; see [SplatMode]. */
+        val splats: SplatBatch? = null,
     )
 
     // One builder for every chunk this mesher makes, cleared between them: a

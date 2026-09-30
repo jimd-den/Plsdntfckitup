@@ -1,5 +1,7 @@
 package com.stratum.app.shell
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -132,6 +134,7 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
     }
     val loadout by app.game.loadout.collectAsStateWithLifecycle()
     val looks = rememberLookChoices(app, content)
+    val sceneScope = androidx.compose.runtime.rememberCoroutineScope()
     NewWorldScreen(
         draft = draft.copy(heroClassId = draft.heroClassId ?: app.game.loadout.value.heroClassId),
         heroes = heroes,
@@ -146,6 +149,7 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
             // Null is the class's own art; picking the worn look again also goes back to it.
             onPickLook = { id -> app.game.chooseHeroSheet(id) },
             onMakeLook = { stack.push(Route.Create.Sprites) },
+            onReadScene = { readScene(app, sceneScope) },
             onGo = {
                 startNewWorld(
                     app,
@@ -154,6 +158,7 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
                     rules = draft.rules,
                     seed = draft.seed(System.currentTimeMillis()),
                     described = draft.described,
+                    scene = draft.scene.takeIf { draft.prompt.isNotBlank() },
                 )
                 app.newWorld.value = NewWorldDraft()
             },
@@ -196,3 +201,28 @@ private fun packLine(content: AssembledContent): String = listOf(
     "${content.biomes.size} regions",
     "${content.heroClasses.size} classes",
 ).joinToString(" · ")
+
+/**
+ * Asks the connected language model to read the new world's description into
+ * scene parameters ([com.stratum.engine.microbridge.ScenePrompt.systemPrompt]),
+ * and keeps its reading on the draft for that exact prompt.
+ */
+private fun readScene(app: AppViewModel, scope: kotlinx.coroutines.CoroutineScope) {
+    val draft = app.newWorld.value
+    val prompt = draft.prompt.trim()
+    if (prompt.isEmpty() || draft.readingScene) return
+    app.newWorld.value = draft.copy(readingScene = true)
+    scope.launch {
+        val reply = app.graph.ai.languageModel.complete(
+            com.stratum.core.domain.ai.CompletionRequest(
+                systemPrompt = com.stratum.engine.microbridge.ScenePrompt.systemPrompt(),
+                userPrompt = prompt, temperature = 0.3f, maxTokens = 900,
+            ),
+        )
+        val spec = reply.map(com.stratum.engine.microbridge.ScenePrompt::parse).getOrElse {
+            com.stratum.engine.microbridge.SceneSpec(emptyMap(), listOf("The model could not be reached: ${it.message}"))
+        }
+        val now = app.newWorld.value
+        app.newWorld.value = now.copy(readingScene = false, modelScene = spec.values, modelNotes = spec.notes, modelSceneFor = prompt)
+    }
+}

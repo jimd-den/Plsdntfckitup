@@ -40,6 +40,18 @@ data class EnemyDefinition(
      * for anything that fights the same way from first blow to last.
      */
     val phases: List<BossPhase> = emptyList(),
+    /**
+     * The mask this monster wears when characters are drawn as mask spirits:
+     * a mask genome code (`mask-genome:...`) or a preset mask's name. Null
+     * derives one from the id and rank, the same on every device.
+     */
+    val mask: String? = null,
+    /**
+     * The motion profile its mask moves with, by id (`spirit:mgbedike`, or a
+     * pack's own from [com.stratum.core.domain.content.ContentPack.motionProfiles]).
+     * Null takes the mask tradition's temperament.
+     */
+    val motion: String? = null,
 ) {
     /** Every skill it could ever use, across its phases. */
     val allSkills: List<MonsterSkill> get() = skills + phases.flatMap { it.skills }

@@ -67,4 +67,12 @@ class SpriteNamespaceTest {
             assertTrue(SpriteNamespace.isCharacter(id))
         }
     }
+
+    @Test
+    fun `every sheet has a kind a picker can show`() {
+        kotlin.test.assertEquals("Hero", SpriteNamespace.kindOf("hero:warrior"))
+        kotlin.test.assertEquals("Monster", SpriteNamespace.kindOf("monster:ghoul"))
+        kotlin.test.assertEquals("Character", SpriteNamespace.kindOf("pose:old_character"))
+        kotlin.test.assertEquals("Pack art", SpriteNamespace.kindOf("igbo:dibia"))
+    }
 }

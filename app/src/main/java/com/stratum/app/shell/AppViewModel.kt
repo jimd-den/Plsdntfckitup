@@ -65,7 +65,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Loaded after the first frame, since it re-reads every archive; the
         // content reassembles when it arrives.
-        viewModelScope.launch { graph.plugins.repository.refresh() }
+        viewModelScope.launch {
+            // The plugins inside the APK first, so the first content already has them.
+            runCatching { graph.plugins.installBundled() }
+            graph.plugins.repository.refresh()
+        }
         graph.worlds.refresh()
 
         // The service is started by a pose run beginning, not by the forge

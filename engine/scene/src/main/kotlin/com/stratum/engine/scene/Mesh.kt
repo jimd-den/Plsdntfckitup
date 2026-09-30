@@ -76,6 +76,13 @@ object Vertex {
         15f / 16, 7f / 16, 13f / 16, 5f / 16,
     )
     const val ACTOR = -2f
+
+    /**
+     * Glossy clay: a character lit like the actors, plus a soft studio
+     * highlight and a sheen at the rim -- the vinyl-toy finish of a 3D
+     * emoji. See [ShadingModel.clay].
+     */
+    const val CLAY = -3f
     const val DISC = 0f
     const val RING = 1f
 
@@ -211,6 +218,18 @@ class MeshBuilder(private val kind: MaterialKind) {
     fun quad(a: Int, b: Int, c: Int, d: Int) {
         triangle(a, b, c)
         triangle(a, c, d)
+    }
+
+    /**
+     * Gives back memory after an unusually large mesh: buffers grown past
+     * [maxFloats] vertex floats shrink to that, so a builder a worker keeps
+     * does not hold the largest mesh it ever made. Empties the builder.
+     */
+    fun trimTo(maxFloats: Int) {
+        clear()
+        if (vertices.size > maxFloats) vertices = FloatArray(maxFloats)
+        val maxIndices = maxFloats / Vertex.STRIDE * 3 / 2
+        if (indices.size > maxIndices) indices = IntArray(maxIndices)
     }
 
     /** An exact copy, for a batch that is kept, such as a chunk's terrain. */

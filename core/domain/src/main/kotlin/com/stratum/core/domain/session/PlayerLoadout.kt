@@ -10,4 +10,11 @@ data class PlayerLoadout(
     val heroClassId: String? = null,
     val heroSheetId: String? = null,
     val equippedWeaponId: String? = null,
+    /**
+     * The mask the hero wears, as a mask genome code, chosen in the model
+     * studio with "Wear as your mask". Null wears the first preset.
+     */
+    val heroMask: String? = null,
+    /** Characters drawn as floating mask spirits (true) or as the sprite art (false). */
+    val maskCharacters: Boolean = true,
 )

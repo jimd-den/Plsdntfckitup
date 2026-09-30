@@ -16,9 +16,23 @@ class DraftCheck(private val base: List<ContentPack>, private val assembler: Con
     /** The draft decoded, or the reasons it cannot be. */
     fun decode(draft: JsonObject): Pair<ContentPack?, List<String>> = try {
         val pack = PackJson.decode(PackSections.render(draft), source = "draft")
-        pack to (runCatching { assembler.assemble(base + pack) }.exceptionOrNull()?.let(::linesOf).orEmpty())
+        val assembled = runCatching { assembler.assemble(base + pack) }
+        pack to (assembled.exceptionOrNull()?.let(::linesOf) ?: assembled.getOrNull()?.let(::terrainProblems).orEmpty())
     } catch (failure: Exception) {
         null to linesOf(failure)
+    }
+
+    /**
+     * A microvoxel terrain is built to see whether it would: unknown stages,
+     * options that do not parse and pinned blocks that do not exist all fail
+     * here, worded for the agent, instead of when a player starts the world.
+     */
+    private fun terrainProblems(content: com.stratum.core.domain.content.AssembledContent): List<String> {
+        if (content.terrain.generatorId != com.stratum.core.domain.world.TerrainRecipe.MICROVOXEL) return emptyList()
+        return runCatching {
+            com.stratum.engine.microbridge.MicrovoxelTerrainGenerator(content.terrainContext(com.stratum.core.domain.world.WorldConfig()))
+                .paletteFor(content.registry)
+        }.exceptionOrNull()?.let { listOf("terrain: ${it.message ?: it.javaClass.simpleName}") }.orEmpty()
     }
 
     /** Everything wrong with laying [fragment] from [sections] over [draft]. */

@@ -67,6 +67,8 @@ data class NewWorldActions(
     val onPickLook: (String?) -> Unit = {},
     /** Detours to the sprite forge to draw a new look. */
     val onMakeLook: () -> Unit = {},
+    /** Asks the connected language model to read the description into scene parameters. */
+    val onReadScene: () -> Unit = {},
 )
 
 /**
@@ -124,7 +126,7 @@ fun NewWorldScreen(
                 HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
                 LookStep(looks, lookId, actions.onPickLook, actions.onMakeLook)
             }
-            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange)
+            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange, actions.onReadScene)
             NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, looks.firstOrNull { it.id == lookId }, existingWorlds, modelReady)
         }
     }
@@ -169,7 +171,7 @@ private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String
 }
 
 @Composable
-private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boolean, onChange: (NewWorldDraft) -> Unit) {
+private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boolean, onChange: (NewWorldDraft) -> Unit, onReadScene: () -> Unit = {}) {
     var fineTune by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("What kind of world?")
@@ -210,10 +212,26 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boo
             placeholder = { Text("A drowned bronze city under a red moon") },
             supportingText = {
                 Text(
-                    if (modelReady) "Plays at once in the look your words suggest. The AI crew writes the rest while you play." else "Plays at once in the look your words suggest.",
+                    if (modelReady) "Shapes the land, towns and look at once. The AI crew writes the rest while you play." else "Shapes the land, towns and look at once.",
                 )
             },
         )
+        val scene = draft.scene
+        if (draft.prompt.isNotBlank()) {
+            StratumPanel(Modifier.fillMaxWidth()) {
+                Text("How your words shape the world", style = MaterialTheme.typography.labelLarge, color = StratumTheme.colors.ink)
+                if (scene.notes.isEmpty()) Text("Nothing here names a land yet: try a place, a people, a climate or a mood.", style = MaterialTheme.typography.bodySmall, color = StratumTheme.colors.inkMuted)
+                scene.notes.take(10).forEach { Text("· $it", style = MaterialTheme.typography.bodySmall, color = StratumTheme.colors.inkMuted) }
+                if (modelReady) {
+                    Spacer(Modifier.height(Space.small))
+                    com.stratum.core.designsystem.component.StratumAction(
+                        label = if (draft.readingScene) "Reading…" else "✨ Read the scene with AI",
+                        onClick = onReadScene, enabled = !draft.readingScene,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("Name it")
@@ -253,6 +271,11 @@ private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, e
         draft.described?.let { world ->
             StratumDivider()
             SummaryRow("Look", world.styleSummary.ifBlank { "Read from your words" })
+            val scene = draft.scene
+            if (!scene.isEmpty) {
+                StratumDivider()
+                SummaryRow("Land", scene.notes.filterNot { it.startsWith("Ignored") }.take(3).joinToString(" · ") { it.substringAfter("→ ") })
+            }
         }
         Spacer(Modifier.height(Space.medium))
         Text(summaryOf(draft.rules), style = MaterialTheme.typography.labelSmall, color = colors.accent)

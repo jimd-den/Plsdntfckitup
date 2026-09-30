@@ -100,6 +100,9 @@ class WorldSession private constructor(
 
     val world: World get() = streamingWorld
 
+    /** Models, sculpting and chiselling laid over this world's land, oldest first; empty on block worlds. */
+    val microStamps: List<com.stratum.core.domain.micro.MicroStamp> get() = parts.stampSurface?.stamps().orEmpty()
+
     /** The world with write access, for persistence and tests in this module; features see [world]. */
     internal val editableWorld: StreamingWorld get() = streamingWorld
 
@@ -146,6 +149,8 @@ class WorldSession private constructor(
         // resumed player is the ground they left rather than a fresh copy of it.
         restoring?.let { save ->
             val remap = SavedChunk.remapTable(save.blockIds, content.registry)
+            // Stamps are part of the land as generated: laid before any chunk is made, so the saved chunks match it.
+            if (save.stamps.isNotEmpty()) parts.stampSurface?.restoreStamps(save.microModels, save.stamps)
             streamingWorld.restoreEdited(save.chunks.map { it.toChunk(remap) })
             encounters.restoreMarkers(save.consumedMarkers)
         }
@@ -266,6 +271,8 @@ class WorldSession private constructor(
         chunks = streamingWorld.dirtyChunks().map(SavedChunk::of).sortedWith(compareBy({ it.x }, { it.y })),
         realm = parts.politics.realmSave(),
         consumedMarkers = encounters.consumedMarkers,
+        microModels = parts.stampSurface?.stampModels().orEmpty(),
+        stamps = parts.stampSurface?.stamps().orEmpty(),
     )
 
     /** Short-lived visuals: damage numbers, misses, level-ups. */
@@ -281,6 +288,61 @@ class WorldSession private constructor(
 
     /** Which region a column belongs to, or null when the generator has none. Art direction is per region. */
     fun biomeAt(worldX: Int, worldY: Int): BiomeDefinition? = parts.biomeSource?.biomeAt(worldX, worldY)
+
+    /**
+     * Quarter-block detail behind the blocks, when this world was generated
+     * in microvoxels (`stratum:microvoxel`); null otherwise. Read-only: the
+     * block [world] stays the truth for play, and a renderer draws blocks
+     * wherever the player has changed them.
+     */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? get() = parts.microTerrain
+
+    /**
+     * The terrain's stages, live-editable, when this world is made of
+     * microvoxels; null for worlds that cannot be retuned while played.
+     */
+    val hotTerrain: com.stratum.engine.microbridge.HotTerrain? get() = parts.hotTerrain
+
+    /**
+     * Reshapes the world while it is played: rebuilds the terrain from
+     * [passes], remakes every chunk the player has not changed, and stands
+     * the player (and anyone near) back on the new ground. The passes are
+     * kept in [config], so the world saves as it was tuned.
+     *
+     * Returns null when the new land is in place, or why it could not be --
+     * in which case the world is exactly as it was.
+     */
+    fun retuneTerrain(passes: List<com.stratum.engine.microvoxel.gen.StageSpec>): String? {
+        val hot = parts.hotTerrain ?: return NOT_HOT
+        return installTerrain(hot.prepare(passes))
+    }
+
+    /**
+     * The second half of [retuneTerrain], on the thread that ticks the
+     * session: [prepared] was built by [com.stratum.engine.microbridge.HotTerrain.prepare]
+     * on any thread, so the slow part never stalls a frame.
+     */
+    fun installTerrain(prepared: com.stratum.engine.microbridge.HotTerrain.Prepared): String? {
+        val hot = parts.hotTerrain ?: return NOT_HOT
+        hot.install(prepared)?.let { return it }
+        parts.config = parts.config.copy(terrainPasses = hot.passes.map { com.stratum.core.domain.world.PassSpec(it.id, it.options) })
+        streamingWorld.regenerate()
+        player = player.copy(position = onGround(player.position))
+        state.enemies = state.enemies.map { it.copy(position = onGround(it.position)) }
+        return null
+    }
+
+    private val NOT_HOT = "This world's terrain cannot be reshaped while played"
+
+    /** [p] moved up out of the ground, if new land has buried it; left alone in the air, where it will fall. */
+    private fun onGround(p: WorldPoint): WorldPoint {
+        val x = kotlin.math.floor(p.x).toInt(); val y = kotlin.math.floor(p.y).toInt()
+        fun open(z: Int) = !streamingWorld.isSolid(com.stratum.core.domain.world.BlockPos(x, y, z))
+        var z = kotlin.math.floor(p.z).toInt().coerceAtLeast(1)
+        // The first gap two blocks tall at or above the feet: under a roof stays under it, inside a hill climbs out.
+        while (z < com.stratum.core.domain.world.Chunk.HEIGHT - 2 && !(open(z) && open(z + 1))) z++
+        return if (z.toFloat() <= p.z) p else p.copy(z = z.toFloat())
+    }
 
     /** The biome under the player's feet, from the same function of position that made the terrain. */
     val currentBiome: BiomeDefinition get() = parts.biomeAt(player.blockPos.x, player.blockPos.y)

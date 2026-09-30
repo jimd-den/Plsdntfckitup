@@ -75,6 +75,8 @@ data class Scene3DInput(
     val kitOverlays: List<java.io.File> = emptyList(),
     val time: WorldTime,
     val biomeAt: (Int, Int) -> BiomeDefinition?,
+    /** Quarter-block detail drawn near the camera, for worlds generated in microvoxels. */
+    val microTerrain: com.stratum.engine.microvoxel.MicroTerrainSource? = null,
     val revision: Int,
     val frame: Int,
     /** Animated character art, when an actor has any. Null falls back to the stand-in body. */
@@ -83,12 +85,20 @@ data class Scene3DInput(
     val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
     /** The player's graphics choice, or null to let the device decide. */
     val quality: QualityTier? = null,
+    /** How the land is drawn, mesh or voxel splats; null is the tier's own. */
+    val terrain: com.stratum.engine.scene.SplatMode? = null,
     /** Prop blocks drawn as 3D models instead of sprites, by block id. */
     val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
     /** Things in flight, burning ground and wind-ups, drawn as the 2D canvas draws them. */
     val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
     val zones: List<com.stratum.engine.world.Zone> = emptyList(),
     val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
+    /** The hero and monsters drawn as floating mask spirits; false draws their sprites. */
+    val maskCharacters: Boolean = true,
+    /** The hero's mask, a genome code; null for the first preset. */
+    val heroMask: String? = null,
+    /** What the packs say about monsters' masks and motion. */
+    val masks: com.stratum.feature.play.MaskLooks = com.stratum.feature.play.MaskLooks(),
 )
 
 /**
@@ -132,11 +142,17 @@ fun Scene3DView(
         surface?.requestRender()
     }
 
-    val builder = remember(input.director, library, settings, input.propModels) {
-        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get)
+    // Keyed on the detail source too: a fresh world brings a new one, and the old one's meshes must go with it.
+    val builder = remember(input.director, library, settings, input.terrain, input.propModels, input.microTerrain) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings.withTerrain(input.terrain), propModels = input.propModels::get, microTerrain = input.microTerrain)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)
+    // The characters are masks: posed here, drawn by the scene, footing and all.
+    val maskTheatre = remember(input.masks) { MaskTheatre(input.masks) }
+    DisposableEffect(maskTheatre) { onDispose { maskTheatre.release() } }
+    val masked: (String) -> Boolean = if (input.maskCharacters) { id -> maskTheatre.drawsAsMask(id) } else { _ -> false }
+    if (input.maskCharacters) maskTheatre.update(input)
 
     val camera = SceneCamera(
         // The shake moves the camera's aim, not the world: taps still land
@@ -151,7 +167,7 @@ fun Scene3DView(
         val frame = builder.build(
             world = world,
             camera = camera,
-            actors = actorsOf(input),
+            actors = actorsOf(input, masked),
             time = input.time,
             worldRevision = input.revision,
             ghosts = input.buildPreview,
@@ -159,6 +175,7 @@ fun Scene3DView(
             highlight = input.highlight,
             effects = theatre.track.active,
             marks = combatMarksOf(input.projectiles, input.zones, input.telegraphs),
+            spirits = if (input.maskCharacters) maskTheatre.spirits else emptyList(),
         )
         renderer.submit(frame)
         surface?.requestRender()
@@ -229,7 +246,7 @@ fun Scene3DView(
             // and a mirror, and the 2D canvas already draws all of that
             // correctly, so the 3D view projects the actor's feet and head
             // through its camera and hands the same drawing the height.
-            spritesOf(input).sortedBy { it.depth }.forEach { placed ->
+            spritesOf(input, masked).sortedBy { it.depth }.forEach { placed ->
                 val feet = ScenePicker.project(camera, placed.x, placed.y, placed.z, this.size.width, this.size.height)
                     ?: return@forEach
                 val head = ScenePicker.project(camera, placed.x, placed.y, placed.z + SPRITE_WORLD_HEIGHT * placed.scale, this.size.width, this.size.height)
@@ -274,8 +291,8 @@ private class PlacedSprite(
     val depth: Float get() = x + y
 }
 
-private fun spritesOf(input: Scene3DInput): List<PlacedSprite> = buildList {
-    input.spriteFor(com.stratum.feature.play.SpriteKey.Player)?.let { sprite ->
+private fun spritesOf(input: Scene3DInput, masked: (String) -> Boolean): List<PlacedSprite> = buildList {
+    input.spriteFor(com.stratum.feature.play.SpriteKey.Player)?.takeUnless { masked("player") }?.let { sprite ->
         add(
             PlacedSprite(
                 input.player.x, input.player.y, input.player.z, sprite, input.playerAnimation,
@@ -284,7 +301,7 @@ private fun spritesOf(input: Scene3DInput): List<PlacedSprite> = buildList {
             ),
         )
     }
-    input.enemies.filter { it.isAlive }.forEach { enemy ->
+    input.enemies.filter { it.isAlive && !masked(it.instanceId) }.forEach { enemy ->
         val sprite = input.spriteFor(com.stratum.feature.play.SpriteKey.Monster(enemy.definitionId)) ?: return@forEach
         add(
             PlacedSprite(
@@ -316,8 +333,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawActorSpriteFor(
     }
 }
 
-private fun actorsOf(input: Scene3DInput): List<SceneActor> = buildList {
-    val playerArt = input.spriteFor(com.stratum.feature.play.SpriteKey.Player) != null
+private fun actorsOf(input: Scene3DInput, masked: (String) -> Boolean): List<SceneActor> = buildList {
+    val playerArt = input.spriteFor(com.stratum.feature.play.SpriteKey.Player) != null || masked("player")
     add(
         SceneActor(
             input.player.x, input.player.y, input.player.z,
@@ -337,7 +354,7 @@ private fun actorsOf(input: Scene3DInput): List<SceneActor> = buildList {
                 ),
                 enemy.facingX, enemy.facingY,
                 spriteKey = "actor:${enemy.definitionId}",
-                drawnElsewhere = input.spriteFor(com.stratum.feature.play.SpriteKey.Monster(enemy.definitionId)) != null,
+                drawnElsewhere = masked(enemy.instanceId) || input.spriteFor(com.stratum.feature.play.SpriteKey.Monster(enemy.definitionId)) != null,
             ),
         )
     }

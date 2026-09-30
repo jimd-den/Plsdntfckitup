@@ -123,6 +123,16 @@ fun PlayScreen(
     val survivalActions = remember(viewModel) {
         SurvivalActions(onToggleCamp = viewModel::toggleCamp, onEat = viewModel::eat, onDrink = viewModel::drink, onMake = viewModel::make)
     }
+    val shaperActions = remember(viewModel) {
+        WorldShaperActions(
+            onToggle = viewModel::toggleWorldShaper,
+            onSet = viewModel::setTerrainOption,
+            onToggleStage = viewModel::toggleTerrainStage,
+            onResetStage = viewModel::resetTerrainStage,
+            onLandShape = viewModel::shapeLand,
+            onDescribe = viewModel::describeScene,
+        )
+    }
     val realmActions = remember(viewModel) {
         RealmActions(
             onToggle = viewModel::toggleRealm,
@@ -134,11 +144,14 @@ fun PlayScreen(
             onOrder = viewModel::command,
         )
     }
+    // A light tick, not a buzz: building is dozens of these a minute.
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     PlayScreenContent(
         state = state,
         world = viewModel.world,
         modifier = modifier,
-        onTapBlock = viewModel::beginMining,
+        onBuildLanded = { haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) },
+        onTapBlock = viewModel::tapBlock,
         onLongPressBlock = viewModel::place,
         onMoveInput = viewModel::setMoveInput,
         onDodge = viewModel::dodge,
@@ -170,6 +183,8 @@ fun PlayScreen(
         onToggle3D = viewModel::toggle3D,
         onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
+        onChooseTerrain = viewModel::chooseTerrain,
+        onChooseMasks = viewModel::chooseMaskCharacters,
         onOpenMenu = onOpenMenu,
         onCraft = viewModel::craft,
         menuOpen = menuOpen,
@@ -180,6 +195,7 @@ fun PlayScreen(
         looks = looks,
         survivalActions = survivalActions,
         realmActions = realmActions,
+        shaperActions = shaperActions,
         gearActions = gearActions,
         sandboxActions = sandboxActions,
     )
@@ -223,6 +239,8 @@ fun PlayScreenContent(
     onToggle3D: () -> Unit = {},
     onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
+    onChooseTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
+    onChooseMasks: (Boolean) -> Unit = {},
     onOpenMenu: () -> Unit = {},
     onCraft: (String) -> Unit = {},
     /** The pause menu; hoisted so a test can show it and back can close it. */
@@ -234,10 +252,16 @@ fun PlayScreenContent(
     looks: HeroLooks = HeroLooks(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
+    shaperActions: WorldShaperActions = WorldShaperActions(),
     gearActions: GearActions = GearActions(),
     sandboxActions: SandboxActions = SandboxActions(),
+    /** Called once per build that lands (see [BuildPanel.ticks]); the device's haptic tick, on a phone. */
+    onBuildLanded: () -> Unit = {},
 ) {
     val colors = StratumTheme.colors
+    // Keyed on the count, so each block laid, drag committed, undo or redo ticks once -- and a recomposition never does.
+    val landed by androidx.compose.runtime.rememberUpdatedState(onBuildLanded)
+    LaunchedEffect(state.build.ticks) { if (state.build.ticks > 0) landed() }
 
     // The world runs edge to edge in either orientation; the HUD floats over
     // it inside the safe area, so a notch or a gesture bar never sits on a
@@ -270,8 +294,10 @@ fun PlayScreenContent(
                     kit = state.kit,
                     kitOverlays = state.kitOverlays,
                     quality = state.quality,
+                    terrain = state.terrain,
                     time = state.worldTime,
                     biomeAt = state.biomeAt,
+                    microTerrain = state.microTerrain,
                     revision = state.worldRevision,
                     frame = state.frame,
                     spriteFor = state.spriteFor,
@@ -281,6 +307,9 @@ fun PlayScreenContent(
                     projectiles = state.projectiles,
                     zones = state.zones,
                     telegraphs = state.telegraphs,
+                    maskCharacters = state.maskCharacters,
+                    heroMask = state.heroMask,
+                    masks = state.masks,
                 ),
                 modifier = Modifier.fillMaxSize(),
                 onTapBlock = onTapBlock,
@@ -331,7 +360,10 @@ fun PlayScreenContent(
         }
 
         val menuEntries = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle) +
-            listOfNotNull(DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active })
+            listOfNotNull(
+                DockEntry("⛰", "World", shaperActions.onToggle, active = state.worldShaper.open).takeIf { state.worldShaper.available },
+                DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active },
+            )
 
         if (!state.isDead) {
             Hud(
@@ -369,6 +401,8 @@ fun PlayScreenContent(
                 onClose = onToggleStyle,
                 onForge = onForgeStyle,
                 onChooseQuality = onChooseQuality,
+                onChooseTerrain = onChooseTerrain,
+                onChooseMasks = onChooseMasks,
             )
         }
 
@@ -415,6 +449,18 @@ fun PlayScreenContent(
 
         if (state.realmOpen && !state.isDead) {
             RealmOverlay(panel = state.realm, actions = realmActions)
+        }
+
+        if (state.worldShaper.open && !state.isDead) {
+            WorldShaperOverlay(
+                panel = state.worldShaper,
+                onSet = shaperActions.onSet,
+                onToggleStage = shaperActions.onToggleStage,
+                onResetStage = shaperActions.onResetStage,
+                onLandShape = shaperActions.onLandShape,
+                onClose = shaperActions.onToggle,
+                onDescribe = shaperActions.onDescribe,
+            )
         }
 
         if (state.hero.open && !state.isDead) {

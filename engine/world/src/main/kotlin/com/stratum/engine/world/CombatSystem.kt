@@ -61,6 +61,8 @@ internal class CombatSystem(
     private val profile: PlayerProfile,
     /** A skill as the player casts it, tuned by their build and supports. */
     private val playerSkill: (String) -> SkillDefinition?,
+    /** Share of a monster's damage that reaches the player; see [com.stratum.core.domain.world.WorldRules.enemyDamage]. */
+    private val incomingDamage: Float = 1f,
 ) {
     private val book = content.statusBook
     val statuses = StatusSystem(book, rules)
@@ -419,7 +421,11 @@ internal class CombatSystem(
             battle.dodged += (attacker.stats.attackPower * skill.powerMultiplier).roundToInt().coerceAtLeast(1)
             return
         }
-        val result = resolve(attacker, profile.defender(battle.player, statuses.of(PLAYER)), skill)
+        val result = resolve(attacker, profile.defender(battle.player, statuses.of(PLAYER)), skill).let { r ->
+            if (incomingDamage == 1f || r.amount == 0) r
+            // A gentler world softens every packet alike, never below one point for a hit that landed.
+            else r.copy(amount = (r.amount * incomingDamage).roundToInt().coerceAtLeast(1), packets = r.packets.mapValues { (_, v) -> (v * incomingDamage).roundToInt() })
+        }
         battle.incoming += result
         when {
             result.wasEvaded -> {

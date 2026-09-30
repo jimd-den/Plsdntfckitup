@@ -76,5 +76,24 @@ object StandardCrew {
         maxAttempts = 2,
     )
 
-    val all = listOf(loremaster, cartographer, bestiary, architect, steward, warlord, arbiter)
+    /**
+     * Shapes the land itself. Writes a `terrain` section for the microvoxel
+     * generator: which stages run and how each is tuned -- rolling hills or
+     * crags, how many towns and of what kind, how thick the forests are.
+     */
+    val surveyor = AgentRoleDefinition(
+        id = "$NS:surveyor", name = "Surveyor", glyph = "⛰",
+        description = "Shapes the land: its hills, waters, forests and the towns its roads join.",
+        sections = listOf("terrain"),
+        dependsOn = listOf(cartographer.id),
+        brief = "Write one terrain object with \"generator\": \"${com.stratum.core.domain.world.TerrainRecipe.MICROVOXEL}\" and a \"passes\" list " +
+            "chosen from these stages, in this order, each as {\"id\": ..., \"options\": {...}} with every option value a string: " +
+            com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.catalogue.entries.joinToString(" ") { (id, what) -> "$id -- $what" } +
+            " Always include micro:terrain first, and micro:settlements so the world's towns (and the home town) are built. " +
+            "Keep height 0.1 to 0.5 and maxFloors at most 3 so the land stays walkable and towns fit under the isometric camera. Optionally pin materials to this world's blocks in \"options\" as \"block.<material>\": \"<block id>\" " +
+            "(materials: grass, dirt, stone, sand, water, bark, asphalt, sidewalk, brick, plaster, roof_tile, timber, glass).",
+        maxAttempts = 3,
+    )
+
+    val all = listOf(loremaster, cartographer, surveyor, bestiary, architect, steward, warlord, arbiter)
 }

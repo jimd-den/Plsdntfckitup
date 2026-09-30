@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 /**
@@ -102,6 +105,39 @@ android {
     includeInBundle = true
   }
 }
+
+/**
+ * Plugins that ship inside the APK, installed on first launch like any
+ * downloaded one: the player can switch them off or uninstall them, and a
+ * newer build's copy upgrades the old. Each is zipped from its folder under
+ * examples/plugins into a `.stratum` file in the app's assets.
+ */
+val bundledPlugins = listOf("microvoxel-realms")
+val bundledPluginDir = layout.buildDirectory.dir("generated/bundledPlugins")
+val bundlePlugins = tasks.register("bundlePlugins") {
+  group = "plugins"
+  description = "Zips the plugins that ship inside the APK into its assets."
+  val sources = bundledPlugins.map { rootProject.file("examples/plugins/$it") }
+  inputs.files(sources.map { fileTree(it) { include("plugin.json", "pack.json", "art/**") } })
+  val out = bundledPluginDir.map { it.dir("plugins") }
+  outputs.dir(out)
+  doLast {
+    val dir = out.get().asFile.apply { deleteRecursively(); mkdirs() }
+    sources.forEach { src ->
+      ZipOutputStream(File(dir, "${src.name}.stratum").outputStream()).use { zip ->
+        src.walkTopDown().filter { it.isFile && (it.name == "plugin.json" || it.name == "pack.json" || it.relativeTo(src).path.startsWith("art")) }
+          .sortedBy { it.relativeTo(src).path }
+          .forEach { f ->
+            zip.putNextEntry(ZipEntry(f.relativeTo(src).invariantSeparatorsPath).apply { time = 0L })
+            zip.write(f.readBytes())
+            zip.closeEntry()
+          }
+      }
+    }
+  }
+}
+android.sourceSets.getByName("main").assets.srcDir(bundledPluginDir.get().asFile)
+tasks.named("preBuild") { dependsOn(bundlePlugins) }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 

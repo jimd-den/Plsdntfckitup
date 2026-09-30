@@ -156,6 +156,14 @@ data class TerrainRecipe(
         /** Level ground at sea level, for sandboxes and tests. */
         const val FLAT_GENERATOR = "stratum:flat"
 
+        /**
+         * Generated in quarter-block microvoxels and played on blocks: smooth
+         * slopes, towns with streets, detailed buildings. [passes] lists its
+         * stages (`micro:terrain`, `micro:city_plan`, ...); see the microvoxel
+         * bridge for options.
+         */
+        const val MICROVOXEL = "stratum:microvoxel"
+
         /** The [options] key naming which map a [TILE_MAP] recipe plays on. */
         const val MAP_OPTION = "map"
 
@@ -214,6 +222,12 @@ data class TerrainContext(
      * factions and passes its own; a generator that builds towns itself asks this.
      */
     val welcoming: (com.stratum.core.domain.settlement.SettlementRecipe) -> Boolean = { it.garrison.isEmpty() },
+    /**
+     * Every block the loaded packs define. A generator that builds with the
+     * packs' own blocks -- towns, a region's soil -- reads their colours and
+     * kinds here before any chunk is asked for.
+     */
+    val blocks: List<BlockType> = emptyList(),
 )
 
 /** Builds a generator from a recipe. This is the seam a new algorithm plugs into. */

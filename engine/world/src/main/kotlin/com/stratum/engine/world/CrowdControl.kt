@@ -145,7 +145,7 @@ internal class CrowdControl(
             isLeader = enemy.isLeader,
             speed = definition?.moveSpeed ?: DEFAULT_SPEED,
             reach = reachOf(enemy),
-            aggroRange = (definition?.aggroRange ?: DEFAULT_AGGRO).toFloat(),
+            aggroRange = director.aggroRangeOf(definition),
             healthFraction = enemy.healthFraction,
             fleeBelow = if (definition?.canFlee == true) definition.fleeBelowHealth else 0f,
             home = enemy.home?.let { Vec2(it.x, it.y) },

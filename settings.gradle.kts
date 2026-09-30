@@ -28,10 +28,12 @@ rootProject.name = "Stratum"
 // ---------------------------------------------------------------------------
 // Dependency rule: :app -> :feature:* -> :core:designsystem -> :core:domain
 //                                     -> :core:data      -> :core:domain
-//                                        :engine:scene   -> :core:domain
+//                                        :engine:scene   -> :core:domain, :engine:microvoxel
+//                                        :engine:microbridge -> :core:domain, :engine:microvoxel
+//                                        :engine:microvoxel (depends on nothing)
 //                                        :engine:model   -> :engine:scene
 //                                        :engine:render  -> :engine:world
-//                                        :engine:world   -> :engine:worldgen, :engine:settlement, :engine:crowd
+//                                        :engine:world   -> :engine:worldgen, :engine:settlement, :engine:crowd, :engine:microbridge
 //                                        :engine:worldgen -> :engine:settlement, :core:domain
 //                                        :engine:settlement -> :core:domain
 //                                        :engine:crowd   -> :core:domain
@@ -52,6 +54,11 @@ include(":engine:render")
 include(":engine:scene")
 // Generated 3D models: GLB/OBJ parsing, voxelising and sprite baking. Pure Kotlin.
 include(":engine:model")
+// Microvoxels: sub-block storage, pluggable terrain/city/architecture stages,
+// binary greedy meshing and LOD. Pure Kotlin, depends on nothing.
+include(":engine:microvoxel")
+// Plays a microvoxel world on the block engine: the `stratum:microvoxel` generator.
+include(":engine:microbridge")
 include(":feature:play")
 include(":feature:forge")
 include(":feature:hero")
@@ -72,6 +79,8 @@ include(":agents")
 // Renders the world headlessly so the art direction can be reviewed and
 // regression-tested without a device. Never shipped in the app.
 include(":tools:artpreview")
+// Ray-traces the microvoxel generators to PNGs. Never shipped in the app.
+include(":tools:microvoxelpreview")
 
 // The original engine, moved out of :app and split along the layering it
 // already had. Being ported feature by feature onto the new architecture.

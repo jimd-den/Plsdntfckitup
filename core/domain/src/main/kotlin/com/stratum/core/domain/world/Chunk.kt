@@ -36,6 +36,38 @@ class Chunk(
     var edgeRevision: Int = 0
         private set
 
+    /**
+     * [edgeRevision] split by the neighbour that reads it: one counter per
+     * side (the column of cells along it) and per corner (the one column
+     * where two sides meet), indexed as [sideRevision] takes them. The chunk
+     * to the east reads only this chunk's east column, and the one to the
+     * north-east only its north-east corner, so a block laid against the west
+     * side remeshes the west neighbour and no other. With one counter,
+     * building a wall along a chunk border remeshed all eight neighbours per
+     * block -- the biggest cost of a placement.
+     */
+    private val sideRevisions = IntArray(9)
+
+    /**
+     * How often the cells this chunk shares with the neighbour in direction
+     * ([dx], [dy]), each -1, 0 or 1, have changed: a side's column, or for a
+     * diagonal the corner column. (0, 0) is the whole chunk's [revision].
+     * Only ever grows.
+     */
+    fun sideRevision(dx: Int, dy: Int): Int =
+        if (dx == 0 && dy == 0) revision else sideRevisions[(dy.coerceIn(-1, 1) + 1) * 3 + dx.coerceIn(-1, 1) + 1]
+
+    /**
+     * Marks the chunk changed without changing a block: the microvoxels
+     * behind it changed (a statue stamped in), so its detail must be drawn
+     * again though every block reads the same.
+     */
+    fun touch() {
+        revision++
+        edgeRevision++
+        for (i in sideRevisions.indices) sideRevisions[i]++
+    }
+
     fun blockAt(localX: Int, localY: Int, z: Int): Int {
         if (!isInBounds(localX, localY, z)) return BlockRegistry.AIR_INDEX
         return blocks[indexOf(localX, localY, z)].toInt()
@@ -50,6 +82,11 @@ class Chunk(
         heightMapValid = false
         revision++
         if (localX == 0 || localY == 0 || localX == SIZE - 1 || localY == SIZE - 1) edgeRevision++
+        val sx = if (localX == 0) -1 else if (localX == SIZE - 1) 1 else 0
+        val sy = if (localY == 0) -1 else if (localY == SIZE - 1) 1 else 0
+        if (sx != 0) sideRevisions[4 + sx]++
+        if (sy != 0) sideRevisions[4 + sy * 3]++
+        if (sx != 0 && sy != 0) sideRevisions[4 + sy * 3 + sx]++
         return true
     }
 

@@ -57,6 +57,12 @@ data class WorldConfig(
     val oreRichness: Float = 1f,
     /** How this world plays: survival, towns, raids, the length of a day. */
     val rules: WorldRules = WorldRules(),
+    /**
+     * The terrain as the player last tuned it in the World panel, replacing
+     * the packs' own `passes` for this world alone. Null keeps the packs'.
+     * Only generators built from passes read it.
+     */
+    val terrainPasses: List<PassSpec>? = null,
 ) {
     init {
         require(simulationRadius >= 0) { "simulationRadius cannot be negative" }

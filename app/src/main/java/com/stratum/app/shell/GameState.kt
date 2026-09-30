@@ -78,6 +78,20 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         .flowOn(Dispatchers.IO)
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    /**
+     * The model studio's models, for the play screen's build tray. A brand
+     * new library is first seeded with the preset Igbo masks, so the tray
+     * and the studio open on something beautiful to place rather than an
+     * empty shelf; the seeding happens once, so deleted masks stay deleted.
+     */
+    val microModels: StateFlow<List<com.stratum.core.domain.micro.MicroModel>> = modelRevision
+        .map {
+            runCatching { graph.microModels.seedOnce(DEFAULT_MASKS_MARKER) { com.stratum.engine.model.mask.MaskGenome.presets.map(com.stratum.engine.model.mask.IgboMaskGenerator::generate) } }
+            graph.microModels.all()
+        }
+        .flowOn(Dispatchers.IO)
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
     val blueprints: StateFlow<List<VoxelBlueprint>> = modelRevision
         .map { ai.models.blueprints() }
         .flowOn(Dispatchers.IO)
@@ -115,6 +129,18 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         ai.playerPreferences.saveEquippedWeapon(id)
     }
 
+    /** Wears a mask as the hero, from the model studio's "Wear as your mask"; [code] is a mask genome code. */
+    fun wearMask(code: String?) {
+        loadoutState.update { it.copy(heroMask = code) }
+        ai.playerPreferences.saveHeroMask(code)
+    }
+
+    /** Characters as floating mask spirits (true) or their sprites (false). */
+    fun chooseMaskCharacters(on: Boolean) {
+        loadoutState.update { it.copy(maskCharacters = on) }
+        ai.playerPreferences.saveMaskCharacters(on)
+    }
+
     fun saveStyle(prompt: String) {
         graph.styles.save(prompt)
         style.value = prompt
@@ -137,3 +163,6 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         modelRevision.update { it + 1 }
     }
 }
+
+/** The marker a model library keeps once it has been given the starter masks. */
+internal const val DEFAULT_MASKS_MARKER = "seeded-igbo-masks-v1"
