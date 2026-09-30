@@ -60,6 +60,10 @@ object Traditions {
         Provinces.FOLD_BELT to listOf("amazigh" to 5),
         Provinces.TSINGY to listOf("swahili" to 2, "igbo" to 1),
         Provinces.CORAL_COAST to listOf("swahili" to 5),
+        Provinces.CANYON to listOf("pastoral" to 3, "ndebele" to 1),
+        Provinces.COASTAL_DUNES to listOf("yoruba" to 2, "swahili" to 2, "asante" to 1),
+        Provinces.MONTANE to listOf("zulu" to 2, "great_zimbabwe" to 1, "igbo" to 1, "hausa" to 1),
+        Provinces.SHIELD to listOf("great_zimbabwe" to 4, "ndebele" to 2, "asante" to 1),
     )
 
     /** The tradition a town in [province] takes, fixed by [seed] (the town's own). */

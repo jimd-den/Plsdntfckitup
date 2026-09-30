@@ -115,6 +115,40 @@ object R {
     /** Natrocarbonatite: Ol Doinyo Lengai's lava, black when erupted, white within days. */
     const val CARBONATITE = "geo:carbonatite"
 
+    // ---- Added with the simulated processes and the richer strata ---------------------
+    // Registered after everything else (see GeoMaterials.added), so no older id moves.
+
+    /** Alluvial fan gravel and sand, spread where a steep stream meets flat ground: the bajadas under the Atlas and the rift shoulders. */
+    const val ALLUVIUM = "geo:alluvium"
+    /** Floodplain silt: the dark, fertile overbank mud every African farming river leaves, from the Niger's fadama to the Nile's. */
+    const val SILT = "geo:silt"
+    /** A river's bed of rounded gravel and coarse sand, and a dry wadi's floor. */
+    const val RIVER_GRAVEL = "geo:river_gravel"
+    /** Milky vein quartz, filling the cracks of the old basement: the reefs prospectors followed. */
+    const val QUARTZ = "geo:quartz"
+    /** Gold-bearing quartz reef, rusty with sulphides: the Ashanti belt (Obuasi), the Barberton greenstones, the Zimbabwe craton. */
+    const val GOLD_REEF = "geo:gold_reef"
+    /** Malachite: green copper ore of the Central African Copperbelt (Katanga and Zambia). */
+    const val MALACHITE = "geo:malachite"
+    /** Bauxite: the pink-cream aluminium ore under the bowal of Guinea's Boké and Fouta Djallon. */
+    const val BAUXITE = "geo:bauxite"
+    /** Shelly limestone packed with fossils: the ammonite beds of Erfoud, the whale-bearing Eocene of Wadi Al-Hitan. */
+    const val FOSSIL_LIMESTONE = "geo:fossil_limestone"
+    /** A Karoo bone bed: mudstone full of the fossil reptiles the Beaufort group is famous for. */
+    const val BONE_BED = "geo:bone_bed"
+    /** Migmatite: half-melted gneiss swirled with pink granite veins, the deepest basement of the Man and Zimbabwe shields. */
+    const val MIGMATITE = "geo:migmatite"
+    /** Greenstone: the dark green metavolcanics of the Archaean belts (Barberton, Bulawayo), where the gold is. */
+    const val GREENSTONE = "geo:greenstone"
+    /** Conglomerate: the pebbly bed laid on an old erosion surface, the first rock over an unconformity. */
+    const val CONGLOMERATE = "geo:conglomerate"
+    /** Grey Nama limestone and dolomite of the Fish River Canyon's rim. */
+    const val DOLOMITE = "geo:dolomite"
+    /** Pale grey coastal dune sand of the Maputaland and Wild Coast cordons. */
+    const val DUNE_SAND = "geo:dune_sand"
+    /** Lagoon mud: grey-black, organic, behind the barrier beaches of Lagos, Ébrié and Keta. */
+    const val LAGOON_MUD = "geo:lagoon_mud"
+
     /** Surfaces nothing grows on: salt, loose dune sand, bare rock. */
     val BARE: Set<String> = setOf(
         SALT, TRONA, SULPHUR, ERG_SAND, NAMIB_SAND, CORAL_SAND, DESERT_VARNISH, TALUS, DIATOMITE, GYPCRETE,
@@ -122,10 +156,12 @@ object R {
         SANDSTONE_RED, SANDSTONE_BUFF, SANDSTONE_PALE, SHALE, MUDSTONE, LIMESTONE, LIMESTONE_GREY, CHALK, CORAL_RAG,
         IRONSTONE, BASALT, BASALT_WEATHERED, RED_BOLE, DOLERITE, PHONOLITE, TUFF, SCORIA, SCORIA_RED, CARBONATITE,
         LATERITE_CRUST, DELTA_MUD,
+        RIVER_GRAVEL, QUARTZ, GOLD_REEF, MALACHITE, BAUXITE, FOSSIL_LIMESTONE, BONE_BED, MIGMATITE, GREENSTONE,
+        CONGLOMERATE, DOLOMITE, DUNE_SAND, LAGOON_MUD,
     )
 
     /** Surfaces strewn with loose stones. */
-    val PEBBLY: Set<String> = setOf(REG_GRAVEL, TALUS, LATERITE_CRUST)
+    val PEBBLY: Set<String> = setOf(REG_GRAVEL, TALUS, LATERITE_CRUST, ALLUVIUM, RIVER_GRAVEL)
 
     /** Name, colour, jitter: registration data, in a fixed order so ids never move. */
     internal val table: List<Triple<String, Int, Float>> = listOf(
@@ -181,9 +217,31 @@ object R {
         Triple(SCORIA_RED, 0x7A3226, 0.18f),
         Triple(CARBONATITE, 0xE8E6DE, 0.06f),
     )
+
+    /** Registered after every other built-in material, paints included, so saved worlds keep their ids. */
+    internal val added: List<Triple<String, Int, Float>> = listOf(
+        Triple(ALLUVIUM, 0x9A8466, 0.2f),
+        Triple(SILT, 0x5E4F3E, 0.08f),
+        Triple(RIVER_GRAVEL, 0x847A6E, 0.22f),
+        Triple(QUARTZ, 0xEEEBE4, 0.06f),
+        Triple(GOLD_REEF, 0xC9A544, 0.2f),
+        Triple(MALACHITE, 0x2F8A5C, 0.2f),
+        Triple(BAUXITE, 0xD6A48E, 0.14f),
+        Triple(FOSSIL_LIMESTONE, 0xC8BBA0, 0.22f),
+        Triple(BONE_BED, 0x9A7E6A, 0.22f),
+        Triple(MIGMATITE, 0xB08E86, 0.18f),
+        Triple(GREENSTONE, 0x4E5E4A, 0.12f),
+        Triple(CONGLOMERATE, 0x8E7460, 0.26f),
+        Triple(DOLOMITE, 0xA8A49A, 0.1f),
+        Triple(DUNE_SAND, 0xDCCDA8, 0.06f),
+        Triple(LAGOON_MUD, 0x3E3C34, 0.08f),
+    )
 }
 
 /** The rocks, for [com.stratum.engine.microvoxel.MaterialPalette.standard]. */
 object GeoMaterials {
     val all: List<Triple<String, Int, Float>> get() = R.table
+
+    /** Rocks added later, registered at the very end of the standard palette so no older id moves. */
+    val added: List<Triple<String, Int, Float>> get() = R.added
 }

@@ -109,6 +109,8 @@ class MaterialPalette {
             ArchMaterials.all.forEach { (name, color, jitter) -> register(name, color, jitter = jitter) }
             // Free colour for the models players make and pictures turned into voxels.
             Paints.register(this)
+            // Rocks added after the paints, so every earlier id (and every saved edit) stays put.
+            GeoMaterials.added.forEach { (name, color, jitter) -> register(name, color, jitter = jitter) }
         }
     }
 }

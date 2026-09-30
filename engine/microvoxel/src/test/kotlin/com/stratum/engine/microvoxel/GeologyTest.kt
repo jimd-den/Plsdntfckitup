@@ -23,7 +23,7 @@ class GeologyTest {
     @Test
     fun `the catalogue is whole and every province resolves against the palette`() {
         val provinces = Provinces.all(seed)
-        assertEquals(20, provinces.size)
+        assertEquals(24, provinces.size)
         assertEquals(provinces.size, provinces.map { it.id }.toSet().size, "province ids repeat")
         val atlas = world("africa").fields.require(Fields.GEOLOGY) as GeoAtlas
         for (p in atlas.resolved) {

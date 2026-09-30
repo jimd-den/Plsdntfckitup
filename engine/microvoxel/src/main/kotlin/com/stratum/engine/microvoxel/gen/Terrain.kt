@@ -151,6 +151,10 @@ fun interface ColumnSource {
  * `terrace` (micro; land gathers into soft plateaus this tall, as laterite
  * escarpments do; 0 = off).
  *
+ * With `geology` (see [GeoTerrain]): `home`, and the simulated processes'
+ * dials, each 0..2 with 1 as shipped -- `erosion`, `rivers`, `dunes`,
+ * `scree`, `rockDetail`.
+ *
  * When a host publishes [Fields.STRATA], the surface, soil and rock are the
  * host's own (a pack's biome blocks); beaches, snow, scree and water stay.
  */
@@ -170,6 +174,12 @@ object TerrainStage : MicroStageFactory, Describable {
             StageParam.Number("terrace", "Plateaus", "Gathers the land into shelves this many quarter-blocks tall; 0 is off.", 0f, 16f, 0f, 1f),
             StageParam.Number("spawnRise", "Home rise", "How far above the water the land around home is lifted.", 0f, 40f, 10f, 1f),
             StageParam.Number("spawnRadius", "Home land", "How far the lifted land around home reaches, in quarter-blocks.", 0f, 800f, 360f, 8f),
+            // The simulated processes and the rock's detail: with a geology only.
+            StageParam.Number("erosion", "Erosion", "With a geology: how deeply running water cuts valleys, and the fans it lays at their feet.", 0f, 2f, 1f),
+            StageParam.Number("rivers", "Rivers", "With a geology: how many streams run with water, with levees and floodplain silt; 0 is none.", 0f, 2f, 1f),
+            StageParam.Number("dunes", "Dunes", "With a geology: how tall the dunes of the sand seas stand, and how many barchans roam them.", 0f, 2f, 1f),
+            StageParam.Number("scree", "Scree", "With a geology: how much rubble piles at the foot of cliffs.", 0f, 2f, 1f),
+            StageParam.Number("rockDetail", "Rock detail", "With a geology: how many dykes, quartz veins, ore lenses and nodules cut the rock.", 0f, 2f, 1f),
         ),
     )
 
