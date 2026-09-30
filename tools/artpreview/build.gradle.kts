@@ -174,3 +174,16 @@ tasks.register<JavaExec>("maskArtPreview") {
   jvmArgs("-Djava.awt.headless=true")
   args = listOf((project.findProperty("out") as String?) ?: "docs/screenshots/mask-art")
 }
+
+/**
+ * Igbo emoji characters as sprite sheets, drawn by the image model when
+ * OPENROUTER_API_KEY is set (an offline stand-in otherwise).
+ *   ./gradlew :tools:artpreview:emojiForge --args="build/emoji-forge Maiden Poppy"
+ */
+tasks.register<JavaExec>("emojiForge") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.EmojiForge")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+}
