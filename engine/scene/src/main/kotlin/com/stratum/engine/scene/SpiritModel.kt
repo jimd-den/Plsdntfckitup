@@ -76,6 +76,85 @@ class SpiritMesh(
 
     val vertexCount: Int get() = positions.size / 3
     val triangleCount: Int get() = indices.size / 3
+
+    /** The front of a bare emoji face, where a drawn expression is laid; null for a mask with its features carved. */
+    @Volatile var face: SpiritFace? = null
+}
+
+/**
+ * The front surface of a bare emoji face, sampled on a grid, so 2D features
+ * can be laid on the 3D head wherever they are drawn.
+ *
+ * Features are designed in the mask's face units (u right, v up, the face
+ * spanning v -1..1); [surface] carries a point of that plane onto the head
+ * in model space, riding its curve, with the surface's normal.
+ */
+class SpiritFace(
+    /** Face units covered: u from -[uMax] to [uMax], v from [v0] by [step], [nu] by [nv] samples. */
+    val uMax: Float,
+    val v0: Float,
+    val step: Float,
+    val nu: Int,
+    val nv: Int,
+    /** How far the surface stands forward at each sample, in face units; NaN off the face. */
+    val front: FloatArray,
+    /** Face units to model units, and the v that is model height 0. */
+    val scale: Float,
+    val midV: Float,
+    /** Where features sit, in face units: half the face's width, the eye line, the eyes' spread, the mouth line. */
+    val plan: FloatArray,
+) {
+    private fun at(i: Int, j: Int): Float = front[j.coerceIn(0, nv - 1) * nu + i.coerceIn(0, nu - 1)]
+
+    /** Forward height at ([u], [v]), bilinear; NaN when any sample round it is off the face. */
+    fun height(u: Float, v: Float): Float {
+        val fi = (u + uMax) / step; val fj = (v - v0) / step
+        val i = kotlin.math.floor(fi).toInt(); val j = kotlin.math.floor(fj).toInt()
+        val tx = fi - i; val ty = fj - j
+        val a = at(i, j); val b = at(i + 1, j); val c = at(i, j + 1); val d = at(i + 1, j + 1)
+        return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty
+    }
+
+    /**
+     * The face point ([u], [v]) on the head, raised [lift] face units off it:
+     * model x, y (forward), z and the normal into [out] (six floats). False
+     * off the face, where there is nothing to draw on.
+     */
+    fun surface(u: Float, v: Float, lift: Float, out: FloatArray): Boolean {
+        val h = height(u, v)
+        if (!h.isFinite()) return false
+        val e = step * 0.75f
+        val hx = (height(u + e, v) - height(u - e, v)) / (2 * e)
+        val hz = (height(u, v + e) - height(u, v - e)) / (2 * e)
+        // Normal of w = h(u, v) in face units is (-dh/du, 1, -dh/dv); model x is -u.
+        var nx = if (hx.isFinite()) hx else 0f
+        var nz = if (hz.isFinite()) -hz else 0f
+        var ny = 1f
+        val l = kotlin.math.sqrt(nx * nx + ny * ny + nz * nz)
+        nx /= l; ny /= l; nz /= l
+        out[0] = -u * scale + nx * lift * scale
+        out[1] = h * scale + ny * lift * scale
+        out[2] = (v - midV) * scale + nz * lift * scale
+        out[3] = nx; out[4] = ny; out[5] = nz
+        return true
+    }
+}
+
+/**
+ * A drawn expression, laid on a [SpiritFace]: flat-coloured triangles in the
+ * spirit's model space, each vertex with a normal and how much it glows (eyes
+ * burn, ink does not). Rebuilt whenever the expression changes, cached by
+ * whoever builds it; the scene only poses it with its spirit.
+ */
+class SpiritFeatures(
+    val positions: FloatArray,
+    val normals: FloatArray,
+    val colors: IntArray,
+    /** 0 drawn colour, 1 lights with the spirit's eyes. */
+    val glow: FloatArray,
+    val indices: IntArray,
+) {
+    val vertexCount: Int get() = positions.size / 3
 }
 
 /** The parts of a spirit that light up, each driven on its own. */
@@ -202,6 +281,9 @@ class SpiritPose {
 class SpiritInstance(var mesh: SpiritMesh, val pose: SpiritPose = SpiritPose()) {
     /** Whose spirit this is, for a caller that pools instances. */
     var id: String = ""
+
+    /** The live expression drawn on a bare emoji face this frame; null draws the mesh alone. */
+    var features: SpiritFeatures? = null
 }
 
 /**
@@ -287,7 +369,51 @@ class SpiritEmitter {
         }
     }
 
+    /**
+     * Emits a drawn expression with the last [emit]'s pose, squash and
+     * stretch: it rides the face it was laid on. Eyes glow with the
+     * spirit's eye channel; everything takes its hit flash.
+     */
+    fun emitFeatures(features: SpiritFeatures, pose: SpiritPose, out: MeshBuilder, fading: Boolean) {
+        orient(pose)
+        val s = pose.scale
+        val sz = s * pose.stretch.let { if (it.isFinite() && it > 0.2f) it else 1f }
+        val sxy = s / sqrt(sz / s)
+        val eyes = channel[GlowChannel.EYES.toInt()]
+        val flash = pose.flash.finite().coerceIn(0f, 1f)
+        val opacity = if (fading) pose.opacity.finite().coerceIn(0f, 1f) else 1f
+        val p = features.positions; val n = features.normals
+        val first = out.vertexCount
+        for (i in 0 until features.vertexCount) {
+            val o = i * 3
+            val lx = p[o] * sxy; val ly = p[o + 1] * sxy; val lz = p[o + 2] * sz
+            val nx = n[o]; val ny = n[o + 1]; val nz = n[o + 2]
+            var color = features.colors[i]
+            if (flash > 0f) color = mixArgb(color, FLASH_WHITE, flash * 0.6f)
+            // Features read as drawn: a touch of self-light keeps ink ink and colour colour on the shaded side.
+            val emissive = FEATURE_EMISSIVE + features.glow[i] * (0.9f + eyes * GLOW_EMISSIVE) + flash * 0.5f
+            out.vertex(
+                pose.x + m00 * lx + m01 * ly + m02 * lz,
+                pose.y + m10 * lx + m11 * ly + m12 * lz,
+                pose.z + m20 * lx + m21 * ly + m22 * lz,
+                m00 * nx + m01 * ny + m02 * nz,
+                m10 * nx + m11 * ny + m12 * nz,
+                m20 * nx + m21 * ny + m22 * nz,
+                color.toLong() and 0xFFFFFFFFL, opacity, 0f, 0f, Vertex.ACTOR, emissive,
+            )
+        }
+        val idx = features.indices
+        var t = 0
+        while (t < idx.size) {
+            out.triangle(first + idx[t], first + idx[t + 1], first + idx[t + 2])
+            t += 3
+        }
+    }
+
     companion object {
+        /** Self-light on a drawn expression, so it reads as graphic, not as paint in shadow. */
+        const val FEATURE_EMISSIVE = 0.18f
+
         /** How emissive a fully lit channel is; the shading multiplies it by the albedo. */
         const val GLOW_EMISSIVE = 1.7f
         /** Below this a channel keeps its drawn colour; over [GLOW_RAMP] more it becomes its light. */

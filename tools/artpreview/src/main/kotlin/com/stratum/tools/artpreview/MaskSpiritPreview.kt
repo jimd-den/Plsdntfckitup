@@ -44,6 +44,7 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "turntable") turntables(out)
         if (only == null || only == "all" || only == "strips") MaskSpiritShots.strips(out)
         if (only == null || only == "all" || only == "world") MaskSpiritShots.fight(out)
+        if (only == null || only == "all" || only == "emoji") emoji(out)
     }
 
     private fun turntables(out: File) {
@@ -69,9 +70,56 @@ object MaskSpiritPreview {
         ImageIO.write(sheet(cards, 5), "png", File(out, "presets-sheet.png"))
     }
 
+    /**
+     * Igbo masks as emoji: every preset's bare 3D head with each expression
+     * drawn on, a sheet per mask and one sheet of all of them feeling the
+     * same things, plus a turn of one expression to show it rides the face.
+     */
+    private fun emoji(out: File) {
+        val feelings = listOf("Calm", "Joy", "Laugh", "Anger", "Shout", "Surprise", "Hurt", "Sorrow", "Focus", "Radiant", "Dazed", "Rest")
+        val grid = ArrayList<BufferedImage>()
+        val pick = listOf("Joy", "Anger", "Surprise", "Hurt", "Radiant", "Rest")
+        MaskGenome.presets.forEachIndexed { i, g ->
+            val mesh = MaskSpiritMesher.build(g, emoji = true)
+            val face = mesh.face ?: error("${g.name} has no emoji face")
+            val t0 = System.nanoTime()
+            val views = feelings.map { f ->
+                val features = com.stratum.engine.model.mask.EmojiFace.build(g, face, com.stratum.engine.model.mask.EmojiFace.presets.getValue(f))
+                f to studio(mesh, 240, 290, features) { it.yaw = 0.22f; it.glow = 0.5f; it.eyes = 0.3f }
+            }
+            val ms = (System.nanoTime() - t0) / 1e6 / feelings.size
+            ImageIO.write(sheet(views.map { (f, img) -> caption(img, f) }, 6), "png", File(out, "emoji-%02d-%s.png".format(i + 1, slug(g.name))))
+            views.filter { it.first in pick }.forEach { grid += caption(it.second, "${g.name} · ${it.first}") }
+            println("${g.name}: emoji head ${mesh.triangleCount} tris, a face drawn in ${"%.1f".format(ms)} ms incl. render")
+        }
+        ImageIO.write(sheet(grid, pick.size), "png", File(out, "emoji-sheet.png"))
+        // One feeling, turned: the drawn face rides the 3D head.
+        val g = MaskGenome.presets[1]
+        val mesh = MaskSpiritMesher.build(g, emoji = true)
+        val features = com.stratum.engine.model.mask.EmojiFace.build(g, mesh.face!!, com.stratum.engine.model.mask.EmojiFace.presets.getValue("Joy"))
+        val turn = listOf(-1.0f, -0.5f, 0f, 0.5f, 1.0f).map { yaw -> studio(mesh, 260, 320, features) { it.yaw = yaw; it.glow = 0.5f; it.eyes = 0.3f } }
+        ImageIO.write(strip(turn, "${g.name} · Joy, turning: a drawn face on a 3D mask"), "png", File(out, "emoji-turn.png"))
+    }
+
+    private fun caption(img: BufferedImage, text: String): BufferedImage {
+        val out = BufferedImage(img.width, img.height + 26, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.color = Color(0xF1, 0xEA, 0xDC); g.fillRect(0, 0, out.width, out.height)
+        g.drawImage(img, 0, 0, null)
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g.color = Color(0x1A, 0x17, 0x1B); g.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
+        g.drawString(text, 10, out.height - 8)
+        g.dispose()
+        return out
+    }
+
     /** A mask alone in a studio: a Deco backdrop, a key light, the pose set by [setup]. */
-    fun studio(mesh: SpiritMesh, width: Int, height: Int, setup: (com.stratum.engine.scene.SpiritPose) -> Unit): BufferedImage {
+    fun studio(
+        mesh: SpiritMesh, width: Int, height: Int, features: com.stratum.engine.scene.SpiritFeatures? = null,
+        setup: (com.stratum.engine.scene.SpiritPose) -> Unit,
+    ): BufferedImage {
         val spirit = SpiritInstance(mesh)
+        spirit.features = features
         spirit.pose.scale = 2.1f
         setup(spirit.pose)
         val camera = SceneCamera(target = Vec3(0f, 0f, 0f), pitch = 8f, yaw = 270f, distance = 6f, fovY = 26f, aspect = width.toFloat() / height, near = 1f, far = 30f)

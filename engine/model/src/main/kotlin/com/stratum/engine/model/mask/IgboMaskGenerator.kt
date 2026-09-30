@@ -154,6 +154,13 @@ object IgboMaskGenerator {
          * plinth to stand on.
          */
         private val floating: Boolean = false,
+        /**
+         * True for an emoji head: the face is left bare -- no eyes, brows,
+         * mouth or marks carved in -- and rounded like a 3D emoji, so the
+         * expression can be drawn on it live ([EmojiFace]). The nose stays
+         * sculpted: it is what makes the face read as a solid.
+         */
+        private val bare: Boolean = false,
     ) {
 
         // ---- Proportions -------------------------------------------------
@@ -165,6 +172,9 @@ object IgboMaskGenerator {
         private val ex = 0.42f * w
         private val noseBottom = ey - 0.44f
         private val my = ey - 0.72f
+
+        /** Where the features sit, in face units: half the face's width, the eye line, the eyes' spread, the mouth line. */
+        val plan: FloatArray get() = floatArrayOf(w, ey, ex, my)
 
         /** Relief multiplier: how far features stand from the face. */
         private val k = 0.6f + 0.8f * g.relief
@@ -227,6 +237,12 @@ object IgboMaskGenerator {
 
         /** The face's dome: rim at the edge, fullest at the cheekbones and forehead. */
         private fun faceHeight(x: Float, v: Float, hw: Float): Float {
+            if (bare) {
+                // An emoji's face: a full, even dome, round to the rim, so the drawn features ride a clean curve.
+                val across = sqrt((1f - (x / hw.coerceAtLeast(1e-3f)).let { it * it }).coerceAtLeast(0f))
+                val down = sqrt((1f - v * v).coerceAtLeast(0f))
+                return rim * 0.6f + (bulge + 0.12f) * across.pow(0.7f) * (0.45f + 0.55f * down)
+            }
             // A broad flat plane rolled over at the edges, not a dome: the
             // features then stand on one clean level, and the voxel grid has
             // no terraces to stair-step across the cheeks.
@@ -275,7 +291,8 @@ object IgboMaskGenerator {
             // oval of the head against the disc reads better.
             if (g.crest != CrestForm.NONE && !(g.crest == CrestForm.DISC && discField == CREST)) hairCap(x, v, c)
 
-            if (inFace) {
+            if (inFace && bare) nose(x, v, c)
+            if (inFace && !bare) {
                 brows(x, v, c)
                 eyes(x, v, left, c)
                 nose(x, v, c)

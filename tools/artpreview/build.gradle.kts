@@ -161,3 +161,16 @@ tasks.register<JavaExec>("maskSpiritPreview") {
     (project.findProperty("only") as String?) ?: "all",
   )
 }
+
+/**
+ * The masks as turning cartoon art.
+ *   ./gradlew :tools:artpreview:maskArtPreview
+ */
+tasks.register<JavaExec>("maskArtPreview") {
+  group = "verification"
+  mainClass.set("com.stratum.tools.artpreview.MaskArtPreview")
+  classpath = sourceSets["main"].runtimeClasspath
+  workingDir = rootProject.projectDir
+  jvmArgs("-Djava.awt.headless=true")
+  args = listOf((project.findProperty("out") as String?) ?: "docs/screenshots/mask-art")
+}

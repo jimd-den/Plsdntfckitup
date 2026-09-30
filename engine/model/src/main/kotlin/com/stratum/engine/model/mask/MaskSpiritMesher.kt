@@ -63,16 +63,21 @@ object MaskSpiritMesher {
     }
 
     /** The mesh for [genome], built once per genome and budget and then shared. */
-    fun cached(genome: MaskGenome, budget: Int = COMPANION_BUDGET): SpiritMesh {
-        val key = MaskCodec.encode(genome.normalised()) + "@" + budget
+    fun cached(genome: MaskGenome, budget: Int = COMPANION_BUDGET, emoji: Boolean = false): SpiritMesh {
+        val key = MaskCodec.encode(genome.normalised()) + "@" + budget + (if (emoji) "e" else "")
         synchronized(cache) { cache[key]?.let { return it } }
-        val mesh = build(genome, budget)
+        val mesh = build(genome, budget, emoji)
         synchronized(cache) { cache[key] = mesh }
         return mesh
     }
 
     /** Builds the mesh, landing it at or under [budget] triangles. */
-    fun build(genome: MaskGenome, budget: Int = COMPANION_BUDGET): SpiritMesh {
+    /**
+     * Builds the mesh, landing it at or under [budget] triangles. [emoji]
+     * builds a bare, rounded face with its surface kept ([SpiritMesh.face]),
+     * for an expression drawn on live ([EmojiFace]).
+     */
+    fun build(genome: MaskGenome, budget: Int = COMPANION_BUDGET, emoji: Boolean = false): SpiritMesh {
         val g = genome.normalised()
         val palette = MaskPalettes[g.palette]
         val bounds = bounds(g, palette)
@@ -83,7 +88,7 @@ object MaskSpiritMesher {
         var cell = sqrt(4.4f * area / (budget * 0.6f)).coerceIn(0.03f, 0.3f)
         var best: SpiritMesh? = null
         repeat(MAX_TRIES) {
-            val mesh = Build(g, palette, bounds, cell).run()
+            val mesh = Build(g, palette, bounds, cell, emoji).run()
             if (mesh.triangleCount <= budget) return mesh
             best = mesh
             cell *= sqrt(mesh.triangleCount / budget.toFloat()) * 1.04f
@@ -117,9 +122,9 @@ object MaskSpiritMesher {
     }
 
     /** One attempt at one grid pitch. */
-    private class Build(val g: MaskGenome, val p: MaskPalette, val b: Bounds, val cell: Float) {
+    private class Build(val g: MaskGenome, val p: MaskPalette, val b: Bounds, val cell: Float, val emoji: Boolean = false) {
         /** Lines drawn at least this wide, so the grid can hold them: bolder, cleaner, more Deco. */
-        val design = IgboMaskGenerator.Design(g, p, pixel = cell * 1.25f, floating = true)
+        val design = IgboMaskGenerator.Design(g, p, pixel = cell * 1.25f, floating = true, bare = emoji)
         val sample = IgboMaskGenerator.Cell()
 
         // The grid: symmetric about u = 0 so a symmetric mask meshes symmetric.
@@ -140,6 +145,24 @@ object MaskSpiritMesher {
 
         /** The mask's curve: the sides sweep back round the head, the crest leans back. */
         fun bend(u: Float, v: Float): Float = -(BEND_ACROSS * u * u + BEND_DOWN * (v - 0.1f) * (v - 0.1f))
+
+        /** The front of the bare face on a fine grid: where an expression is drawn. */
+        fun faceSurface(scale: Float, midV: Float): com.stratum.engine.scene.SpiritFace {
+            val plan = design.plan
+            val uMax = plan[0] * 1.1f
+            val step = 0.02f
+            val v0 = -1.05f
+            val nu = (2 * uMax / step).toInt() + 2
+            val nv = (2.1f / step).toInt() + 2
+            val front = FloatArray(nu * nv)
+            val c = IgboMaskGenerator.Cell()
+            for (j in 0 until nv) for (i in 0 until nu) {
+                val uu = -uMax + i * step; val vv = v0 + j * step
+                design.sample(uu, vv, c)
+                front[j * nu + i] = if (c.h > 0f && abs(uu) < design.halfWidth(vv)) bend(uu, vv) + c.h else Float.NaN
+            }
+            return com.stratum.engine.scene.SpiritFace(uMax, v0, step, nu, nv, front, scale, midV, plan)
+        }
 
         fun run(): SpiritMesh {
             sampleColumns()
@@ -519,10 +542,16 @@ object MaskSpiritMesher {
                     eyes[side * 3 + 2] = (0.1f - midV) * scale
                 }
             }
+            val face = if (b.emoji) b.faceSurface(scale, midV) else null
+            if (face != null) {
+                // Bare faces have no lit eye to find: the eyes are where the plan puts them, on the surface.
+                val out = FloatArray(6)
+                for (side in 0 until 2) if (face.surface(if (side == 0) face.plan[2] else -face.plan[2], face.plan[1], 0.02f, out)) out.copyInto(eyes, side * 3, 0, 3)
+            }
             return SpiritMesh(
                 positions, normals, colours, channels, glows, idx, eyes, look.aura, look.auraSecond,
                 faceColor = SpiritLook.argb(b.p.face), fringeColors = look.fringe, charmColor = SpiritLook.argb(b.p.ivory),
-            )
+            ).also { it.face = face }
         }
     }
 

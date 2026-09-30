@@ -72,6 +72,7 @@ class SpiritStage {
         if (opacity > 0.02f) {
             val body = if (opacity < 0.999f) fading else solid
             emitter.emit(mesh, pose, body, fading = opacity < 0.999f)
+            spirit.features?.let { emitter.emitFeatures(it, pose, body, fading = opacity < 0.999f) }
             if (pose.fringeRibbons > 0 && pose.fringePoints > 1) fringe(mesh, pose, body, opacity)
             if (pose.handCount > 0 || pose.charms > 0) parts(mesh, pose, body, opacity < 0.999f)
         }
