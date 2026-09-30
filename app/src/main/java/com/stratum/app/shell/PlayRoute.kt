@@ -129,6 +129,8 @@ private fun Session(
                 kitOverlays = graph.plugins.textureDirectories() + ai.models.textureDirectory,
                 quality = graph.graphics.chosen,
                 saveQuality = graph.graphics::choose,
+                terrain = graph.graphics.terrain,
+                saveTerrain = graph.graphics::chooseTerrain,
                 loadHero = { heroClassId?.let(graph.heroes::load) },
                 saveHero = graph.heroes::save,
                 stylePrompt = stylePrompt,

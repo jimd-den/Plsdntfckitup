@@ -1,0 +1,21 @@
+Voxel splats against the greedy mesh (seed 20260928, this JVM, 4 cores)
+
+Per 16x16x48 chunk (average of 16 around the home town)
+detail       build: mesh   splats (unlit)    GPU bytes: mesh   splats    vertices run: mesh   splats   primitives: triangles   points
+full             9.6 ms   16.8 ms ( 6.0 ms)          1635 KB     98 KB          23,912     5,730           11,956     5,730
+half-block       4.2 ms    8.0 ms ( 4.0 ms)           312 KB     29 KB           4,562     1,297            2,281     1,297
+
+One edit (a chunk layer remade at full detail): mesh 3.78 ms, splats 3.82 ms (unlit 1.05 ms)
+
+Whole view, per tier, settled (every chunk in detail)
+tier    splat  GPU bytes: mesh   splats    vertices run: mesh   splats
+LOW     fast          11.8 MB    1.0 MB          133,032      49,265
+MEDIUM  fast          25.5 MB    2.3 MB          301,688     104,303
+HIGH    exact         45.6 MB    3.5 MB          379,244     120,736
+ULTRA   exact         62.7 MB    4.8 MB          419,436     133,923
+
+GPU bytes = vertex and index buffers held for the terrain (mesh: 16 floats a vertex + 4-byte indices; splats: 16 bytes a voxel, its light included).
+vertices run = vertex shader invocations per frame for the terrain in view; a splat is one, lit there once for its three faces.
+build = on the meshing threads, never the frame; splats include baking each voxel's light (sky, bounce, lamps), unlit is without.
+Splat chunks keep water as a small mesh; blocks beyond the detail rings are meshed either way.
+Desktop JVM numbers; a low-end phone core is roughly 3-6x slower.

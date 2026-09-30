@@ -21,8 +21,16 @@ class GraphicsSettingsStore(context: Context) {
         prefs.edit { putString(KEY_TIER, tierName) }
     }
 
+    /** How the land is drawn (mesh or voxels), by name; null lets the tier decide. */
+    fun loadTerrain(): String? = prefs.getString(KEY_TERRAIN, null)
+
+    fun saveTerrain(name: String?) {
+        prefs.edit { putString(KEY_TERRAIN, name) }
+    }
+
     private companion object {
         const val FILE = "stratum_graphics"
         const val KEY_TIER = "quality_tier"
+        const val KEY_TERRAIN = "terrain_draw"
     }
 }

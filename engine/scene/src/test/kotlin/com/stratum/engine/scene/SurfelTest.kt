@@ -139,7 +139,7 @@ class SurfelTest {
     @Test
     fun `a HIGH frame carries surfels near the focus, within budget, and a night frame glows`() {
         val world = world()
-        val settings = RenderSettings.of(QualityTier.HIGH)
+        val settings = RenderSettings.of(QualityTier.HIGH).withTerrain(SplatMode.MESH) // surfels grow on mesh quads
         val builder = SceneBuilder(director, TextureLibrary(), settings = settings, microTerrain = generator)
         val camera = SceneCamera(target = Vec3(200.5f, 200.5f, world.surfaceAt(200, 200) + 1f))
         val night = WorldTime(dayFraction = 0.02f, elapsedSeconds = 1f)

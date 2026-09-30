@@ -114,6 +114,10 @@ class PlayViewModel(
     quality: QualityTier? = null,
     /** Keeps a new graphics choice for next time. Supplied by the composition root. */
     private val saveQuality: (QualityTier?) -> Unit = {},
+    /** How the land is drawn when the run began (mesh or voxel splats); null lets the tier decide. */
+    terrain: com.stratum.engine.scene.SplatMode? = null,
+    /** Keeps a new terrain choice for next time. */
+    private val saveTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     /** Keeps the world style for next time, so a painted style is still worn after a restart. */
     private val saveStyle: (String) -> Unit = {},
     /** The character carried in from earlier play, or null for a new one. */
@@ -150,6 +154,8 @@ class PlayViewModel(
     private val initialMaskCharacters = maskCharacters
 
     private val initialQuality = quality
+
+    private val initialTerrain = terrain
 
     /** The hero class this run plays: a resumed world's own, else the one asked for. */
     private val heroClassId: String? = resume?.heroClassId ?: heroClassId
@@ -277,6 +283,12 @@ class PlayViewModel(
     fun chooseQuality(tier: QualityTier?) {
         _state.value = _state.value.copy(quality = tier)
         saveQuality(tier)
+    }
+
+    /** Draws the land as a greedy mesh or as voxel splats; null goes back to the tier's choice. */
+    fun chooseTerrain(mode: com.stratum.engine.scene.SplatMode?) {
+        _state.value = _state.value.copy(terrain = mode)
+        saveTerrain(mode)
     }
 
     /**
@@ -792,6 +804,7 @@ class PlayViewModel(
             brush = { r, m -> changeBrush(r, m) }, turnModel = ::turnModel, placeModel = ::placeModel,
         ),
         quality = initialQuality,
+        terrain = initialTerrain,
         maskCharacters = initialMaskCharacters,
         heroMask = heroMask,
         masks = MaskLooks.of(content),
@@ -1552,6 +1565,8 @@ class PlayViewModel(
             kitOverlays: List<File> = emptyList(),
             quality: QualityTier? = null,
             saveQuality: (QualityTier?) -> Unit = {},
+            terrain: com.stratum.engine.scene.SplatMode? = null,
+            saveTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
             /** Read only when the view model is created, so a recomposition does not touch the disk. */
             loadHero: () -> HeroSave? = { null },
             saveHero: (HeroSave) -> Unit = {},
@@ -1574,7 +1589,7 @@ class PlayViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
                 imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
-                quality = quality, saveQuality = saveQuality, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
+                quality = quality, saveQuality = saveQuality, terrain = terrain, saveTerrain = saveTerrain, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
                 propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
@@ -1654,6 +1669,8 @@ data class PlayUiState(
     val kitOverlays: List<File> = emptyList(),
     /** The graphics tier the player chose; null is the device's own. */
     val quality: QualityTier? = null,
+    /** How the land is drawn, mesh or voxel splats; null is the tier's own. */
+    val terrain: com.stratum.engine.scene.SplatMode? = null,
     /** Characters drawn as floating mask spirits; false draws their sprites. */
     val maskCharacters: Boolean = true,
     /** The hero's mask, a genome code; null wears the first preset. */

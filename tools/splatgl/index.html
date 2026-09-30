@@ -113,6 +113,7 @@ function link(gl, vs, fs, name) {
     gl.uniform3fv(u(`uLightColor[${i}]`), l.color);
     gl.uniform1f(u(`uLightRadius[${i}]`), l.radius);
   });
+  gl.uniform1f(u('uLampGain'), scene.lampGain);
   gl.uniform1f(u('uGrain'), scene.grain);
   gl.uniform1f(u('uBevel'), 0);
   gl.uniform1f(u('uOcclusionDepth'), scene.occlusionDepth);
@@ -129,8 +130,8 @@ function link(gl, vs, fs, name) {
   gl.depthFunc(gl.LESS);
   const t0 = performance.now();
   for (const b of scene.batches) {
-    // Each batch starts at its own offset in the one buffer: 8 bytes a splat.
-    gl.vertexAttribIPointer(0, 2, gl.UNSIGNED_INT, 8, b.first * 8);
+    // Each batch starts at its own offset in the one buffer: 16 bytes a splat.
+    gl.vertexAttribIPointer(0, 4, gl.UNSIGNED_INT, 16, b.first * 16);
     gl.uniform2f(u('uOrigin'), b.ox, b.oy);
     gl.uniform1f(u('uPerMicro'), b.perMicro);
     gl.drawArrays(gl.POINTS, 0, b.count);

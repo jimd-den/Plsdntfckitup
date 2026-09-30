@@ -16,7 +16,7 @@ import java.nio.ByteOrder
  * are shown working, not only their CPU twin.
  *
  * Writes `scene.json` (uniforms, and each batch's origin and range) and
- * `splats.bin` (every batch's eight-byte splats, little-endian, back to back).
+ * `splats.bin` (every batch's sixteen-byte splats, little-endian, back to back).
  */
 object SplatGpuDump {
     fun write(dir: File, frame: SceneFrame, width: Int, height: Int) {
@@ -38,7 +38,7 @@ object SplatGpuDump {
         val cam = frame.camera
         val eye = cam.eye
         val look = frame.look
-        val lights = frame.lights.take(SceneFrame.MAX_LIGHTS)
+        val lights = frame.lights.take(minOf(frame.dynamicLights, SceneFrame.MAX_LIGHTS))
         val json = """{
   "width": $width, "height": $height,
   "viewProj": ${arr(cam.viewProjection)},
@@ -54,6 +54,7 @@ object SplatGpuDump {
   "grain": ${look.grain}, "occlusionDepth": ${look.occlusionDepth}, "haze": ${look.aerialHaze}, "glowGain": ${look.nightGlow * frame.night},
   "focus": [${cam.target.x}, ${cam.target.y}, ${cam.target.z}], "focusDistance": ${cam.distance},
   "pixelAngle": ${2f / (cam.projection[5] * height)},
+  "lampGain": ${frame.lighting.pointLightGain},
   "splats": $total,
   "batches": [
     $batches

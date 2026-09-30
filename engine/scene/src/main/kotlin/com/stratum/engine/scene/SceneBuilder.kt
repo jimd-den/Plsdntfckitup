@@ -121,6 +121,12 @@ class SceneFrame(
     val residentSplats: List<SplatBatch> = emptyList(),
     /** How [splats] are drawn: [SplatMode.FAST] or [SplatMode.EXACT]. */
     val splatMode: SplatMode = SplatMode.MESH,
+    /**
+     * How many of [lights], from the front, move: the hero's and the
+     * impacts'. The rest are the land's own lamps, which splats carry
+     * already baked in ([VoxelLight]) and so do not shade again.
+     */
+    val dynamicLights: Int = lights.size,
 ) {
     /** Everything opaque: the terrain, the model props, then the actors. */
     val opaque: List<MeshBatch> get() = terrain + models + listOfNotNull(actors)
@@ -173,7 +179,7 @@ class SceneBuilder(
     private val chunks = ChunkMeshCache(
         TerrainMesher(scene, textures, biomeAt),
         microTerrain?.let {
-            MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity, splatMode = settings.splats)
+            MicroDetailMesher(it, scatterSurfels = settings.diorama.surfels, surfelDensity = settings.diorama.surfelDensity, splatMode = settings.splats, voxelLight = settings.voxelLight)
         },
         settings.microDetailRadius,
         settings.microFarRadius,
@@ -422,6 +428,7 @@ class SceneBuilder(
             },
             residentSplats = terrain.splats,
             splatMode = settings.splatDraw,
+            dynamicLights = if (settings.splats.splats && settings.voxelLight) minOf(nearest.size, (if (hero != null) 1 else 0) + bursts.size) else nearest.size,
         )
     }
 

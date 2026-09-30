@@ -309,8 +309,14 @@ class SceneRasterizer(
         val t = s.terms
         val glow = 1f + s.look.nightGlow * s.frame.night
         val exact = mode == SplatMode.EXACT
+        // Lamps are baked into the splats; only the lights that move are shaded here.
+        val moving = s.frame.lights.take(s.frame.dynamicLights)
+        val lampGain = s.frame.lighting.pointLightGain
+        // One bounce of the hour's daylight: sky and sun as they fall on open ground.
+        val bounceLight = FloatArray(3) { k -> (t.sky[k] + t.sunColor[k] * max(0f, t.sun[2])) * VoxelSplat.BOUNCE_GAIN }
         for (i in 0 until b.count) {
             val a = b.data[i * VoxelSplat.INTS]; val c = b.data[i * VoxelSplat.INTS + 1]
+            val lightBits = b.data[i * VoxelSplat.INTS + 2]; val lampBits = b.data[i * VoxelSplat.INTS + 3]
             val side = VoxelSplat.size(a) * per
             val half = side / 2f
             val mx = b.originX + VoxelSplat.x(a) * per; val my = b.originY + VoxelSplat.y(a) * per; val mz = VoxelSplat.z(a) * per
@@ -340,6 +346,12 @@ class SceneRasterizer(
             // One shadow lookup for the voxel, just above its top towards the sun.
             val lift = side * VoxelSplat.SHADOW_LIFT
             val lit = sunlit(s.frame, wx + t.sun[0] * lift, wy + t.sun[1] * lift, wz + t.sun[2] * lift, 1f, scratch)
+            val skyShare = VoxelSplat.skyShare(VoxelSplat.sky(lightBits))
+            val bounce = VoxelSplat.bounce(lightBits); val lamp = VoxelSplat.lamp(lampBits)
+            // Light the neighbourhood gives the voxel, the same on each of its faces.
+            val ir = VoxelSplat.channel(bounce, 16, 1f) * bounceLight[0] + VoxelSplat.channel(lamp, 16, VoxelSplat.LAMP_RANGE) * lampGain
+            val ig = VoxelSplat.channel(bounce, 8, 1f) * bounceLight[1] + VoxelSplat.channel(lamp, 8, VoxelSplat.LAMP_RANGE) * lampGain
+            val ib = VoxelSplat.channel(bounce, 0, 1f) * bounceLight[2] + VoxelSplat.channel(lamp, 0, VoxelSplat.LAMP_RANGE) * lampGain
             val xOpen = faces and (if (sx > 0f) VoxelSplat.FACE_PX else VoxelSplat.FACE_NX) != 0
             val yOpen = faces and (if (sy > 0f) VoxelSplat.FACE_PY else VoxelSplat.FACE_NY) != 0
             for (f in 0 until 3) {
@@ -351,11 +363,12 @@ class SceneRasterizer(
                 }
                 if (face == 0 && f != 0) { cols[0].copyInto(cols[f]); continue }
                 val nx = if (face == 1) sx else 0f; val ny = if (face == 2) sy else 0f; val nz = if (face == 0) 1f else 0f
-                val ao = if (face == 0) VoxelSplat.occlusion(VoxelSplat.ao(a)) else 1f
+                val ao = (if (face == 0) VoxelSplat.occlusion(VoxelSplat.ao(a)) else 1f) * skyShare
                 ShadingModel.shade(
                     t, ar, ag, ab, nx, ny, nz, ao, lit, wx, wy, wz, ex, ey, ez, emissive, false,
-                    s.frame.lights, s.lightColors, s.out, occlusionDepth = s.look.occlusionDepth,
+                    moving, s.lightColors, s.out, occlusionDepth = s.look.occlusionDepth,
                 )
+                s.out[0] += ar * ir; s.out[1] += ag * ig; s.out[2] += ab * ib
                 atmosphere(s, dist, wx, wy, wz)
                 s.out.copyInto(cols[f])
             }

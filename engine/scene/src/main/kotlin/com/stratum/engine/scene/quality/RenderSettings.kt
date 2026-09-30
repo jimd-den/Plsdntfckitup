@@ -61,6 +61,12 @@ data class RenderSettings(
      * sprite per surface voxel. See [com.stratum.engine.scene.SplatMode].
      */
     val splats: com.stratum.engine.scene.SplatMode = com.stratum.engine.scene.SplatMode.MESH,
+    /**
+     * Splats carry the light their surroundings give them -- sky seen,
+     * bounced daylight, every lamp near -- found when a chunk is built
+     * (see `VoxelLight`). Off, they are shaded like the mesh, and build faster.
+     */
+    val voxelLight: Boolean = true,
 ) {
     init {
         require(renderScale in minRenderScale..1f) { "renderScale $renderScale is outside $minRenderScale..1" }
@@ -72,6 +78,9 @@ data class RenderSettings(
     }
 
     val shadows: Boolean get() = shadowMapSize > 0
+
+    /** These settings with the player's terrain choice over the tier's; null keeps the tier's. */
+    fun withTerrain(mode: com.stratum.engine.scene.SplatMode?): RenderSettings = if (mode == null) this else copy(splats = mode)
 
     /**
      * How splats are really drawn: [splats], except that fast splats become

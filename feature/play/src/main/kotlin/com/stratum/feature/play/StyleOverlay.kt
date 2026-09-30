@@ -54,6 +54,7 @@ fun StyleOverlay(
     onClose: () -> Unit,
     onForge: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
+    onChooseTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     onChooseMasks: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -117,6 +118,8 @@ fun StyleOverlay(
 
             Spacer(Modifier.height(Space.medium))
             GraphicsChooser(chosen = state.quality, onChoose = onChooseQuality)
+            Spacer(Modifier.height(Space.small))
+            TerrainChooser(chosen = state.terrain, onChoose = onChooseTerrain)
 
             Spacer(Modifier.height(Space.medium))
             // The characters are masks: floating, glowing mask spirits. The
@@ -176,6 +179,28 @@ private fun GraphicsChooser(chosen: QualityTier?, onChoose: (QualityTier?) -> Un
                 selected = tier == chosen,
                 onClick = { onChoose(tier) },
             )
+        }
+    }
+}
+
+/**
+ * How the land is drawn. Voxels is one lit point per voxel: a fraction of
+ * the mesh's memory and vertex work, with every lamp lighting the street;
+ * sharp voxels trace each cube's exact edge. Auto takes the tier's choice.
+ */
+@Composable
+private fun TerrainChooser(chosen: com.stratum.engine.scene.SplatMode?, onChoose: (com.stratum.engine.scene.SplatMode?) -> Unit) {
+    SectionLabel(text = "Terrain")
+    Spacer(Modifier.height(Space.small))
+    val options = listOf(
+        null to "Auto",
+        com.stratum.engine.scene.SplatMode.MESH to "Mesh",
+        com.stratum.engine.scene.SplatMode.FAST to "Voxels",
+        com.stratum.engine.scene.SplatMode.EXACT to "Voxels, sharp",
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+        items(options) { (mode, label) ->
+            StratumChip(label = label, selected = mode == chosen, onClick = { onChoose(mode) })
         }
     }
 }

@@ -1,0 +1,114 @@
+[
+  {
+    "shot": "building",
+    "mode": "fast",
+    "splats": 70562,
+    "batches": 27,
+    "ms": 0.19999999925494194,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "building",
+    "mode": "exact",
+    "splats": 70562,
+    "batches": 27,
+    "ms": 0,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "home",
+    "mode": "fast",
+    "splats": 103519,
+    "batches": 37,
+    "ms": 0.20000000018626451,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "home",
+    "mode": "exact",
+    "splats": 103519,
+    "batches": 37,
+    "ms": 0.09999999962747097,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "night",
+    "mode": "fast",
+    "splats": 93287,
+    "batches": 38,
+    "ms": 0.09999999962747097,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "night",
+    "mode": "exact",
+    "splats": 93287,
+    "batches": 38,
+    "ms": 0.10000000055879354,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "wilds",
+    "mode": "fast",
+    "splats": 83518,
+    "batches": 35,
+    "ms": 0,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  },
+  {
+    "shot": "wilds",
+    "mode": "exact",
+    "splats": 83518,
+    "batches": 35,
+    "ms": 0,
+    "renderer": "WebKit WebGL",
+    "floatTarget": true,
+    "pointSizeRange": [
+      1,
+      1023
+    ],
+    "error": 0
+  }
+]

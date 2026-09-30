@@ -511,7 +511,7 @@ internal object SceneShaders {
      */
     fun splatVertex(exact: Boolean) = """#version 300 es
         precision highp float;
-        layout(location = 0) in uvec2 aSplat;
+        layout(location = 0) in uvec4 aSplat;
         uniform mat4 uViewProj;
         uniform mat4 uShadowViewProj;
         uniform sampler2D uShadowMap;
@@ -538,6 +538,7 @@ internal object SceneShaders {
         uniform vec3 uLightPos[8];
         uniform vec3 uLightColor[8];
         uniform float uLightRadius[8];
+        uniform float uLampGain;
         $DIORAMA
         flat out vec3 vTop;
         flat out vec3 vSideX;
@@ -559,6 +560,9 @@ internal object SceneShaders {
         const float EDGE_PIXELS = ${f(com.stratum.engine.scene.SplatFaces.EDGE_PIXELS)};
         const float SHADOW_LIFT = ${f(VoxelSplat.SHADOW_LIFT)};
         const float MIN_OCCLUSION = ${f(VoxelSplat.MIN_OCCLUSION)};
+        const float SKY_FLOOR = ${f(VoxelSplat.SKY_FLOOR)};
+        const float BOUNCE_GAIN = ${f(VoxelSplat.BOUNCE_GAIN)};
+        const float LAMP_RANGE = ${f(VoxelSplat.LAMP_RANGE)};
         const float EMISSIVE_GAIN = ${f(ShadingModel.EMISSIVE_GAIN)};
         const float TONE_GAIN = ${f(ShadingModel.TONE_GAIN)};
         const float HEIGHT_FOG_DEPTH = ${f(ShadingModel.HEIGHT_FOG_DEPTH)};
@@ -587,8 +591,8 @@ internal object SceneShaders {
             // One tap: a voxel is a few pixels across.
             return (p.z - 0.0015 <= textureLod(uShadowMap, p.xy, 0.0).r) ? 1.0 : 0.0;
         }
-        // ShadingModel.shade, then haze and fog, for one face.
-        vec3 shadeFace(vec3 n, vec3 w, vec3 albedo, float ao, float lit, float emissive, float dist) {
+        // ShadingModel.shade, the voxel's baked light, then haze and fog, for one face.
+        vec3 shadeFace(vec3 n, vec3 w, vec3 albedo, float ao, float lit, float emissive, vec3 indirect, float dist) {
             float skyAo = uOcclusionDepth > 0.0 ? pow(ao, 1.0 + uOcclusionDepth) : ao;
             float sunAo = 1.0 - uOcclusionDepth * OCCLUSION_SUN_SHARE * (1.0 - ao);
             vec3 light = mix(uGround, uSky, n.z * 0.5 + 0.5) * skyAo;
@@ -604,7 +608,7 @@ internal object SceneShaders {
                 float fall = 1.0 - len / uLightRadius[i];
                 light += uLightColor[i] * fall * fall * facing;
             }
-            vec3 color = light * albedo + albedo * emissive * EMISSIVE_GAIN;
+            vec3 color = light * albedo + albedo * emissive * EMISSIVE_GAIN + albedo * indirect;
             if (uHaze) {
                 vec4 hz = haze(w, dist, uEye, uSun, uFog);
                 color = mix(color, vec3(untone(hz.r), untone(hz.g), untone(hz.b)), hz.a);
@@ -655,13 +659,20 @@ internal object SceneShaders {
             if (uGrain > 0.0) albedo *= voxelGrain(w, vec3(0.0));
             float emissive = float(b & 255u) / 255.0 * (1.0 + uGlowGain);
             float lit = sunlit(w + uSun * side * SHADOW_LIFT);
-            float ao = 1.0 - (1.0 - MIN_OCCLUSION) * float(a >> 28u) / 15.0;
-            vTop = shadeFace(vec3(0.0, 0.0, 1.0), w, albedo, ao, lit, emissive, dist);
+            // The light the neighbourhood gives the voxel (VoxelLight): sky seen, one bounce of daylight, lamps.
+            uint c = aSplat.z;
+            uint d = aSplat.w;
+            float skyShare = SKY_FLOOR + (1.0 - SKY_FLOOR) * float(c & 255u) / 255.0;
+            vec3 bounce = vec3(float(c >> 24u), float((c >> 16u) & 255u), float((c >> 8u) & 255u)) / 255.0;
+            vec3 lamp = vec3(float(d >> 24u), float((d >> 16u) & 255u), float((d >> 8u) & 255u)) / 255.0 * LAMP_RANGE;
+            vec3 indirect = bounce * (uSky + uSunColor * max(0.0, uSun.z)) * BOUNCE_GAIN + lamp * uLampGain;
+            float ao = (1.0 - (1.0 - MIN_OCCLUSION) * float(a >> 28u) / 15.0) * skyShare;
+            vTop = shadeFace(vec3(0.0, 0.0, 1.0), w, albedo, ao, lit, emissive, indirect, dist);
             // A closed side is hidden by its neighbour; shaded as top, the sprite's spill onto that neighbour keeps its colour.
             bool xOpen = (faces & (sx > 0.0 ? 1u : 2u)) != 0u;
             bool yOpen = (faces & (sy > 0.0 ? 4u : 8u)) != 0u;
-            vSideX = xOpen ? shadeFace(vec3(sx, 0.0, 0.0), w, albedo, 1.0, lit, emissive, dist) : vTop;
-            vSideY = yOpen ? shadeFace(vec3(0.0, sy, 0.0), w, albedo, 1.0, lit, emissive, dist) : vTop;
+            vSideX = xOpen ? shadeFace(vec3(sx, 0.0, 0.0), w, albedo, skyShare, lit, emissive, indirect, dist) : vTop;
+            vSideY = yOpen ? shadeFace(vec3(0.0, sy, 0.0), w, albedo, skyShare, lit, emissive, indirect, dist) : vTop;
             ${if (exact) """
             vBoxMin = lo;
             vBoxSide = side;
@@ -744,7 +755,7 @@ internal object SceneShaders {
     /** A splat into the sun's depth map: a square of its centre's depth, no colour. */
     val SPLAT_SHADOW_VERTEX = """#version 300 es
         precision highp float;
-        layout(location = 0) in uvec2 aSplat;
+        layout(location = 0) in uvec4 aSplat;
         uniform mat4 uShadowViewProj;
         uniform vec2 uOrigin;
         uniform float uPerMicro;

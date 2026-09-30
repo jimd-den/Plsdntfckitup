@@ -47,7 +47,7 @@ class MicroDetailTest {
     @Test
     fun `with the far ring off, chunks near the camera are drawn from microvoxels, the rest from blocks`() {
         val world = world()
-        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM).copy(microFarRadius = 0), microTerrain = generator)
+        val builder = SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM).copy(microFarRadius = 0, splats = SplatMode.MESH), microTerrain = generator)
         val frame = settle(builder, world)
         assertTrue(builder.detailedChunksLastFrame in 1 until frame.terrain.size, "detailed ${builder.detailedChunksLastFrame} of ${frame.terrain.size}")
         val plain = settle(SceneBuilder(director, TextureLibrary(), settings = RenderSettings.of(QualityTier.MEDIUM)), world)

@@ -43,6 +43,8 @@ class MicroDetailMesher(
      * are not scattered over splats: each voxel already carries its own tone.
      */
     private val splatMode: SplatMode = SplatMode.MESH,
+    /** Bake each splat's light from its surroundings ([VoxelLight]); off, splats carry open sky and no lamps. */
+    private val voxelLight: Boolean = true,
 ) {
 
     private val palette: MaterialPalette get() = source.palette
@@ -56,7 +58,7 @@ class MicroDetailMesher(
         val idx = IntArray(4)
         val occ = FloatArray(4)
         val surfels = if (scatterSurfels && !splatMode.splats) SurfelScatter(source.palette, surfelDensity) else null
-        val splats = if (splatMode.splats) SplatExtractor(source.palette, source.microPerBlock) else null
+        val splats = if (splatMode.splats) SplatExtractor(source.palette, source.microPerBlock, voxelLight) else null
     }
 
     private val work = ThreadLocal.withInitial { Work() }
@@ -171,11 +173,12 @@ class MicroDetailMesher(
         val splats = w.splats
         if (splats != null) {
             val before = splats.size
-            if (factor == 1) splats.extract(grid, neighbours, cz * MicroChunk.SIZE, 1)
+            val near = if (voxelLight) lampsNear(mpos, lights) else Lamps.NONE
+            if (factor == 1) splats.extract(grid, neighbours, cz * MicroChunk.SIZE, 1, near)
             else splats.extract(
                 com.stratum.engine.microvoxel.mesh.Lod.downsample(grid, factor, palette),
                 NeighborOpacity { x, y, z -> neighbours.opaque(x * factor + factor / 2, y * factor + factor / 2, z * factor + factor / 2) },
-                cz * MicroChunk.SIZE, factor,
+                cz * MicroChunk.SIZE, factor, near,
             )
             water(grid, mpos)
             lamps(grid, mpos, lights)
@@ -194,6 +197,76 @@ class MicroDetailMesher(
         lamps(grid, mpos, lights)
         return mesh.count
     }
+
+    /**
+     * Lamps that may light a layer's splats: the glowing voxels of it and
+     * of the 26 micro chunks round it, gathered a block at a time, plus the
+     * lamp blocks placed in it ([placed], the lights [patched] made). Only
+     * those within a lamp's reach of the layer are kept.
+     */
+    private fun lampsNear(mpos: MicroChunkPos, placed: List<PointLight>): Lamps {
+        val reach = TerrainMesher.LIGHT_RADIUS * r
+        val size = MicroChunk.SIZE
+        val out = ArrayList<Float>()
+        for (dz in -1..1) for (dy in -1..1) for (dx in -1..1) {
+            val npos = MicroChunkPos(mpos.x + dx, mpos.y + dy, mpos.z + dz)
+            if (npos.z < 0 || npos.z >= layers) continue
+            val cells = lampCells(npos)
+            var i = 0
+            while (i < cells.size) {
+                val x = cells[i]; val y = cells[i + 1]; val z = cells[i + 2]
+                if (x > mpos.originX - reach && x < mpos.originX + size + reach && y > mpos.originY - reach && y < mpos.originY + size + reach &&
+                    z > mpos.originZ - reach && z < mpos.originZ + size + reach
+                ) for (k in 0 until Lamps.FLOATS) out += cells[i + k]
+                i += Lamps.FLOATS
+            }
+        }
+        for (light in placed) {
+            out += light.x * r; out += light.y * r; out += light.z * r
+            val k = light.strength * LAMP_STRENGTH
+            out += ((light.color shr 16) and 255) / 255f * k; out += ((light.color shr 8) and 255) / 255f * k; out += (light.color and 255) / 255f * k
+        }
+        return if (out.isEmpty()) Lamps.NONE else Lamps(out.toFloatArray(), out.size / Lamps.FLOATS)
+    }
+
+    /** Lamp cells of the generated micro chunk at [pos], each a block's glowing voxels summed; see [lampsNear]. */
+    private fun lampCells(pos: MicroChunkPos): FloatArray {
+        lampCache[pos]?.let { return it }
+        val grid = source.microChunk(pos)
+        val out = ArrayList<Float>()
+        if (!grid.isEmpty()) {
+            val cells = HashMap<Int, FloatArray>()
+            val b = MicroChunk.BRICK
+            for (bz in 0 until MicroChunk.BRICKS_PER_AXIS) for (by in 0 until MicroChunk.BRICKS_PER_AXIS) for (bx in 0 until MicroChunk.BRICKS_PER_AXIS) {
+                val u = grid.brickUniform(bx, by, bz)
+                if (u != null && palette[u].emission < MIN_GLOW) continue
+                for (z in bz * b until bz * b + b) for (y in by * b until by * b + b) for (x in bx * b until bx * b + b) {
+                    val m = palette[grid[x, y, z]]
+                    if (m.emission < MIN_GLOW) continue
+                    val key = (x / r) + (y / r) * 64 + (z / r) * 4096
+                    val c = cells.getOrPut(key) { FloatArray(7) }
+                    val e = m.emission
+                    c[0] += (x + 0.5f) * e; c[1] += (y + 0.5f) * e; c[2] += (z + 0.5f) * e
+                    c[3] += ((m.color shr 16) and 255) / 255f * e; c[4] += ((m.color shr 8) and 255) / 255f * e; c[5] += (m.color and 255) / 255f * e
+                    c[6] += e
+                }
+            }
+            for (c in cells.values) {
+                val e = c[6]
+                // A block of glow lights like a lamp head; a lone lit pane, a little.
+                val k = LAMP_STRENGTH * minOf(1.5f, e / GLOW_PER_LAMP) / e
+                out += pos.originX + c[0] / e; out += pos.originY + c[1] / e; out += pos.originZ + c[2] / e
+                out += c[3] * k; out += c[4] * k; out += c[5] * k
+            }
+        }
+        val cells = out.toFloatArray()
+        if (lampCache.size > MAX_LAMP_CHUNKS) lampCache.clear()
+        lampCache[pos] = cells
+        return cells
+    }
+
+    /** [lampCells] of generated chunks, which never change; bounded by [MAX_LAMP_CHUNKS]. */
+    private val lampCache = java.util.concurrent.ConcurrentHashMap<MicroChunkPos, FloatArray>()
 
     /**
      * Per micro-chunk layer, the blocks that differ from what was generated,
@@ -409,6 +482,18 @@ class MicroDetailMesher(
 
         /** Emission at which a voxel counts as a lamp and lights its surroundings. */
         const val LAMP_EMISSION = 2f
+
+        /** Emission at which a voxel lights splats near it (lit windows too, not only lamps); see [lampsNear]. */
+        private const val MIN_GLOW = 0.5f
+
+        /** A lamp's light before the style's gain: the strength the mesh path gives its lamp lights. */
+        private const val LAMP_STRENGTH = 0.8f
+
+        /** Glow, summed over a block's voxels, that makes a full lamp. */
+        private const val GLOW_PER_LAMP = 6f
+
+        /** Micro chunks whose lamps are remembered. */
+        private const val MAX_LAMP_CHUNKS = 4096
 
         /** Water sits a hair below its cell top, as a liquid surface should. */
         private const val WATER_DROP = 0.06f

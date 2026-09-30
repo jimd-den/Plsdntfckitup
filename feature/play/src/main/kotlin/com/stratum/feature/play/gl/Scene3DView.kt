@@ -85,6 +85,8 @@ data class Scene3DInput(
     val animationFor: (String) -> com.stratum.core.domain.sprite.AnimationPlayback = { com.stratum.core.domain.sprite.AnimationPlayback() },
     /** The player's graphics choice, or null to let the device decide. */
     val quality: QualityTier? = null,
+    /** How the land is drawn, mesh or voxel splats; null is the tier's own. */
+    val terrain: com.stratum.engine.scene.SplatMode? = null,
     /** Prop blocks drawn as 3D models instead of sprites, by block id. */
     val propModels: Map<String, com.stratum.engine.scene.PropModel> = emptyMap(),
     /** Things in flight, burning ground and wind-ups, drawn as the 2D canvas draws them. */
@@ -141,8 +143,8 @@ fun Scene3DView(
     }
 
     // Keyed on the detail source too: a fresh world brings a new one, and the old one's meshes must go with it.
-    val builder = remember(input.director, library, settings, input.propModels, input.microTerrain) {
-        SceneBuilder(input.director, library, input.biomeAt, settings = settings, propModels = input.propModels::get, microTerrain = input.microTerrain)
+    val builder = remember(input.director, library, settings, input.terrain, input.propModels, input.microTerrain) {
+        SceneBuilder(input.director, library, input.biomeAt, settings = settings.withTerrain(input.terrain), propModels = input.propModels::get, microTerrain = input.microTerrain)
     }
     val theatre = remember(input.director) { CombatTheatre(input.director) }
     theatre.update(input)

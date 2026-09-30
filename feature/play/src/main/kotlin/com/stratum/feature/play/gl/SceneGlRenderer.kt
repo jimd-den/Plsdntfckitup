@@ -462,6 +462,9 @@ class SceneGlRenderer(
         else GLES30.glUniform4f(loc(p, "uReveal"), 0f, 0f, 0f, 0f)
         GLES30.glUniform1f(loc(p, "uPixelsPerUnit"), sceneHeight * frame.camera.projection[5] / 2f)
         GLES30.glUniform2f(loc(p, "uViewport"), sceneWidth.toFloat(), sceneHeight.toFloat())
+        // The land's lamps are baked into the splats; shade only the lights that move.
+        GLES30.glUniform1i(loc(p, "uLightCount"), minOf(frame.dynamicLights, frame.lights.size, SceneFrame.MAX_LIGHTS, settings.maxPointLights))
+        GLES30.glUniform1f(loc(p, "uLampGain"), frame.lighting.pointLightGain)
         if (exact) {
             android.opengl.Matrix.invertM(inverseViewProj, 0, frame.camera.viewProjection, 0)
             matrix(p, "uInverseViewProj", inverseViewProj)

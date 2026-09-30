@@ -183,6 +183,7 @@ fun PlayScreen(
         onToggle3D = viewModel::toggle3D,
         onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
+        onChooseTerrain = viewModel::chooseTerrain,
         onChooseMasks = viewModel::chooseMaskCharacters,
         onOpenMenu = onOpenMenu,
         onCraft = viewModel::craft,
@@ -238,6 +239,7 @@ fun PlayScreenContent(
     onToggle3D: () -> Unit = {},
     onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
+    onChooseTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     onChooseMasks: (Boolean) -> Unit = {},
     onOpenMenu: () -> Unit = {},
     onCraft: (String) -> Unit = {},
@@ -292,6 +294,7 @@ fun PlayScreenContent(
                     kit = state.kit,
                     kitOverlays = state.kitOverlays,
                     quality = state.quality,
+                    terrain = state.terrain,
                     time = state.worldTime,
                     biomeAt = state.biomeAt,
                     microTerrain = state.microTerrain,
@@ -398,6 +401,7 @@ fun PlayScreenContent(
                 onClose = onToggleStyle,
                 onForge = onForgeStyle,
                 onChooseQuality = onChooseQuality,
+                onChooseTerrain = onChooseTerrain,
                 onChooseMasks = onChooseMasks,
             )
         }
