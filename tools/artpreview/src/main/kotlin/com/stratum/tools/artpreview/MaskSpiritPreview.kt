@@ -52,6 +52,8 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "vector") vectorMasks(out)
         if (only == null || only == "all" || only == "emojimask") emojiMasks(out)
         if (only == null || only == "all" || only == "shapemask") shapeMasks(out)
+        if (only == "sculpt") sculptedMasks(out)
+        if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
     }
 
     private fun turntables(out: File) {
@@ -117,6 +119,164 @@ object MaskSpiritPreview {
      * Igbo masks as emoji: the carvers' masks smiling, one mask through
      * twenty feelings, another through the same, a turn, and fresh rolls.
      */
+    // ---- sculpted masks -----------------------------------------------------------------------
+
+    /**
+     * The sculpted masks: every tradition carved and seen from the game's
+     * isometric camera, close portraits, a turn, fresh carvings, a war party
+     * on the ground, and the masks alive -- hovering, striking, spinning,
+     * casting, reeling and falling -- driven by the game's own motion.
+     */
+    private fun sculptedMasks(out: File, animations: Boolean = true, quick: Boolean = false) {
+        val culture = com.stratum.engine.model.mask.sculpt.MaskCulture
+        val sculptor = com.stratum.engine.model.mask.sculpt.MaskSculptor
+        val detail = if (quick) com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.HIGH else com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.SHOWCASE
+        val masks = culture.traditions.map { tr ->
+            val spec = culture.generate(tr, 11L)
+            val t0 = System.nanoTime()
+            val mesh = sculptor.carve(spec, detail)
+            println("${tr.name} (${tr.people}): ${mesh.triangleCount} triangles, carved in ${(System.nanoTime() - t0) / 1_000_000} ms")
+            Triple(tr, spec, mesh)
+        }
+        // The gallery, from the game's camera.
+        val cards = masks.map { (tr, _, mesh) -> val (tz, dist) = framing(mesh, 4.4f); labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.35f)), 320, 380, distance = dist, target = Vec3(0f, 0f, tz)), "${tr.name} · ${tr.people}") }
+        ImageIO.write(sheet(cards, 4), "png", File(out, "sculpt-traditions.png"))
+        // Close portraits, three-quarter, low.
+        val portraits = masks.take(8).map { (tr, _, mesh) -> val (tz, dist) = framing(mesh, 3.2f); labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.5f)), 360, 440, distance = dist, pitch = 14f, target = Vec3(0f, 0f, tz)), tr.name) }
+        ImageIO.write(sheet(portraits, 4), "png", File(out, "sculpt-portraits.png"))
+        // One mask turning.
+        val hero = masks.first { it.first.id == "mgbedike" }.third
+        val turn = listOf(-1.2f, -0.6f, 0f, 0.6f, 1.2f, 2.2f).map { yaw -> isoScene(listOf(single(hero, 0f, 0f, yaw)), 280, 340, distance = 3.9f, pitch = 20f) }
+        ImageIO.write(strip(turn, "Mgbedike turning: carved horns, tube eyes lit from inside, bared teeth, raffia"), "png", File(out, "sculpt-turn.png"))
+        // Fresh carvings: each tradition's grammar rolled again, and two mixed.
+        val rolls = (0 until 12).map { i ->
+            val tr = culture.traditions[(i * 5) % culture.traditions.size]
+            val spec = if (i % 4 == 3) culture.blend(tr, culture.traditions[(i * 3 + 1) % culture.traditions.size], 100L + i) else culture.generate(tr, 100L + i)
+            val mesh = sculptor.carve(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.HIGH)
+            val (tz, dist) = framing(mesh, 4.4f)
+            labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.4f)), 300, 360, distance = dist, target = Vec3(0f, 0f, tz)), "${spec.name} #${i + 1}")
+        }
+        ImageIO.write(sheet(rolls, 4), "png", File(out, "sculpt-rolls.png"))
+        // A war party on the ground, as the game's camera sees a fight.
+        val party = masks.filter { it.first.id in setOf("mgbedike", "agbogho_mmuo", "ikenga", "ijele", "okoroshi", "ogbodo_enyi", "songye", "bwa") }
+        val spots = listOf(0f to 0f, -2.2f to 1.2f, 2.1f to 1.0f, -1.1f to 3.0f, 1.3f to 3.2f, -3.3f to -1.2f, 3.4f to -1.0f, 0.2f to -2.6f)
+        val scene = party.mapIndexed { i, (_, _, mesh) -> single(mesh, spots[i].first, spots[i].second, 0.3f + i * 0.2f) }
+        ImageIO.write(labelled(isoScene(scene, 1280, 800, distance = 16f, target = Vec3(0f, 0.5f, 1f)), "A war party of spirits, from the game's camera"), "png", File(out, "sculpt-party.png"))
+        // Alive.
+        if (animations) animate(out, masks)
+    }
+
+    private var TILT = 0.35f
+
+    /** Where to aim and how far back to stand so the whole mask, crown and all, fills the card. */
+    private fun framing(mesh: SpiritMesh, base: Float): Pair<Float, Float> {
+        var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+        for (i in 0 until mesh.vertexCount) { val z = mesh.positions[i * 3 + 2]; lo = kotlin.math.min(lo, z); hi = kotlin.math.max(hi, z) }
+        val k = 1.5f
+        val mid = 1.1f + (lo + hi) / 2f * k
+        val tall = (hi - lo) * k
+        return mid to (base * kotlin.math.max(1f, tall / 1.2f))
+    }
+
+    /** One mask standing at (x, y) facing [yaw], hovering a block up. */
+    private fun single(mesh: SpiritMesh, x: Float, y: Float, yaw: Float): SpiritInstance = SpiritInstance(mesh).also {
+        it.pose.x = x; it.pose.y = y; it.pose.z = 1.1f; it.pose.yaw = yaw; it.pose.scale = 1.5f; it.pose.glow = 0.35f; it.pose.eyes = 0.3f; it.pose.lines = 0.2f
+        // Tipped back toward the camera above, as a floating mask presents its face in an isometric view.
+        it.pose.pitch = TILT
+    }
+
+    /**
+     * Masks over a stretch of dark earth, from above at the game's own
+     * elevation (or [pitch]), lit by a low sun with shadows.
+     */
+    private fun isoScene(
+        spirits: List<SpiritInstance>, width: Int, height: Int, distance: Float, pitch: Float = com.stratum.core.domain.ai.IsometricCamera.SCENE_ELEVATION_DEGREES.toFloat(),
+        target: Vec3 = Vec3(0f, 0f, 1.15f),
+    ): BufferedImage {
+        val camera = SceneCamera(target = target, pitch = pitch, yaw = 270f, distance = distance, fovY = 30f, aspect = width.toFloat() / height, near = 0.5f, far = 60f)
+        val base = director.lightingFor(null, WorldTime(dayFraction = 0.36f))
+        val sx = 0.5f; val sy = 0.35f; val sz = 0.8f
+        val l = kotlin.math.sqrt(sx * sx + sy * sy + sz * sz)
+        val lighting = base.copy(
+            sunX = sx / l, sunY = sy / l, sunZ = sz / l, fogStart = 100f, fogEnd = 200f, fogFloor = -100f,
+            skyTop = 0xFF1A1512, skyBottom = 0xFF2A211B, vignette = 0.35f, shadowStrength = 0.7f,
+            sunIntensity = base.sunIntensity * 1.35f, rimStrength = base.rimStrength * 0.6f,
+        )
+        val solid = MeshBuilder(MaterialKind.OPAQUE); val fading = MeshBuilder(MaterialKind.CUTOUT); val glows = MeshBuilder(MaterialKind.GLOW)
+        // The ground: packed laterite, darker toward the edge.
+        val n = 24; val span = 14f
+        val grid = Array(n + 1) { i -> IntArray(n + 1) { j ->
+            val x = -span + 2 * span * i / n; val y = -span + 2 * span * j / n
+            val fall = (1f - kotlin.math.sqrt(x * x + y * y) / (span * 1.1f)).coerceIn(0f, 1f)
+            val grain = ((kotlin.math.sin(x * 3.1f) * kotlin.math.cos(y * 2.7f) + 1f) * 0.04f)
+            val r = (34 + 38 * fall + 160 * grain).toInt().coerceIn(0, 255); val g = (24 + 22 * fall + 110 * grain).toInt().coerceIn(0, 255); val b = (20 + 12 * fall).toInt()
+            solid.vertex(x, y, 0f, 0f, 0f, 1f, ((r.toLong() shl 16) or (g.toLong() shl 8) or b.toLong()), 1f, 0f, 0f, com.stratum.engine.scene.Vertex.ACTOR)
+        } }
+        for (i in 0 until n) for (j in 0 until n) solid.quad(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
+        val lights = ArrayList<PointLight>()
+        SpiritStage(sticker = false).draw(spirits, camera, solid, fading, glows, lights)
+        val recycler = MeshRecycler()
+        val frame = SceneFrame(
+            camera = camera, lighting = lighting, lights = lights,
+            shadowViewProjection = sunMatrix(lighting, target, distance * 0.6f + 2f),
+            terrain = emptyList(), actors = solid.build(recycler), cutout = fading.build(recycler),
+            decals = MeshBuilder(MaterialKind.DECAL).build(recycler), glows = glows.build(recycler),
+        )
+        return SceneRasterizer(width, height, TextureLibrary(), supersample = 3, shadowSize = 2048).render(frame)
+    }
+
+    private fun labelled(img: BufferedImage, label: String): BufferedImage {
+        val out = BufferedImage(img.width, img.height + 28, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.color = Color(0x16, 0x12, 0x10); g.fillRect(0, 0, out.width, out.height)
+        g.drawImage(img, 0, 0, null)
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g.color = Color(0xE8, 0xDC, 0xC8); g.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
+        g.drawString(label, 10, img.height + 19)
+        g.dispose()
+        return out
+    }
+
+    /**
+     * The masks alive, through the game's own motion: each clip runs a mask's
+     * body through the motion bank at 30 frames a second and takes frames.
+     */
+    private fun animate(out: File, masks: List<Triple<com.stratum.engine.model.mask.sculpt.Tradition, com.stratum.engine.model.mask.sculpt.MaskSpec, SpiritMesh>>) {
+        fun meshOf(id: String) = masks.first { it.first.id == id }
+        class Clip(val id: String, val title: String, val length: Float, val frames: Int, val act: (com.stratum.core.domain.motion.MotionBody, Float, Float) -> Unit)
+        val clips = listOf(
+            Clip("agbogho_mmuo", "Agbogho Mmuo at rest: hovering, breathing, the eyes' light pulsing", 3.2f, 7) { _, _, _ -> },
+            Clip("mgbedike", "Mgbedike strikes: wind-up, lunge, recoil, raffia whipping", 1.2f, 7) { b, t, p -> if (p < 0.4f && t >= 0.4f) b.strike(1.2f, com.stratum.core.domain.motion.StrikeStyle.LUNGE) },
+            Clip("okoroshi", "Okoroshi whirls: a spinning strike, fringe flying out", 1.4f, 7) { b, t, p -> if (p < 0.2f && t >= 0.2f) b.strike(1f, com.stratum.core.domain.motion.StrikeStyle.SPIN) },
+            Clip("ikenga", "Ikenga butts: rears back and drives the horns down", 1.3f, 7) { b, t, p -> if (p < 0.2f && t >= 0.2f) b.strike(1.2f, com.stratum.core.domain.motion.StrikeStyle.HEADBUTT) },
+            Clip("ijele", "Ijele calls on its power: rises and flares", 1.6f, 7) { b, t, p -> if (p < 0.2f && t >= 0.2f) b.cast() },
+            Clip("ogbodo_enyi", "Ogbodo Enyi is struck: it reels and shudders", 1.2f, 7) { b, t, p -> if (p < 0.25f && t >= 0.25f) { b.hit(2f, 0f, 1.4f); b.crit() } },
+            Clip("songye", "Kifwebe falls: struck down, it drops and fades", 1.6f, 7) { b, t, p -> if (p < 0.2f && t >= 0.2f) b.die() },
+        )
+        for ((c, clip) in clips.withIndex()) {
+            val (tr, _, mesh) = meshOf(clip.id)
+            val profile = com.stratum.core.domain.motion.MotionProfiles.resolve(tr.motion)
+            val cast = com.stratum.engine.scene.MaskCast()
+            val dt = 1f / 30f
+            val shots = ArrayList<BufferedImage>()
+            val every = (clip.length / dt / clip.frames).toInt().coerceAtLeast(1)
+            var t = 0f; var prev = -1f; var step = 0
+            // Settle first, so the hover and fringe are in their stride.
+            repeat(45) { cast.begin(); cast.track("m", mesh, profile, 0f, 0f, 0f, 0.34f, 0.94f, spawning = false); cast.advance(dt) }
+            while (t < clip.length) {
+                cast.begin()
+                val body = cast.track("m", mesh, profile, 0f, 0f, 0f, 0.34f, 0.94f, spawning = false)
+                if (body != null) { body.aim(1.1f, 3f, 1f); clip.act(body, t, prev) }
+                cast.advance(dt)
+                // Tipped toward the camera above, as the stills are.
+                cast.spirits.forEach { it.pose.pitch += TILT }
+                if (step % every == 0 && shots.size < clip.frames) shots += isoScene(cast.spirits.toList(), 240, 300, distance = 5.4f, target = Vec3(0f, 0f, 1.25f))
+                prev = t; t += dt; step++
+            }
+            ImageIO.write(strip(shots, clip.title), "png", File(out, "sculpt-anim-${c + 1}-${clip.id}.png"))
+        }
+    }
+
     /** Masks built from flat shapes: the set, how one is built layer by layer, its feelings, a turn, rolls. */
     private fun shapeMasks(out: File) {
         val sm = com.stratum.engine.model.mask.ShapeMask
