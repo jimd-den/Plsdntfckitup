@@ -26,6 +26,8 @@ import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
+import com.stratum.engine.model.mask.AfricanMaskArt.Nudge
+import com.stratum.engine.model.mask.AfricanMaskArt.Part
 
 /**
  * Mask spirits through the game's own scene pipeline: turntables of every
@@ -46,6 +48,8 @@ object MaskSpiritPreview {
         if (only == null || only == "all" || only == "world") MaskSpiritShots.fight(out)
         if (only == null || only == "all" || only == "emoji") emoji(out)
         if (only == null || only == "all" || only == "stickers") stickers(out)
+        if (only == null || only == "all" || only == "builder") builder(out)
+        if (only == null || only == "all" || only == "vector") vectorMasks(out)
     }
 
     private fun turntables(out: File) {
@@ -102,6 +106,73 @@ object MaskSpiritPreview {
         ImageIO.write(strip(turn, "${g.name} · Wink, turning: a drawn face on a 3D mask"), "png", File(out, "emoji-turn.png"))
     }
 
+    /**
+     * African mask art as vector layers hung on a plain oval: a sheet of
+     * generated masks, one turning, and one animating (raffia swaying, crown
+     * bobbing, a blink).
+     */
+    private fun vectorMasks(out: File) {
+        val art = com.stratum.engine.model.mask.AfricanMaskArt
+        val designs = (1..18).map { art.generate(it * 7919L, "Mask $it") }
+        val cards = designs.map { d ->
+            val mesh = art.head(d)
+            val f = art.features(d, mesh.face!!, time = 0.6f)
+            caption(studio(mesh, 280, 360, f, sticker = false, shadows = 0.2f) { it.yaw = 0.18f; it.glow = 0.5f; it.eyes = 0.3f; it.scale = 1.3f },
+                "${d.colours.name} · ${d.silhouette.label}")
+        }
+        ImageIO.write(sheet(cards, 6), "png", File(out, "vector-masks.png"))
+        // The liveliest one: the most pieces that move.
+        val d = designs.maxBy { x ->
+            (if (x.crown != com.stratum.engine.model.mask.AfricanMaskArt.Crown.NONE) 2 else 0) +
+                (if (x.hanging != com.stratum.engine.model.mask.AfricanMaskArt.Hanging.NONE) 2 else 0) +
+                (if (x.sides != com.stratum.engine.model.mask.AfricanMaskArt.Sides.NONE) 1 else 0) + x.motion +
+                (if (x.colours.name in setOf("Kaolin", "Ochre", "Brass", "Jade")) 3 else 0)
+        }
+        val mesh = art.head(d)
+        val turn = listOf(-1.0f, -0.5f, 0f, 0.5f, 1.0f).map { yaw -> studio(mesh, 260, 340, art.features(d, mesh.face!!, 0.6f), sticker = false, shadows = 0.2f) { it.yaw = yaw; it.glow = 0.5f; it.scale = 1.3f } }
+        ImageIO.write(strip(turn, "${d.name} turning: a painted head, the pieces floating in front of it"), "png", File(out, "vector-turn.png"))
+        val frames = listOf(0.2f, 0.75f, 1.3f, 1.85f, 2.4f, 2.95f).map { tt -> studio(mesh, 230, 310, art.features(d, mesh.face!!, tt), sticker = false, shadows = 0.2f) { it.yaw = 0.15f; it.glow = 0.5f; it.scale = 1.3f } }
+        ImageIO.write(strip(frames, "${d.name} animating: every piece moves on its own"), "png", File(out, "vector-anim.png"))
+        // The pieces are parts: pulled apart, then re-placed by hand.
+        val exploded = d.copy(nudges = mapOf(
+            Part.CROWN to Nudge(0f, 0.45f, 1f, 0f), Part.HANGING to Nudge(0f, -0.4f, 1f, 0f), Part.EYES to Nudge(0f, 0.08f, 1f, 0f),
+            Part.MOUTH to Nudge(0f, -0.14f, 1f, 0f), Part.BROWS to Nudge(0f, 0.2f, 1f, 0f), Part.SIDES to Nudge(0f, 0f, 1.25f, 0f), Part.NOSE to Nudge(0f, -0.05f, 1f, 0f),
+        ))
+        val edited = d.copy(nudges = mapOf(
+            Part.CROWN to Nudge(0.05f, 0f, 0.8f, -0.25f), Part.EYES to Nudge(0f, 0f, 1.3f, 0f), Part.MOUTH to Nudge(0f, 0.05f, 1.4f, 0f),
+            Part.BROWS to Nudge(0f, 0.04f, 1f, 0.12f),
+        ))
+        val views = listOf(d to "As generated", exploded to "Pulled apart", edited to "Re-placed by hand").map { (x, label) ->
+            caption(studio(mesh, 320, 400, art.features(x, mesh.face!!, 0.6f), sticker = false, shadows = 0.2f) { it.yaw = 0.25f; it.glow = 0.5f; it.scale = 1.15f }, label)
+        }
+        ImageIO.write(sheet(views, 3), "png", File(out, "vector-parts.png"))
+        designs.forEach { println("${it.name}: ${it.colours.name}, ${it.silhouette.label}, ${it.eyes.label}, ${it.brows.label}, ${it.mouth.label}, marks ${it.marks.map { m -> m.label }}, paint ${it.paint.map { p -> p.label }}, uli ${it.uli.map { u -> u.label }}, ${it.crown.label}, ${it.hanging.label}, ${it.sides.label}") }
+    }
+
+    /**
+     * The mask builder's examples: oval spirit heads carrying nothing but
+     * African mask art, each from the builder's dials alone; a sheet of all
+     * of them, a turn of a few, and a sheet of fresh rolls, one per tradition.
+     */
+    private fun builder(out: File) {
+        val examples = com.stratum.engine.model.mask.AfricanMaskBuilder.examples
+        val cards = examples.map { g ->
+            val mesh = MaskSpiritMesher.build(g)
+            caption(studio(mesh, 280, 330) { it.yaw = 0.3f; it.glow = 0.55f; it.eyes = 0.25f }, g.name)
+        }
+        ImageIO.write(sheet(cards, 6), "png", File(out, "builder-examples.png"))
+        for (g in examples.take(3)) {
+            val mesh = MaskSpiritMesher.build(g)
+            val views = listOf(-1.0f, -0.5f, 0f, 0.5f, 1.0f).map { yaw -> studio(mesh, 260, 310) { it.yaw = yaw; it.glow = 0.55f; it.eyes = 0.25f } }
+            ImageIO.write(strip(views, "${g.name} · turning"), "png", File(out, "builder-turn-${slug(g.name)}.png"))
+        }
+        val rolls = com.stratum.engine.model.mask.MaskTradition.entries.flatMap { t ->
+            (1..2).map { k -> com.stratum.engine.model.mask.AfricanMaskBuilder.roll(t.ordinal * 101L + k * 7L, t).copy(name = t.label) }
+        }
+        ImageIO.write(sheet(rolls.map { g -> caption(studio(MaskSpiritMesher.build(g), 240, 290) { it.yaw = 0.3f; it.glow = 0.55f; it.eyes = 0.25f }, "Rolled · ${g.name}") }, 7), "png", File(out, "builder-rolls.png"))
+        println("wrote builder examples")
+    }
+
     /** The Igbo emoji set as a sticker sheet, each in its own feeling, and each one showing every feeling. */
     private fun stickers(out: File) {
         val cards = com.stratum.engine.model.mask.IgboEmoji.set.map { e ->
@@ -143,6 +214,8 @@ object MaskSpiritPreview {
     fun studio(
         mesh: SpiritMesh, width: Int, height: Int, features: com.stratum.engine.scene.SpiritFeatures? = null,
         sunny: Boolean = false,
+        sticker: Boolean = true,
+        shadows: Float = -1f,
         setup: (com.stratum.engine.scene.SpiritPose) -> Unit,
     ): BufferedImage {
         val spirit = SpiritInstance(mesh)
@@ -150,10 +223,10 @@ object MaskSpiritPreview {
         spirit.pose.scale = 2.1f
         setup(spirit.pose)
         val camera = SceneCamera(target = Vec3(0f, 0f, 0f), pitch = 8f, yaw = 270f, distance = 6f, fovY = 26f, aspect = width.toFloat() / height, near = 1f, far = 30f)
-        val lighting = if (sunny) sunnyLight() else studioLight()
+        val lighting = (if (sunny) sunnyLight() else studioLight()).let { if (shadows >= 0f) it.copy(shadowStrength = shadows) else it }
         val solid = MeshBuilder(MaterialKind.OPAQUE); val fading = MeshBuilder(MaterialKind.CUTOUT); val glows = MeshBuilder(MaterialKind.GLOW)
         val lights = ArrayList<PointLight>()
-        SpiritStage().draw(listOf(spirit), camera, solid, fading, glows, lights)
+        SpiritStage(sticker = sticker).draw(listOf(spirit), camera, solid, fading, glows, lights)
         val recycler = MeshRecycler()
         val frame = SceneFrame(
             camera = camera, lighting = lighting, lights = lights,
