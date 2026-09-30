@@ -73,7 +73,18 @@ class MaskCharacters(
     var heroGenome: MaskGenome = CharacterMasks.DEFAULT_HERO
         set(value) { if (field != value) { field = value; heroMesh = null } }
 
+    /**
+     * The hero's mask when it was made in the mask maker: a painted head with
+     * floating pieces that move on their own. Wins over [heroGenome] while set.
+     */
+    var heroArt: AfricanMaskArt.Design? = null
+        set(value) { if (field != value) { field = value; heroMesh = null; heroPieces = null } }
+
     private var heroMesh: SpiritMesh? = null
+    private var heroId: String? = null
+    private var heroPieces: com.stratum.engine.scene.SpiritFeatures? = null
+    private var piecesClock = 0f
+    private var piecesAt = -1f
     private var heroProfile: MotionProfile? = null
     private var heroProfileFor: MaskGenome? = null
 
@@ -113,7 +124,8 @@ class MaskCharacters(
         state: AnimationState = AnimationState.IDLE, flash: Float = 0f, impact: Float = 0f,
         aimX: Float = Float.NaN, aimY: Float = Float.NaN,
     ): MotionBody? {
-        val mesh = heroMesh ?: MaskSpiritMesher.cached(heroGenome, MaskSpiritMesher.COMPANION_BUDGET).also { heroMesh = it }
+        heroId = id
+        val mesh = heroMesh ?: (heroArt?.let { AfricanMaskArt.head(it) } ?: MaskSpiritMesher.cached(heroGenome, MaskSpiritMesher.COMPANION_BUDGET)).also { heroMesh = it }
         if (heroProfileFor != heroGenome) {
             heroProfile = MotionProfiles.resolve(CharacterMasks.profileIdFor(heroGenome), profileOverrides)
             heroProfileFor = heroGenome
@@ -167,8 +179,27 @@ class MaskCharacters(
     /** Springs, layers and fringes forward by [dt] seconds; any [dt] is safe. */
     fun advance(dt: Float) {
         cast.advance(dt)
+        dressHero(dt)
         // Forget signals of characters gone a while, so the map is as small as the screen.
         if (frame % FORGET_EVERY == 0) signals.values.removeAll { frame - it.seen > FORGET_EVERY }
+    }
+
+    /**
+     * A mask-maker hero's floating pieces, redrawn [PIECES_RATE] times a
+     * second -- often enough for blinks and swings, rarely enough to cost
+     * nothing. Every other spirit is kept free of pieces, as slots are reused.
+     */
+    private fun dressHero(dt: Float) {
+        val art = heroArt
+        val face = heroMesh?.face
+        if (art != null && face != null) {
+            piecesClock += if (dt.isFinite()) dt.coerceIn(0f, 0.25f) else 0f
+            if (heroPieces == null || piecesClock - piecesAt >= 1f / PIECES_RATE) {
+                heroPieces = AfricanMaskArt.features(art, face, piecesClock)
+                piecesAt = piecesClock
+            }
+        }
+        for (spirit in cast.spirits) spirit.features = if (art != null && spirit.id == heroId) heroPieces else null
     }
 
     fun clear() {
@@ -265,6 +296,9 @@ class MaskCharacters(
     }
 
     companion object {
+        /** How many times a second a mask-maker hero's floating pieces are redrawn. */
+        const val PIECES_RATE = 20f
+
         /** A flash has to jump by this much in a frame to count as a new blow. */
         const val FLASH_EDGE = 0.25f
 

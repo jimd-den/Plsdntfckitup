@@ -1,5 +1,6 @@
 package com.stratum.feature.play.gl
 
+import com.stratum.engine.model.mask.AfricanMaskCodec
 import com.stratum.engine.model.mask.CharacterMasks
 import com.stratum.engine.model.mask.MaskCharacters
 import com.stratum.engine.model.mask.MaskCodec
@@ -50,7 +51,11 @@ internal class MaskTheatre(looks: MaskLooks) {
 
         if (input.heroMask != heroCode) {
             heroCode = input.heroMask
-            masks.heroGenome = input.heroMask?.let { MaskCodec.decode(it.removePrefix(MaskCodec.TAG_PREFIX), "Hero") } ?: CharacterMasks.DEFAULT_HERO
+            // A mask from the mask maker, or an older sculpted mask's genome code.
+            val art = input.heroMask?.takeIf(AfricanMaskCodec::isCode)?.let { AfricanMaskCodec.decode(it, "Hero") }
+            masks.heroArt = art
+            masks.heroGenome = if (art != null) CharacterMasks.DEFAULT_HERO
+            else input.heroMask?.let { MaskCodec.decode(it.removePrefix(MaskCodec.TAG_PREFIX), "Hero") } ?: CharacterMasks.DEFAULT_HERO
         }
 
         masks.begin()

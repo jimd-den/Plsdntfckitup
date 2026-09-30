@@ -10,6 +10,7 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -90,6 +91,32 @@ object AfricanMaskArt {
     /** A builder's hand on one [Part]: moved by ([dx], [dy]) face units, scaled, turned by [angle] radians. */
     data class Nudge(val dx: Float = 0f, val dy: Float = 0f, val scale: Float = 1f, val angle: Float = 0f)
 
+    /** A pigment a player can paint any of the five colour slots with. */
+    class Pigment(val name: String, val rgb: Int)
+
+    /** The pigments of the masks: clays, earths, soot, dyes, stones and metal. */
+    val PIGMENTS: List<Pigment> = listOf(
+        Pigment("Kaolin", c(0xF1ECE2)), Pigment("Bone", c(0xE3D6BC)), Pigment("Ochre", c(0xD99A2B)), Pigment("Gold", c(0xE3B044)),
+        Pigment("Camwood", c(0x8E2C2F)), Pigment("Vermilion", c(0xB3322B)), Pigment("Terracotta", c(0xB85A36)), Pigment("Umber", c(0x5A3A26)),
+        Pigment("Charcoal", c(0x24211F)), Pigment("Lampblack", c(0x1C1212)), Pigment("Indigo", c(0x263B6E)), Pigment("Lapis", c(0x2F3A6B)),
+        Pigment("Jade", c(0x3E7F6E)), Pigment("Malachite", c(0x2A5A4A)), Pigment("Brass", c(0xC8943C)), Pigment("Coral", c(0xE0705A)),
+    )
+
+    /** The five colour slots, in the order [Design.pigments] holds them. */
+    val SLOTS: List<String> = listOf("Ground", "Ink", "Colour 1", "Colour 2", "Colour 3")
+
+    /** Proportions: each 0..1, 0.5 as the mask is drawn by default. */
+    enum class Dial(val label: String) {
+        EYE_SIZE("Eye size"), EYE_SPREAD("Eye spacing"), EYE_TILT("Eye tilt"), BROW_HEIGHT("Brow height"),
+        MOUTH_SIZE("Mouth size"), CROWN_SIZE("Crown size"), HANG_LENGTH("Hanging length"), ORNAMENT("Ornament count"),
+    }
+
+    /** What a roll can keep: a locked trait survives [reroll]; [variations] change one or two unlocked ones. */
+    enum class Trait(val label: String) {
+        SHAPE("Shape"), COLOURS("Colours"), EYES("Eyes"), BROWS("Brows"), NOSE("Nose"), MOUTH("Mouth"), MARKS("Marks"),
+        PAINT("Paint"), ULI("Uli"), CROWN("Crown"), HANGING("Hanging"), SIDES("Sides"), PROPORTIONS("Proportions"),
+    }
+
     /** Every choice a mask is made of: what the builder edits and the generator rolls. */
     data class Design(
         val name: String,
@@ -111,8 +138,17 @@ object AfricanMaskArt {
         /** 0 still, 1 lively: how much the pieces move. */
         val motion: Float = 0.7f,
         val nudges: Map<Part, Nudge> = emptyMap(),
+        /** Five [PIGMENTS] indices -- ground, ink, three colours -- over the [scheme], when chosen by hand. */
+        val pigments: List<Int>? = null,
+        /** Proportions off their defaults; a missing dial is 0.5. */
+        val dials: Map<Dial, Float> = emptyMap(),
     ) {
-        val colours: Scheme get() = schemes[Math.floorMod(scheme, schemes.size)]
+        val colours: Scheme get() = pigments?.takeIf { it.size == 5 }?.let { p ->
+            fun at(i: Int) = PIGMENTS[Math.floorMod(p[i], PIGMENTS.size)].rgb
+            Scheme("Your own", at(0), at(1), at(2), at(3), at(4))
+        } ?: schemes[Math.floorMod(scheme, schemes.size)]
+
+        fun dial(x: Dial): Float = (dials[x] ?: 0.5f).coerceIn(0f, 1f)
     }
 
     /** A mask from [seed]: the same seed, the same mask. */
@@ -121,7 +157,7 @@ object AfricanMaskArt {
         fun <T> one(xs: List<T>): T = xs[r.nextInt(xs.size)]
         fun <T> some(xs: List<T>, most: Int): List<T> = xs.shuffled(r).take(r.nextInt(0, most + 1))
         val eyes = one(Eyes.entries)
-        return Design(
+        val design = Design(
             name = name,
             scheme = r.nextInt(schemes.size),
             // Half the masks keep the plain oval; the rest are built from more than one shape.
@@ -131,23 +167,95 @@ object AfricanMaskArt {
             brows = if (eyes == Eyes.TUBE) one(listOf(Brows.RIDGE, Brows.ARCH)) else one(Brows.entries),
             nose = one(listOf(Nose.WEDGE, Nose.WEDGE, Nose.BROAD, Nose.ARROW, Nose.NONE)),
             mouth = if (eyes == Eyes.TUBE) one(listOf(Mouth.TEETH, Mouth.TUBE)) else one(Mouth.entries),
-            marks = some(Mark.entries, 2),
-            paint = some(Paint.entries, 2),
-            uli = some(Uli.entries, 2),
+            marks = some(Mark.entries, 2).sorted(),
+            paint = some(Paint.entries, 2).sorted(),
+            uli = some(Uli.entries, 2).sorted(),
             crown = one(Crown.entries),
             hanging = one(listOf(Hanging.NONE, Hanging.RAFFIA, Hanging.RAFFIA, Hanging.BEADS, Hanging.BEARD, Hanging.TASSELS, Hanging.COWRIES)),
             sides = one(listOf(Sides.NONE, Sides.NONE, Sides.DISCS, Sides.LEAVES, Sides.RINGS)),
             symmetric = r.nextFloat() > 0.15f,
-            width = 0.2f + r.nextFloat() * 0.6f,
-            motion = 0.5f + r.nextFloat() * 0.5f,
+            width = quantise(0.2f + r.nextFloat() * 0.6f),
+            motion = quantise(0.5f + r.nextFloat() * 0.5f),
+        )
+        // Proportions wander round their defaults, on the steps a share code can hold.
+        val dials = Dial.entries.associateWith { quantise(0.5f + (r.nextFloat() - 0.5f) * 0.75f) }.filterValues { it != quantise(0.5f) }
+        // A third of the time, pigments of its own rather than a named scheme.
+        val pigments = if (r.nextFloat() < 0.35f) rollPigments(r) else null
+        return design.copy(dials = dials, pigments = pigments)
+    }
+
+    /** Five pigments that read: a ground, an ink that stands out on it, three distinct colours. */
+    private fun rollPigments(r: Random): List<Int> {
+        val ground = r.nextInt(PIGMENTS.size)
+        val light = luma(PIGMENTS[ground].rgb) > 0.45f
+        val inks = PIGMENTS.indices.filter { (luma(PIGMENTS[it].rgb) > 0.6f) != light && abs(luma(PIGMENTS[it].rgb) - luma(PIGMENTS[ground].rgb)) > 0.4f }
+        val ink = inks[r.nextInt(inks.size)]
+        val rest = PIGMENTS.indices.filter { it != ground && it != ink }.shuffled(r).take(3)
+        return listOf(ground, ink) + rest
+    }
+
+    /** [design] rolled again from [seed], keeping every trait in [locked]. The builder's nudges stay. */
+    fun reroll(design: Design, seed: Long, locked: Set<Trait> = emptySet()): Design {
+        val f = generate(seed, design.name)
+        fun <T> keep(t: Trait, mine: T, fresh: T): T = if (t in locked) mine else fresh
+        return f.copy(
+            scheme = keep(Trait.COLOURS, design.scheme, f.scheme), pigments = keep(Trait.COLOURS, design.pigments, f.pigments),
+            silhouette = keep(Trait.SHAPE, design.silhouette, f.silhouette), width = keep(Trait.SHAPE, design.width, f.width),
+            symmetric = keep(Trait.SHAPE, design.symmetric, f.symmetric),
+            eyes = keep(Trait.EYES, design.eyes, f.eyes), brows = keep(Trait.BROWS, design.brows, f.brows),
+            nose = keep(Trait.NOSE, design.nose, f.nose), mouth = keep(Trait.MOUTH, design.mouth, f.mouth),
+            marks = keep(Trait.MARKS, design.marks, f.marks), paint = keep(Trait.PAINT, design.paint, f.paint), uli = keep(Trait.ULI, design.uli, f.uli),
+            crown = keep(Trait.CROWN, design.crown, f.crown), hanging = keep(Trait.HANGING, design.hanging, f.hanging),
+            sides = keep(Trait.SIDES, design.sides, f.sides),
+            dials = keep(Trait.PROPORTIONS, design.dials, f.dials), motion = keep(Trait.PROPORTIONS, design.motion, f.motion),
+            nudges = design.nudges,
         )
     }
+
+    /** [count] masks like [design]: each changes one or two of its traits not in [locked], so browsing never loses it. */
+    fun variations(design: Design, seed: Long, count: Int, locked: Set<Trait> = emptySet()): List<Design> {
+        val open = Trait.entries.filter { it !in locked }
+        if (open.isEmpty()) return List(count) { design }
+        return List(count) { i ->
+            val r = Random(seed * 1_000_003L + i)
+            val change = open.shuffled(r).take(1 + r.nextInt(2)).toSet()
+            reroll(design, seed * 7919L + i * 104_729L + 1, locked = Trait.entries.toSet() - change)
+        }
+    }
+
+    /**
+     * How many different masks the choices make, before any slider or hand
+     * placement -- the dials and nudges multiply it past counting.
+     */
+    fun choices(): java.math.BigInteger {
+        fun b(n: Int) = java.math.BigInteger.valueOf(n.toLong())
+        val colours = b(schemes.size) + b(PIGMENTS.size).pow(5)
+        return listOf(
+            b(Silhouette.entries.size), b(2), colours, b(Eyes.entries.size), b(Brows.entries.size), b(Nose.entries.size),
+            b(Mouth.entries.size), b(1 shl Mark.entries.size), b(1 shl Paint.entries.size), b(1 shl Uli.entries.size),
+            b(Crown.entries.size), b(Hanging.entries.size), b(Sides.entries.size),
+        ).reduce(java.math.BigInteger::multiply)
+    }
+
+    /** The steps a dial moves in, so a share code holds it exactly. */
+    const val STEPS = 35
+
+    fun quantise(v: Float): Float = (v.coerceIn(0f, 1f) * STEPS).roundToInt() / STEPS.toFloat()
+
+    /** Where the eyes sit across, for the head's blush and the pieces alike. */
+    internal fun eyeSpread(d: Design, p: Profile): Float = p.hw(0.1f) * (0.36f + 0.16f * d.dial(Dial.EYE_SPREAD))
 
     /** The plain oval this design hangs on: an emoji head with nothing on it, in the scheme's ground colour. */
     fun oval(d: Design): MaskGenome = MaskGenome(
         name = d.name, width = d.width, crest = CrestForm.NONE, ears = EarForm.NONE, ornament = 0f, ichi = 0, cheekMarks = 0,
         palette = MaskPalettes.KAOLIN_INK,
     )
+
+    /** The head's mesh: rings from crown to chin, segments round. */
+    const val RINGS = 44
+    const val SEGMENTS = 48
+    /** The head's own triangles at the default mesh; its painted layers follow them. */
+    const val HEAD_TRIANGLES = RINGS * SEGMENTS * 2
 
     /** How deep the head is, front to back, at its widest: a mask's shallow dome, not a ball. */
     const val HEAD_DEPTH = 0.5f
@@ -231,7 +339,7 @@ object AfricanMaskArt {
      * front surface is kept ([SpiritFace]) for the floating pieces to hang
      * in front of. Face units: v up (chin about -1, crown about 1), u across.
      */
-    fun head(d: Design, rings: Int = 44, segments: Int = 48): SpiritMesh {
+    fun head(d: Design, rings: Int = RINGS, segments: Int = SEGMENTS): SpiritMesh {
         val p = Profile.of(d)
         val scale = HEAD_SCALE
         val s = d.colours
@@ -242,7 +350,7 @@ object AfricanMaskArt {
         val light = mix(s.base, c(0xFFF4E0), 0.32f)
         val shade = mix(s.base, c(0x2A1E3A), 0.5f)
         val blushC = mix(s.base, c(0xE0604A), 0.6f)
-        val ex = p.hw(0.1f) * 0.44f
+        val ex = eyeSpread(d, p)
         val ev = half * 2e-3f
         for (i in 0..rings) {
             val v = mid + half * cos(PI.toFloat() * i / rings)
@@ -310,11 +418,13 @@ object AfricanMaskArt {
     private class Painter(val d: Design, val face: SpiritFace, val t: Float, val burn: Float, val prof: Profile, val skin: Boolean) {
         val s = d.colours
         val w = prof.w
-        val ey = 0.1f; val ex = prof.hw(ey) * 0.44f; val my = -0.55f
+        val ey = 0.1f; val ex = eyeSpread(d, prof); val my = -0.55f
         val top = prof.vMax; val chin = prof.vMin
         val front = prof.front(0f, 0f) + 0.08f
         val m = d.motion.coerceIn(0f, 1f)
-        val pos = ArrayList<Float>(); val nrm = ArrayList<Float>(); val col = ArrayList<Int>(); val glw = ArrayList<Float>(); val idx = ArrayList<Int>()
+        fun dial(x: Dial) = d.dial(x)
+        val orn = d.dial(Dial.ORNAMENT)
+        val pos = FloatBuf(); val nrm = FloatBuf(); val col = IntBuf(); val glw = FloatBuf(); val idx = IntBuf()
         var depth = 0f
         var layer = 0
         // The current placement: x' = xa x + xb y + xtx, y' = xc x + xd y + xty.
@@ -343,8 +453,8 @@ object AfricanMaskArt {
         fun floating(): SpiritFeatures {
             if (d.crown == Crown.RAYS) part(Part.HALO, -0.35f - front, 0f, (top + chin) / 2f) { halo() }
             part(Part.SIDES, 0.02f, 0f, 0f) { sides() }
-            part(Part.HANGING, 0.03f, 0f, chin) { hanging() }
-            part(Part.CROWN, 0.04f, 0f, top) { crown() }
+            part(Part.HANGING, 0.03f, 0f, chin) { moved(0f, chin + 0.05f, sx = 1f, sy = 0.7f + 0.6f * dial(Dial.HANG_LENGTH)) { hanging() } }
+            part(Part.CROWN, 0.04f, 0f, top) { val k = 0.7f + 0.6f * dial(Dial.CROWN_SIZE); moved(0f, top - 0.1f, sx = k, sy = k) { crown() } }
             part(Part.NOSE, 0.05f, 0f, -0.1f) { nose() }
             part(Part.BROWS, 0.06f, 0f, ey + 0.2f) { brows() }
             part(Part.MOUTH, 0.07f, 0f, my) { mouth() }
@@ -598,10 +708,10 @@ object AfricanMaskArt {
                     for (i in 0..12) { pts += -half + 2 * half * i / 12f; pts += 0.6f + if (i % 2 == 0) 0.04f else -0.04f }
                     line(pts.toFloatArray(), s.ink, 0.026f, burn * 0.6f)
                 }
-                Uli.BORDER -> each(17) { k ->
-                    val v = chin + 0.14f + (top - chin - 0.28f) * k / 16f
+                Uli.BORDER -> { val n = 13 + (orn * 8).roundToInt(); each(n) { k ->
+                    val v = chin + 0.14f + (top - chin - 0.28f) * k / (n - 1f)
                     both { sx -> fillRaw(Shapes.ellipse(sx * hw(v) * 0.86f, v, 0.022f, 0.022f, 8), if (k % 2 == 0) s.ink else s.a2, burn * 0.5f) }
-                }
+                } }
                 Uli.ARCS -> for (k in 0 until 3) line(Shapes.quad(-0.22f + k * 0.04f, my - 0.14f - k * 0.05f, 0f, my - 0.26f - k * 0.05f, 0.22f - k * 0.04f, my - 0.14f - k * 0.05f, 10), s.ink, 0.022f, burn * 0.6f)
                 Uli.TRIANGLES -> {
                     val half = hw(0.5f) * 0.8f
@@ -631,7 +741,7 @@ object AfricanMaskArt {
 
         fun brows() {
             // The pair jumps together; each brow also tips up at its outer end.
-            moved(0f, ey + 0.2f, dy = browLift) {
+            moved(0f, ey + 0.2f, dy = browLift + (dial(Dial.BROW_HEIGHT) - 0.5f) * 0.16f) {
                 when (d.brows) {
                     Brows.NONE -> Unit
                     Brows.ARCH -> both { sx -> moved(sx * ex, ey + 0.2f, angle = -sx * browLift * 2f) { piece(Shapes.taper(sx * (ex - 0.22f), ey + 0.15f, sx * ex, ey + 0.32f, sx * (ex + 0.22f), ey + 0.16f, 0.07f, 0.02f, 14), s.ink) } }
@@ -674,7 +784,8 @@ object AfricanMaskArt {
             both { sx ->
                 val cx = sx * ex; val cy = ey
                 // A blink squashes the eye on its line; the glint looks about.
-                moved(cx, cy, sx = 1f, sy = open) {
+                val k = 0.75f + 0.5f * dial(Dial.EYE_SIZE)
+                moved(cx, cy, angle = -sx * (dial(Dial.EYE_TILT) - 0.5f) * 0.8f, sx = k, sy = k * open) {
                     when (d.eyes) {
                         Eyes.ALMOND -> {
                             piece(almond(cx, cy, 0.21f, 0.095f, sx), s.a1)
@@ -729,7 +840,8 @@ object AfricanMaskArt {
         }
 
         fun mouth() {
-            moved(0f, my, sx = 1f, sy = talk) {
+            val k = 0.75f + 0.5f * dial(Dial.MOUTH_SIZE)
+            moved(0f, my, sx = k, sy = k * talk) {
                 when (d.mouth) {
                     Mouth.LIPS -> {
                         val lip = if (s.base == s.a1) s.a2 else s.a1
@@ -754,7 +866,7 @@ object AfricanMaskArt {
 
         fun halo() {
             val cy = (top + chin) / 2f; val ry = (top - chin) / 2f * 1.04f; val rx = prof.widest * 1.04f
-            val n = 16
+            val n = 10 + (orn * 12).roundToInt()
             val spin = t * 0.25f * m
             val breathe = 1f + 0.08f * sin(t * 1.4f) * m
             each(n) { i ->
@@ -778,7 +890,8 @@ object AfricanMaskArt {
                     }
                 }
                 Crown.COMB -> moved(0f, top - 0.1f, dy = bob) {
-                    for (i in -2..2) {
+                    val blades = 1 + (orn * 2).roundToInt()
+                    for (i in -blades..blades) {
                         val a = i * 0.3f + sin(t * 2.2f + i) * 0.04f * m
                         val h = 0.52f - abs(i) * 0.07f
                         piece(rotated(Shapes.roundRect(-0.06f, top - 0.12f, 0.06f, top - 0.12f + h, 0.06f), 0f, top - 0.12f, a), if (i % 2 == 0) s.a3 else s.a2)
@@ -798,7 +911,7 @@ object AfricanMaskArt {
                     gem(star(0f, top + 0.4f, 0.03f, 0.08f, 5, t * 0.8f * m), s.a1, 0.3f)
                 }
                 Crown.FEATHERS -> {
-                    val n = 7
+                    val n = 5 + 2 * (orn * 2).roundToInt()
                     for (i in 0 until n) {
                         val base = (i - (n - 1) / 2f) * 0.28f
                         val a = base + sin(t * 2.6f + i * 0.9f) * 0.12f * m
@@ -810,12 +923,12 @@ object AfricanMaskArt {
                     }
                     gem(Shapes.ellipse(0f, top - 0.1f, 0.12f, 0.07f, 20), s.a2)
                 }
-                Crown.COWRIES -> each(7) { i ->
-                    val a = PI.toFloat() * (0.18f + 0.64f * i / 6f)
+                Crown.COWRIES -> { val n = 5 + (orn * 4).roundToInt(); each(n) { i ->
+                    val a = PI.toFloat() * (0.18f + 0.64f * i / (n - 1f))
                     val v = top - 0.1f - (1f - sin(a)) * 0.5f
                     val u = cos(a) * hw(v) * 1.02f
                     cowrie(u, v + 0.06f + sin(t * 2f + i * 0.8f) * 0.012f * m, 0.06f, 0.085f, a - PI.toFloat() / 2f + sin(t * 1.8f + i) * 0.1f * m)
-                }
+                } }
                 Crown.BIRD -> {
                     // A Senufo hornbill perched on top: body, long beak, crest. It nods now and then.
                     val nod = max(0f, sin(t * 1.1f + seed)).pow(8) * 0.35f * m
@@ -853,7 +966,7 @@ object AfricanMaskArt {
             when (d.hanging) {
                 Hanging.NONE -> Unit
                 Hanging.RAFFIA -> {
-                    val n = 13
+                    val n = 9 + (orn * 8).roundToInt()
                     val span = min(0.46f, prof.hw(chin + 0.12f) * 0.95f)
                     each(n) { i ->
                         val x0 = -span + 2 * span * i / (n - 1)
@@ -869,8 +982,8 @@ object AfricanMaskArt {
                     for (k in 0 until 3) {
                         val x = sx * (hw(-0.3f) * 0.82f + k * 0.055f); val y0 = -0.3f - k * 0.02f
                         moved(x, y0, angle = sway * 0.12f * (1f + k * 0.3f)) {
-                            line(floatArrayOf(x, y0, x, y0 - 0.56f), edge(s.a2), 0.01f)
-                            each(7) { b ->
+                            line(floatArrayOf(x, y0, x, y0 - 0.08f * (5 + (orn * 4).roundToInt())), edge(s.a2), 0.01f)
+                            each(5 + (orn * 4).roundToInt()) { b ->
                                 val y = y0 - 0.04f - b * 0.08f
                                 if (b % 3 == 1) gem(Shapes.roundRect(x - 0.022f, y - 0.034f, x + 0.022f, y + 0.034f, 0.02f), s.a3)
                                 else gem(Shapes.ellipse(x, y, 0.028f, 0.028f, 12), if ((b + k) % 2 == 0) s.a2 else s.a1)
@@ -883,7 +996,7 @@ object AfricanMaskArt {
                     for (k in 1..3) piece(floatArrayOf(-0.16f + k * 0.03f, chin - 0.02f - k * 0.1f, 0f, chin - 0.07f - k * 0.1f, 0.16f - k * 0.03f, chin - 0.02f - k * 0.1f, 0f, chin - 0.04f - k * 0.1f), s.a2)
                 }
                 Hanging.TASSELS -> {
-                    val n = 5
+                    val n = 3 + 2 * (orn * 2).roundToInt()
                     for (i in 0 until n) {
                         val x = (i - (n - 1) / 2f) * 0.13f
                         val y0 = bottomAt(x)
@@ -895,7 +1008,7 @@ object AfricanMaskArt {
                     }
                 }
                 Hanging.COWRIES -> {
-                    val n = 4
+                    val n = 3 + (orn * 2).roundToInt()
                     for (i in 0 until n) {
                         val x = (i - (n - 1) / 2f) * 0.15f
                         val y0 = bottomAt(x)
@@ -948,6 +1061,23 @@ object AfricanMaskArt {
     private const val OUTLINE = 0.026f
     private val DEEP = c(0x160E12)
     private val WHITE = c(0xFFFFFF)
+
+    /** A growable float list without boxing: the pieces are rebuilt every frame. */
+    internal class FloatBuf(capacity: Int = 1024) {
+        var data = FloatArray(capacity); private set
+        var size = 0; private set
+        operator fun plusAssign(v: Float) { if (size == data.size) data = data.copyOf(size * 2); data[size++] = v }
+        fun toFloatArray(): FloatArray = data.copyOf(size)
+    }
+
+    internal class IntBuf(capacity: Int = 1024) {
+        var data = IntArray(capacity); private set
+        var size = 0; private set
+        operator fun plusAssign(v: Int) { if (size == data.size) data = data.copyOf(size * 2); data[size++] = v }
+        fun toIntArray(): IntArray = data.copyOf(size)
+    }
+
+    private fun luma(argb: Int) = (0.299f * ch(argb, 16) + 0.587f * ch(argb, 8) + 0.114f * ch(argb, 0)) / 255f
 
     private fun c(rgb: Int) = (0xFF shl 24) or rgb
     private fun ch(c: Int, s: Int) = (c shr s) and 255
