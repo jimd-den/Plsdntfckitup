@@ -80,6 +80,23 @@ class MaskCharacters(
     var heroArt: AfricanMaskArt.Design? = null
         set(value) { if (field != value) { field = value; heroMesh = null; heroPieces = null } }
 
+    /**
+     * The hero's mask when it was made in the mask maker: the painted mask
+     * worn as a card, its feeling following the fight. Wins over the others.
+     */
+    var heroMaker: EmojiMask.Look? = null
+        set(value) { if (field != value) { field = value; heroMesh = null; heroCards.clear() } }
+
+    private val heroCards = HashMap<String, SpiritMesh>()
+
+    /** What the hero feels, from its state: serene, fierce in a strike, afraid when hit, struck down in death. */
+    private fun heroFeeling(state: AnimationState, flash: Float): String = when {
+        state == AnimationState.DIE -> "Knocked out"
+        state == AnimationState.ATTACK || state == AnimationState.SPECIAL -> "Angry"
+        flash.isFinite() && flash > 0.3f -> "Nervous"
+        else -> "Serene"
+    }
+
     private var heroMesh: SpiritMesh? = null
     private var heroId: String? = null
     private var heroPieces: com.stratum.engine.scene.SpiritFeatures? = null
@@ -125,7 +142,11 @@ class MaskCharacters(
         aimX: Float = Float.NaN, aimY: Float = Float.NaN,
     ): MotionBody? {
         heroId = id
-        val mesh = heroMesh ?: (heroArt?.let { AfricanMaskArt.head(it) } ?: MaskSpiritMesher.cached(heroGenome, MaskSpiritMesher.COMPANION_BUDGET)).also { heroMesh = it }
+        val maker = heroMaker
+        val mesh = if (maker != null) {
+            val feeling = heroFeeling(state, flash)
+            heroCards.getOrPut(feeling) { MaskMaker.card(maker, EmojiMask.expressions.getValue(feeling)) }
+        } else heroMesh ?: (heroArt?.let { AfricanMaskArt.head(it) } ?: MaskSpiritMesher.cached(heroGenome, MaskSpiritMesher.COMPANION_BUDGET)).also { heroMesh = it }
         if (heroProfileFor != heroGenome) {
             heroProfile = MotionProfiles.resolve(CharacterMasks.profileIdFor(heroGenome), profileOverrides)
             heroProfileFor = heroGenome

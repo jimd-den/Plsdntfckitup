@@ -36,6 +36,9 @@ sealed interface Route {
         data object Weapons : Create
         data object Models : Create
         data object Voxels : Create
+
+        /** Make your own Igbo mask, and wear it. */
+        data object Masks : Create
         data object Mapper : Create
 
         /** The agent crew, opened on [preset] when the way in chose one. */

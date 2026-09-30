@@ -32,6 +32,8 @@ data class StudioStatus(
     val running: Int = 0,
     /** Microvoxel models the player has kept in the model studio. */
     val microModelCount: Int = 0,
+    /** Whether the hero wears a mask from the mask maker. */
+    val wearsMakerMask: Boolean = false,
 )
 
 /** Every way into the studio's tools. */
@@ -46,6 +48,7 @@ data class CreateHubActions(
     val onSprites: () -> Unit = {},
     val onModels: () -> Unit = {},
     val onVoxels: () -> Unit = {},
+    val onMasks: () -> Unit = {},
     val onCrew: () -> Unit = {},
     val onMapper: () -> Unit = {},
     val onSettings: () -> Unit = {},
@@ -110,6 +113,14 @@ fun CreateHubScreen(
             glyph = "🎨", title = "Art", promise = "Textures, sprites and 3D props",
             onClick = actions.onTextures, status = art.first, statusTone = art.second,
             links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
+            modifier = Modifier.fillMaxWidth(),
+            tint = StratumTheme.colors.accentAlt,
+        )
+        HubCard(
+            glyph = "🎭", title = "Mask maker", promise = "Make your own Igbo mask — carve it, paint it, give it feelings, wear it",
+            onClick = actions.onMasks,
+            status = if (status.wearsMakerMask) "Worn by your hero" else "Ready",
+            statusTone = if (status.wearsMakerMask) StatusTone.NEUTRAL else StatusTone.READY,
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accentAlt,
         )
