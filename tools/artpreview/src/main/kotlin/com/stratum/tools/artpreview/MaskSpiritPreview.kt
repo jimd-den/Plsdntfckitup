@@ -159,7 +159,7 @@ object MaskSpiritPreview {
             if (label.isNotEmpty()) println("  $label drawn in ${"%.0f".format(ms)} ms")
             val img = BufferedImage(size, size + 30, BufferedImage.TYPE_INT_ARGB)
             val g = img.createGraphics()
-            g.paint = java.awt.GradientPaint(0f, 0f, Color(0x3A, 0x30, 0x2C), 0f, size + 30f, Color(0x16, 0x12, 0x10)); g.fillRect(0, 0, size, size + 30)
+            g.paint = java.awt.GradientPaint(0f, 0f, Color(0x24, 0x1C, 0x19), 0f, size + 30f, Color(0x0C, 0x09, 0x08)); g.fillRect(0, 0, size, size + 30)
             val art = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { it.setRGB(0, 0, size, size, px, 0, size) }
             g.drawImage(art, 0, 0, null)
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
@@ -171,14 +171,14 @@ object MaskSpiritPreview {
         val smile = em.expressions.getValue("Smile")
         ImageIO.write(sheet(em.presets.map { card(it, smile, it.name) }, 6), "png", File(out, "emoji-masks.png"))
         for ((i, look) in listOf(em.presets[0], em.presets[2]).withIndex()) {
-            val cards = em.expressions.map { (name, face) -> card(look, face, name, 240) }
+            val cards = em.expressions.map { (name, face) -> card(look, face, em.igboNames[name]?.let { "$it · $name" } ?: name, 240) }
             ImageIO.write(sheet(cards, 5), "png", File(out, "emoji-expressions-${i + 1}.png"))
         }
         val turn = listOf(-0.75f, -0.45f, -0.2f, 0f, 0.2f, 0.45f, 0.75f).map { card(em.presets[0], em.expressions.getValue("Grin"), "", 240, it) }
-        ImageIO.write(strip(turn, "Agbogho Mmuo turning: the face wraps the head, the nose and crest stand off it"), "png", File(out, "emoji-turn.png"))
+        ImageIO.write(strip(turn, "${em.presets[0].name} turning: the face wraps the head, the nose and crest stand off it"), "png", File(out, "emoji-turn.png"))
         val a = em.expressions.getValue("Serene"); val b = em.expressions.getValue("Laugh"); val c = em.expressions.getValue("Love")
         val frames = (0..7).map { k -> val x = k / 7f; val face = if (x < 0.5f) em.blend(a, b, x * 2f) else em.blend(b, c, x * 2f - 1f); card(em.presets[3], face, "", 220, 0.1f, k * 0.15f) }
-        ImageIO.write(strip(frames, "Beaded Maiden blending: serene, laughing, in love"), "png", File(out, "emoji-blend.png"))
+        ImageIO.write(strip(frames, "${em.presets[3].name} blending: serene, laughing, in love"), "png", File(out, "emoji-blend.png"))
         val feelings = em.expressions.keys.toList()
         val rolls = (1..12).map { i -> val look = em.generate(i * 104729L, "Roll $i"); card(look, em.expressions.getValue(feelings[(i * 7) % feelings.size]), "${look.crest.label} · ${feelings[(i * 7) % feelings.size]}") }
         ImageIO.write(sheet(rolls, 6), "png", File(out, "emoji-rolls.png"))

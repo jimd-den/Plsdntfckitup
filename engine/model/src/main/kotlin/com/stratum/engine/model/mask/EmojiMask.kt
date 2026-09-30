@@ -178,37 +178,46 @@ object EmojiMask {
     // ---- Masks from the carvers ----------------------------------------------------------
 
     /** Masks after the carvers' own: maidens, spirits, the brave. */
+    /** Igbo masks after the carvers': maidens and spirits of the masquerade, titled elders, the old bronzes. */
     val presets: List<Look> = listOf(
         Look("Agbogho Mmuo", shape = FaceShape.LONG, width = 0.4f, crestColour = BLACKWOOD, crestCount = 3, crestSize = 0.6f, hairline = Hairline.HIGH,
-            marks = setOf(Mark.LINE, Mark.STAR, Mark.TEMPLE), paint = setOf(Paint.LIDS)),
-        Look("Fang Ngil", finish = Finish.CARVED, shape = FaceShape.LONG, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = KAOLIN, width = 0.3f,
-            hairline = Hairline.BALD, crest = Crest.RIDGES, crestCount = 1, crestSize = 0.7f, crestColour = BLACKWOOD, eyes = EyeStyle.SLIT, brows = BrowStyle.NONE,
+            marks = setOf(Mark.LINE, Mark.STAR, Mark.TEMPLE), paint = setOf(Paint.LIDS, Paint.SPIRALS)),
+        Look("Okoroshi Ocha", finish = Finish.CARVED, shape = FaceShape.LONG, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = KAOLIN, width = 0.35f,
+            hairline = Hairline.BALD, crest = Crest.RIDGES, crestCount = 1, crestSize = 0.6f, crestColour = BLACKWOOD, eyes = EyeStyle.SLIT, brows = BrowStyle.NONE,
             paint = setOf(Paint.HEART), marks = setOf(Mark.LINE)),
         Look("Okoroshi Ojo", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = LAMPBLACK, accent = KAOLIN, accent2 = GOLD, hairline = Hairline.LOW,
             crest = Crest.NONE, eyes = EyeStyle.ROUND, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, mouth = MouthStyle.TEETH, marks = setOf(Mark.ICHI), width = 0.7f),
         Look("Mgbedike", finish = Finish.CARVED, shape = FaceShape.ROUND, ground = MAHOGANY, wood = MAHOGANY, hair = BLACKWOOD, accent = KAOLIN, accent2 = GOLD, crestColour = BONE,
             hairline = Hairline.BALD, crest = Crest.HORNS, crestSize = 0.8f, eyes = EyeStyle.TUBE, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, mouth = MouthStyle.TEETH,
             ears = Ears.SMALL, marks = setOf(Mark.CHEEK), beard = true, width = 0.8f),
-        Look("Beaded Maiden", wood = IROKO, accent = VERMILION, accent2 = INDIGO, crest = Crest.RIDGES, crestCount = 1, crestSize = 0.9f, crestColour = INDIGO, cowries = true,
-            brows = BrowStyle.THIN, paint = setOf(Paint.SPLIT), marks = emptySet(), width = 0.35f, shape = FaceShape.LONG, hairline = Hairline.HIGH),
-        Look("Conical Crest", wood = UMBER, crest = Crest.CONE, crestColour = IROKO, accent = OCHRE, accent2 = VERMILION, hairline = Hairline.HIGH,
-            marks = setOf(Mark.LINE, Mark.KELOID), paint = setOf(Paint.LIDS)),
-        Look("Afikpo Elder", finish = Finish.CARVED, shape = FaceShape.LONG, ground = IROKO, wood = IROKO, hair = BLACKWOOD, accent = VERMILION, accent2 = KAOLIN,
-            hairline = Hairline.BALD, crest = Crest.NONE, paint = setOf(Paint.EYE_BAND), marks = setOf(Mark.ICHI), width = 0.25f, brows = BrowStyle.THIN),
-        Look("Ijele Crown", ground = OCHRE, wood = MAHOGANY, accent = VERMILION, accent2 = JADE, crestColour = JADE, crest = Crest.TIERS, hairline = Hairline.HIGH,
-            marks = setOf(Mark.ICHI), cowries = true),
-        Look("Knot Maiden", hair = INDIGO, crest = Crest.KNOTS, crestColour = INDIGO, crestCount = 3, eyes = EyeStyle.BEAN,
-            marks = setOf(Mark.TEMPLE, Mark.KELOID), paint = setOf(Paint.SPIRALS), earrings = true, accent = CORAL, shape = FaceShape.HEART, hairline = Hairline.HIGH),
-        Look("Elephant Spirit", ground = TERRACOTTA, wood = BLACKWOOD, hair = LAMPBLACK, hairline = Hairline.LOW, crest = Crest.KNOTS, crestCount = 1, crestColour = BRASS,
-            eyes = EyeStyle.ROUND, mouth = MouthStyle.TEETH, ears = Ears.ELEPHANT, accent = KAOLIN, marks = setOf(Mark.ICHI), shape = FaceShape.ROUND, width = 0.8f),
-        Look("Benin Queen", finish = Finish.BRASS, ground = BRASS, wood = BRASS, hair = BRASS, crest = Crest.CONE, crestColour = BRASS, crestSize = 0.9f, hairline = Hairline.HIGH,
-            braids = false, cowries = true, brows = BrowStyle.THIN, accent = CORAL, accent2 = CORAL, marks = setOf(Mark.TEMPLE), earrings = true,
-            shape = FaceShape.LONG, width = 0.45f),
-        Look("Camwood Maiden", finish = Finish.CARVED, ground = CAMWOOD, wood = CAMWOOD, hair = BLACKWOOD, crest = Crest.LOBES, crestCount = 3, crestColour = BLACKWOOD,
-            accent = KAOLIN, accent2 = GOLD, paint = setOf(Paint.SPIRALS), marks = setOf(Mark.STAR), cowries = true),
-        Look("Brass Warrior", finish = Finish.BRASS, ground = BRASS, wood = BRASS, hair = BRASS, crest = Crest.HORNS, crestColour = BRASS, crestSize = 0.6f, hairline = Hairline.BALD,
-            eyes = EyeStyle.TUBE, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, mouth = MouthStyle.TEETH, marks = setOf(Mark.CHEEK), beard = true, shape = FaceShape.ROUND, width = 0.7f,
-            accent = CORAL),
+        Look("Ikenga", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN, crestColour = UMBER,
+            hairline = Hairline.BALD, crest = Crest.HORNS, crestSize = 1f, eyes = EyeStyle.BEAN, brows = BrowStyle.RIDGE, mouth = MouthStyle.WIDE,
+            marks = setOf(Mark.ICHI, Mark.TEMPLE), beard = true, width = 0.6f),
+        Look("Igbo-Ukwu Bronze", finish = Finish.BRASS, ground = BRASS, wood = BRASS, hair = BRASS, crest = Crest.NONE, hairline = Hairline.HIGH, braids = true,
+            cowries = true, eyes = EyeStyle.BEAN, brows = BrowStyle.NONE, marks = setOf(Mark.ICHI, Mark.TEMPLE, Mark.CHEEK), accent = CORAL, accent2 = CORAL,
+            shape = FaceShape.OVAL, width = 0.55f),
+        Look("Ijele", ground = OCHRE, wood = MAHOGANY, accent = VERMILION, accent2 = JADE, crestColour = JADE, crest = Crest.TIERS, hairline = Hairline.HIGH,
+            marks = setOf(Mark.ICHI), paint = setOf(Paint.SPIRALS), cowries = true),
+        Look("Afikpo Okumkpa", finish = Finish.CARVED, shape = FaceShape.LONG, ground = IROKO, wood = IROKO, hair = BLACKWOOD, accent = CAMWOOD, accent2 = KAOLIN,
+            hairline = Hairline.BALD, crest = Crest.NONE, paint = setOf(Paint.EYE_BAND), marks = setOf(Mark.ICHI), width = 0.25f, brows = BrowStyle.THIN, eyes = EyeStyle.SLIT),
+        Look("Ogbodo Enyi", finish = Finish.CARVED, ground = BLACKWOOD, wood = BLACKWOOD, hair = LAMPBLACK, hairline = Hairline.LOW, crest = Crest.KNOTS, crestCount = 1,
+            crestColour = CAMWOOD, eyes = EyeStyle.ROUND, mouth = MouthStyle.TEETH, ears = Ears.ELEPHANT, accent = KAOLIN, marks = setOf(Mark.ICHI),
+            shape = FaceShape.ROUND, width = 0.8f),
+        Look("Mbari Nne", ground = KAOLIN, wood = UMBER, hair = LAMPBLACK, crest = Crest.CONE, crestColour = CAMWOOD, crestSize = 0.8f, accent = OCHRE, accent2 = CAMWOOD,
+            hairline = Hairline.HIGH, marks = setOf(Mark.LINE, Mark.KELOID), paint = setOf(Paint.SPIRALS, Paint.CHIN), earrings = true),
+        Look("Uli Maiden", finish = Finish.CARVED, ground = CAMWOOD, wood = CAMWOOD, hair = BLACKWOOD, crest = Crest.LOBES, crestCount = 3, crestColour = BLACKWOOD,
+            accent = KAOLIN, accent2 = GOLD, paint = setOf(Paint.SPIRALS), marks = setOf(Mark.STAR, Mark.TEMPLE), cowries = true, shape = FaceShape.HEART),
+        Look("Ichi Elder", finish = Finish.CARVED, ground = UMBER, wood = UMBER, hair = BLACKWOOD, accent = KAOLIN, hairline = Hairline.BALD, crest = Crest.NONE,
+            eyes = EyeStyle.BEAN, brows = BrowStyle.RIDGE, nose = NoseStyle.BROAD, marks = setOf(Mark.ICHI, Mark.TEMPLE, Mark.CHEEK), beard = true, shape = FaceShape.LONG, width = 0.5f),
+    )
+
+    /**
+     * Igbo names for the feelings, for players to see beside the English.
+     * Only the plain, common words; a speaker should check them.
+     */
+    val igboNames: Map<String, String> = mapOf(
+        "Laugh" to "Ọchị", "Joy" to "Ọṅụ", "Love" to "Ịhụnanya", "Angry" to "Iwe", "Sad" to "Mwute",
+        "Crying" to "Ákwá", "Sleepy" to "Ụra", "Nervous" to "Egwu",
     )
 
     /** A mask from [seed]: the same seed, the same mask. */
@@ -216,12 +225,12 @@ object EmojiMask {
         val r = Random(seed * 0x5DEECE66DL + 11)
         fun <T> one(xs: List<T>): T = xs[r.nextInt(xs.size)]
         fun <T> some(xs: List<T>, most: Int): Set<T> = xs.shuffled(r).take(r.nextInt(0, most + 1)).toSet()
-        val finish = one(listOf(Finish.CARVED, Finish.CARVED, Finish.PAINTED, Finish.PAINTED, Finish.PAINTED, Finish.BRASS))
-        val wood = one(listOf(IROKO, BLACKWOOD, MAHOGANY, UMBER, CAMWOOD))
+        val finish = one(listOf(Finish.CARVED, Finish.CARVED, Finish.CARVED, Finish.PAINTED, Finish.PAINTED, Finish.BRASS))
+        val wood = one(listOf(BLACKWOOD, BLACKWOOD, MAHOGANY, MAHOGANY, UMBER, CAMWOOD, IROKO))
         val ground = when (finish) {
             Finish.CARVED -> wood
             Finish.BRASS -> BRASS
-            else -> one(listOf(KAOLIN, KAOLIN, KAOLIN, BONE, OCHRE, CAMWOOD, TERRACOTTA, INDIGO))
+            else -> one(listOf(KAOLIN, KAOLIN, BONE, OCHRE, CAMWOOD, CAMWOOD, INDIGO))
         }
         val dark = ground in setOf(CAMWOOD, UMBER, CHARCOAL, INDIGO)
         val eyes = one(listOf(EyeStyle.BEAN, EyeStyle.BEAN, EyeStyle.BEAN, EyeStyle.TUBE, EyeStyle.TUBE, EyeStyle.ROUND, EyeStyle.ROUND, EyeStyle.SLIT, EyeStyle.ALMOND))
@@ -301,14 +310,15 @@ object EmojiMask {
         val gloss = look.finish == Finish.GLOSS
         /** How shiny a surface of this mask is: waxed wood is satin, chalk is matte, brass gleams. */
         val sheen = when (look.finish) { Finish.CARVED -> 0.2f; Finish.PAINTED -> 0.12f; Finish.BRASS -> 0.95f; Finish.GLOSS -> 0.42f }
-        val faceMat = moody(material(pigment(look.ground), sheen))
+        val faceMat = moody(material(if (look.finish == Finish.PAINTED) mix(pigment(look.ground), pigment(look.wood), 0.14f) else pigment(look.ground), sheen))
         val woodMat = moody(material(pigment(look.wood), 0.22f))
         val hairMat = moody(material(pigment(look.hair), if (gloss) 0.75f else if (metal) 0.9f else 0.35f))
         val crestMat = moody(material(pigment(look.crestColour), if (gloss) 0.6f else if (metal) 0.9f else 0.3f))
 
         /** Deeper, cooler shadows and warmer light, as a painter lights a figure; the glossy emoji keeps its own. */
         fun moody(m: Material): Material = if (gloss) m else Material(
-            light = mix(m.base, c(0xFFE6BE), 0.34f), base = m.base, shade = mix(m.base, c(0x160C14), 0.58f), spec = m.spec, bounce = mix(m.base, c(0xD8764A), 0.35f),
+            light = mix(m.base, c(0xFFDDAE), 0.24f), base = mix(m.base, c(0x1A0E0C), 0.12f), shade = mix(m.base, c(0x0C0608), 0.7f), spec = m.spec * 0.8f,
+            bounce = mix(m.base, c(0xB85A30), 0.3f),
         )
         val accentMat = material(pigment(look.accent), 0.5f)
         val accent2Mat = material(pigment(look.accent2), 0.45f)
@@ -316,7 +326,8 @@ object EmojiMask {
         val carved = mix(pigment(look.ground), c(0x1E1212), if (luma(pigment(look.ground)) > 0.5f) 0.62f else 0.3f)
         /** A dark mask draws its lines in kaolin, as the carvers paint round its eyes and mouth. */
         val darkGround = luma(pigment(look.ground)) < 0.3f
-        val eyeLine = if (darkGround) c(0xF1E8DA) else EYE_DARK
+        /** Round eyes sit on a painted kaolin disc, so their lines are dark whatever the wood. */
+        val eyeLine = if (darkGround && look.eyes != EyeStyle.ROUND) c(0xF1E8DA) else EYE_DARK
         val mouthLine = if (darkGround) c(0xF1E8DA) else MOUTH_INK
 
         /** On a dark mask, a kaolin rim round a dark opening so it reads. */
@@ -439,7 +450,7 @@ object EmojiMask {
             if (look.finish != Finish.PAINTED) return 0f
             // Worn back to the wood at the rim, on the high points and in patches.
             val n = fbm(th * 3.1f + 7f, v * 3.4f) + 0.35f * nz - 0.05f * noise(th * 20f, v * 20f)
-            return ((n - 0.49f) / 0.05f).coerceIn(0f, 1f)
+            return ((n - 0.53f) / 0.05f).coerceIn(0f, 1f)
         }
 
         /** A shaded paint for a rounded piece centred at ([cx], [cy]) with radii [rw], [rh], turned by [angle]. */
@@ -674,8 +685,8 @@ object EmojiMask {
                 Paint.CHIN -> region(-HALF_PI, HALF_PI, { -1f }, { MOUTH_V - 0.17f }, 48)?.let { cv.fill(it, headPaint(accent2Mat)) }
                 Paint.SPIRALS -> sides { sd ->
                     val pts = FloatArray(82)
-                    for (i in 0..40) { val k = i / 40f; val a = k * 4.2f * PI.toFloat() * sd; val r = 0.012f + 0.085f * k; pts[i * 2] = sd * 0.52f + cos(a) * r; pts[i * 2 + 1] = -0.2f + sin(a) * r }
-                    if (facing(sd * 0.52f, -0.2f) > 0.1f) cv.stroke(onFace(pts), 0.02f, ink)
+                    for (i in 0..40) { val k = i / 40f; val a = k * 4.2f * PI.toFloat() * sd; val r = 0.01f + 0.07f * k; pts[i * 2] = sd * 0.6f + cos(a) * r; pts[i * 2 + 1] = -0.42f + sin(a) * r }
+                    if (facing(sd * 0.6f, -0.42f) > 0.1f) cv.stroke(onFace(pts), 0.02f, ink)
                 }
                 Paint.HEART -> {
                     // The Fang heart: a concave plane from the brows down to the chin, framed by a carved ridge.
@@ -738,11 +749,24 @@ object EmojiMask {
             }
         }
 
+        /** Uhie, camwood, rubbed on the cheeks: a warm smear and three stripes -- the feeling shows in the pigment. */
         fun blush() {
             val amount = (f.blush + f.anger * 0.3f).coerceIn(0f, 1.2f)
-            if (amount <= 0f || !gloss) return
-            val col = if (luma(pigment(look.ground)) > 0.5f) c(0xE8584A) else c(0xFF6A5A)
-            sides { sd -> softOnFace(sd * 0.56f, -0.26f, 0.24f, 0.14f, col, 0.55f * amount) }
+            if (amount <= 0f) return
+            if (gloss) {
+                val col = if (luma(pigment(look.ground)) > 0.5f) c(0xE8584A) else c(0xFF6A5A)
+                sides { sd -> softOnFace(sd * 0.56f, -0.26f, 0.24f, 0.14f, col, 0.55f * amount) }
+                return
+            }
+            val cam = if (darkGround) c(0xC0473A) else c(0x8E2C2F)
+            sides { sd ->
+                if (facing(sd * 0.55f, -0.28f) <= 0.15f) return@sides
+                softOnFace(sd * 0.55f, -0.28f, 0.22f, 0.12f, cam, 0.45f * amount)
+                for (i in 0 until 3) {
+                    val v = -0.2f - i * 0.06f
+                    cv.stroke(onFace(floatArrayOf(sd * 0.44f, v, sd * 0.66f, v - 0.02f)), 0.026f, cam, opacity = min(1f, amount) * 0.9f)
+                }
+            }
         }
 
         // ---- the face ----------------------------------------------------------------
@@ -796,17 +820,23 @@ object EmojiMask {
             }
             when (f.eyeKind) {
                 EyeKind.HEART -> {
-                    val p = point(cu, v, 0.04f); val s = 0.27f * (1f + 0.08f * sin(t * 9f))
-                    val h = heart(p[0], p[1], s * (0.45f + 0.55f * fc), s)
-                    val b = bounds(h)
-                    cv.fill(h, blobPaint(material(c(0xE8283C), 0.8f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+                    // Love: a lovers' knot, two loops holding each other, beating.
+                    val p = point(cu, v, 0.04f); val s = 0.2f * (1f + 0.08f * sin(t * 6f))
+                    if (gloss) {
+                        val h = heart(p[0], p[1], s * 1.3f * (0.45f + 0.55f * fc), s * 1.3f)
+                        val b = bounds(h)
+                        cv.fill(h, blobPaint(material(c(0xE8283C), 0.8f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+                    } else knot(p[0], p[1], s, 0.45f + 0.55f * fc)
                     return
                 }
                 EyeKind.STAR -> {
-                    val p = point(cu, v, 0.04f); val s = 0.25f * (1f + 0.06f * sin(t * 7f))
-                    val st5 = star(p[0], p[1], s * 0.45f, s, 5, t * 0.6f, fc)
-                    val b = bounds(st5)
-                    cv.fill(st5, blobPaint(material(c(0xFFC21A), 0.9f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+                    // Wonder: the eyes become Anyanwu, the sun.
+                    val p = point(cu, v, 0.04f); val s = 0.22f * (1f + 0.06f * sin(t * 5f))
+                    if (gloss) {
+                        val st5 = star(p[0], p[1], s * 0.5f, s * 1.1f, 5, t * 0.6f, fc)
+                        val b = bounds(st5)
+                        cv.fill(st5, blobPaint(material(c(0xFFC21A), 0.9f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+                    } else sun(p[0], p[1], s, t * 0.5f, 0.45f + 0.55f * fc)
                     return
                 }
                 EyeKind.X -> {
@@ -1194,7 +1224,18 @@ object EmojiMask {
                 val p = point(0.6f, 0.42f, 0.05f)
                 drop(p[0] + 0.06f, p[1] - ((t * 0.3f) % 1f) * 0.05f, 0.08f * f.sweat)
             }
-            if (f.zzz > 0f) for (k in 0 until 3) {
+            if (f.zzz > 0f && !gloss) {
+                // Sleep: ọnwa, the moon, rising with a trail of dots.
+                val ph = (t * 0.2f) % 1f
+                val x = 0.9f + 0.15f * ph; val y = headY + 0.85f + 0.2f * ph
+                val s = 0.26f * f.zzz
+                cv.fill(crescentShape(x, y, s, -0.6f), blobPaint(material(c(0xE8E0CC), 0.4f), x, y, s, s))
+                for (k in 0 until 4) {
+                    val q = (t * 0.5f + k / 4f) % 1f
+                    cv.fill(Shapes.ellipse(x - 0.28f + 0.2f * q, y - 0.32f + 0.3f * q, 0.022f, 0.022f, 10), c(0xE8E0CC), (1f - q) * f.zzz)
+                }
+            }
+            if (f.zzz > 0f && gloss) for (k in 0 until 3) {
                 val ph = (t * 0.35f + k / 3f) % 1f
                 val s = (0.06f + 0.08f * ph) * f.zzz
                 val x = 0.7f + 0.45f * ph; val y = headY + 0.55f + 0.7f * ph
@@ -1202,7 +1243,15 @@ object EmojiMask {
                 cv.stroke(z, s * 0.55f, c(0x2A3A7A), opacity = 1f - ph)
                 cv.stroke(z, s * 0.3f, c(0xBFD8FF), opacity = 1f - ph)
             }
-            if (f.hearts > 0f) {
+            if (f.hearts > 0f && !gloss) {
+                val n = if (f.hearts > 0.6f) 3 else 1
+                for (k in 0 until n) {
+                    val a = t * 0.8f + k * 2.1f + 0.6f
+                    val x = cos(a) * 1.15f; val y = headY + 0.2f + sin(a) * 0.55f
+                    knot(x, y, 0.11f * f.hearts * (1f + 0.1f * sin(t * 6f + k)), 1f)
+                }
+            }
+            if (f.hearts > 0f && gloss) {
                 val n = if (f.hearts > 0.6f) 3 else 1
                 for (k in 0 until n) {
                     val a = t * 0.9f + k * 2.1f + 0.6f
@@ -1212,7 +1261,13 @@ object EmojiMask {
                     cv.fill(h, blobPaint(material(c(0xE8283C), 0.8f), x, y, s, s))
                 }
             }
-            if (f.anger > 0f) {
+            if (f.anger > 0f && !gloss) {
+                // Anger: Amadioha's thunder, a bolt over the brow, flickering.
+                val flick = if (((t * 7f).toInt() % 5) == 0) 0.6f else 1f
+                bolt(0.72f, headY + 0.8f, 0.2f * f.anger, 0.25f, flick)
+                bolt(-0.8f, headY + 0.62f, 0.13f * f.anger, -0.3f, flick)
+            }
+            if (f.anger > 0f && gloss) {
                 val cx = 0.6f; val cy = headY + 0.75f; val s = 0.1f * f.anger * (1f + 0.08f * sin(t * 10f))
                 for (q in 0 until 4) {
                     val a = q * PI.toFloat() / 2f + PI.toFloat() / 4f
@@ -1221,7 +1276,19 @@ object EmojiMask {
                     cv.stroke(arc, s * 0.32f, c(0xE0242E))
                 }
             }
-            if (f.sparkle > 0f) {
+            if (f.sparkle > 0f && !gloss) {
+                // Delight: uli dots, four in a diamond, twinkling round the head.
+                val spots = listOf(-1.1f to 0.5f, 1.05f to 0.75f, 0.95f to -0.55f, -1.0f to -0.35f)
+                spots.forEachIndexed { i, (x, y) ->
+                    val tw = (0.55f + 0.45f * sin(t * 4f + i * 1.7f)) * f.sparkle
+                    for (q in 0 until 4) {
+                        val a = q * PI.toFloat() / 2f
+                        cv.fill(Shapes.ellipse(x + cos(a) * 0.06f * tw, headY + y + sin(a) * 0.06f * tw, 0.022f * tw, 0.022f * tw, 10), c(0xF2C24A))
+                    }
+                    cv.fill(Shapes.ellipse(x, headY + y, 0.014f * tw, 0.014f * tw, 8), c(0xF4ECDC))
+                }
+            }
+            if (f.sparkle > 0f && gloss) {
                 val spots = listOf(-1.1f to 0.5f, 1.05f to 0.75f, 0.95f to -0.55f, -1.0f to -0.35f)
                 spots.forEachIndexed { i, (x, y) ->
                     val tw = (0.55f + 0.45f * sin(t * 4f + i * 1.7f)) * f.sparkle
@@ -1239,7 +1306,14 @@ object EmojiMask {
                     val a = point(sd * (EYE_U + 0.02f), EYE_V - 0.06f, 0.03f)
                     val spine = floatArrayOf(a[0], a[1], a[0] + sd * 0.28f, a[1] - 0.05f, a[0] + sd * 0.42f, headY - ry - 0.15f)
                     val s = Shapes.taper(spine[0], spine[1], spine[2], spine[3], spine[4], spine[5], 0.07f, 0.16f * amount, 18)
-                    cv.fill(s, linear(spine[0], spine[1], c(0xBFE6FF), spine[4], spine[5], c(0x2E8AE6)), 0.92f)
+                    cv.fill(s, linear(spine[0], spine[1], if (gloss) c(0xBFE6FF) else c(0x8FB4D0), spine[4], spine[5], if (gloss) c(0x2E8AE6) else c(0x1E4A78)), 0.92f)
+                    if (!gloss) for (q in 0 until 4) {
+                        // Mmiri: the uli sign for water, waves running down the stream.
+                        val k = ((t * 0.6f + q / 4f) % 1f)
+                        val wx = spine[0] + (spine[4] - spine[0]) * k; val wy = spine[1] + (spine[5] - spine[1]) * k
+                        val ww = 0.05f + 0.06f * k
+                        cv.stroke(floatArrayOf(wx - ww, wy, wx - ww / 2f, wy + 0.02f, wx, wy, wx + ww / 2f, wy + 0.02f, wx + ww, wy), 0.014f, c(0xE8E0CC), opacity = 0.8f)
+                    }
                     val wave = (t * 1.5f) % 1f
                     val wy = spine[1] + (spine[5] - spine[1]) * wave
                     cv.fill(Shapes.ellipse(spine[0] + (spine[4] - spine[0]) * wave, wy, 0.03f, 0.05f, 12), c(0xFFFFFF), 0.7f)
@@ -1254,7 +1328,51 @@ object EmojiMask {
         fun drop(x: Float, y: Float, s: Float) {
             val pts = teardrop(x, y, s)
             val b = bounds(pts)
-            cv.fill(pts, blobPaint(material(c(0x5AB4F5), 0.95f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+            cv.fill(pts, blobPaint(material(if (gloss) c(0x5AB4F5) else c(0x4A86B8), 0.95f), (b[0] + b[2]) / 2f, (b[1] + b[3]) / 2f, (b[2] - b[0]) / 2f, (b[3] - b[1]) / 2f))
+        }
+
+        // ---- signs -----------------------------------------------------------------------
+
+        /** A lovers' knot: two loops holding each other, camwood with a kaolin line. */
+        fun knot(x: Float, y: Float, s: Float, squeeze: Float) {
+            for (a in listOf(0.6f, -0.6f)) {
+                val loop = rotate(Shapes.ellipse(x, y, s * squeeze, s * 0.5f, 28), x, y, a)
+                cv.stroke(loop, s * 0.32f, c(0x2A0E0E), closed = true)
+                cv.stroke(loop, s * 0.2f, c(0xA8322E), closed = true)
+                cv.stroke(loop, s * 0.05f, c(0xF0E4CC), closed = true, opacity = 0.9f)
+            }
+        }
+
+        /** Anyanwu, the sun: a gold disc with a camwood ring, and rays turning round it. */
+        fun sun(x: Float, y: Float, s: Float, spin: Float, squeeze: Float) {
+            val n = 12
+            for (i in 0 until n) {
+                val a = spin + i * 2f * PI.toFloat() / n
+                val ray = floatArrayOf(
+                    x + cos(a - 0.14f) * s * 0.62f * squeeze, y + sin(a - 0.14f) * s * 0.62f,
+                    x + cos(a) * s * 1.05f * squeeze, y + sin(a) * s * 1.05f,
+                    x + cos(a + 0.14f) * s * 0.62f * squeeze, y + sin(a + 0.14f) * s * 0.62f,
+                )
+                cv.fill(ray, if (i % 2 == 0) c(0xE0A030) else c(0xA8322E))
+            }
+            cv.fill(Shapes.ellipse(x, y, s * 0.62f * squeeze, s * 0.62f, 28), blobPaint(material(c(0xE8B040), 0.7f), x, y, s * 0.62f * squeeze, s * 0.62f))
+            cv.stroke(Shapes.ellipse(x, y, s * 0.4f * squeeze, s * 0.4f, 24), s * 0.08f, c(0x8E2C2F), closed = true)
+            cv.fill(Shapes.ellipse(x, y, s * 0.12f * squeeze, s * 0.12f, 12), c(0x2A0E0E))
+        }
+
+        /** Amadioha's thunder: a zigzag bolt in ochre, edged in camwood. */
+        fun bolt(x: Float, y: Float, s: Float, lean: Float, alpha: Float) {
+            val pts = rotate(floatArrayOf(x - 0.25f * s, y + s, x + 0.35f * s, y + s, x + 0.05f * s, y + 0.15f * s, x + 0.4f * s, y + 0.15f * s,
+                x - 0.3f * s, y - s, x - 0.02f * s, y - 0.1f * s, x - 0.38f * s, y - 0.1f * s), x, y, lean)
+            cv.stroke(pts, s * 0.14f, c(0x6A1A14), closed = true, opacity = alpha)
+            cv.fill(pts, c(0xE8A030), alpha)
+        }
+
+        fun crescentShape(x: Float, y: Float, r: Float, a: Float): FloatArray {
+            val out = ArrayList<Float>()
+            for (i in 0..20) { val th = -2.2f + 4.4f * i / 20f; out += cos(th) * r; out += sin(th) * r }
+            for (i in 20 downTo 0) { val th = -1.75f + 3.5f * i / 20f; out += r * 0.45f + cos(th) * r * 0.72f; out += sin(th) * r * 0.72f }
+            return rotate(Shapes.offset(out.toFloatArray(), x, y), x, y, a)
         }
 
         // ---- shapes -----------------------------------------------------------------------
