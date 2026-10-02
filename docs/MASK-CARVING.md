@@ -42,6 +42,20 @@ New in this round: the arched, knob-studded crests of Agbogho Mmuo
 Nsibidi-style incised signs (composed from that script's strokes; they copy no
 real glyph and claim no meaning).
 
+## Generated monsters
+
+Every monster wears a carved mask (`CharacterMasks.sculptedFor`): its
+tradition chosen from what it is called (a brute is Mgbedike or Bugle, a ghost
+or maiden Agbogho Mmuo or Okuyi, a golem the elephant mask), otherwise from a
+seed of its id, with bosses and champions drawn from the great masquerades.
+The mask is rolled within that tradition's grammar from the same seed, so each
+kind of monster always wears the same mask and no two kinds share one; rank
+makes the same face grander. A pack's own genome or preset override still
+wins. `MaskCharacters.sculptedMonsters = false` returns to the simpler genome
+masks.
+
+![Generated monsters](screenshots/sculpted-masks/generated-monsters.png)
+
 ## Seen in play
 
 ![The traditions from the game's camera](screenshots/sculpted-masks/sculpt-traditions.png)
@@ -55,3 +69,4 @@ fall), their eyes and lines lit by what they are doing; see the looping
     ./gradlew :tools:artpreview:maskSpiritPreview -Pout=docs/screenshots/sculpted-masks -Ponly=sculpt
     ./gradlew :tools:artpreview:maskSpiritPreview -Pout=docs/screenshots/carved-wood -Ponly=wood
     ./gradlew :tools:artpreview:maskSpiritPreview -Pout=docs/screenshots/mask-carver -Ponly=carver
+    ./gradlew :tools:artpreview:maskSpiritPreview -Pout=docs/screenshots/sculpted-masks -Ponly=monsters

@@ -61,7 +61,8 @@ object MaskSculptor {
     enum class Detail(val cell: Float) { SHOWCASE(0.0055f), HIGH(0.008f), GAME(0.013f), FAR(0.02f) }
 
     private val cache = object : LinkedHashMap<String, SpiritMesh>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SpiritMesh>?): Boolean = size > 24
+        // Room for every kind of monster in a big fight, and the hero, without carving any twice.
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SpiritMesh>?): Boolean = size > 64
     }
 
     fun cached(spec: MaskSpec, detail: Detail = Detail.GAME): SpiritMesh {

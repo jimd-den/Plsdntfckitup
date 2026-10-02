@@ -164,7 +164,15 @@ class MaskCharacters(
     private var frame = 0
 
     /** A monster definition's mask, mesh and profile, worked out once. */
-    private class Look(val genome: MaskGenome, val profile: MotionProfile, val height: Float) {
+    /**
+     * Monsters wear masks carved after the sculpted traditions
+     * ([CharacterMasks.sculptedFor]); false gives them the simpler genome
+     * masks. An override naming a pack's genome or preset is always worn.
+     */
+    var sculptedMonsters: Boolean = true
+        set(value) { if (field != value) { field = value; looks.clear() } }
+
+    private class Look(val genome: MaskGenome, val profile: MotionProfile, val height: Float, val carved: com.stratum.engine.model.mask.sculpt.MaskSpec? = null, val rank: EnemyRank = EnemyRank.MINION) {
         @Volatile var mesh: SpiritMesh? = null
         @Volatile var building = false
     }
@@ -347,19 +355,27 @@ class MaskCharacters(
         val key = key(definitionId, rank, maskOverride)
         val look = looks.getOrPut(key) {
             val genome = CharacterMasks.genomeFor(definitionId, rank, maskOverride)
-            val profileId = motionOverride ?: CharacterMasks.profileIdFor(genome)
-            val profile = MotionProfiles.resolve(profileId, profileOverrides, MotionProfiles.resolve(CharacterMasks.profileIdFor(genome), profileOverrides))
-            Look(genome, profile.copy(scale = profile.scale), CharacterMasks.heightFor(rank))
+            val carved = if (sculptedMonsters) CharacterMasks.sculptedFor(definitionId, rank, maskOverride) else null
+            // A carved mask moves as its tradition's spirits do.
+            val own = carved?.let { com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(it.tradition.substringBefore('+')).motion } ?: CharacterMasks.profileIdFor(genome)
+            val profile = MotionProfiles.resolve(motionOverride ?: own, profileOverrides, MotionProfiles.resolve(own, profileOverrides))
+            Look(genome, profile.copy(scale = profile.scale), CharacterMasks.heightFor(rank), carved, rank)
         }
         if (look.mesh == null && !look.building) {
             val budget = budgetFor(rank)
+            val build = {
+                val carved = look.carved
+                if (carved != null) runCatching { com.stratum.engine.model.mask.sculpt.MaskSculptor.cached(carved, CharacterMasks.sculptDetailFor(look.rank)) }.getOrNull()
+                    ?: MaskSpiritMesher.cached(look.genome, budget)
+                else MaskSpiritMesher.cached(look.genome, budget)
+            }
             val exec = builder
             if (exec == null) {
-                look.mesh = MaskSpiritMesher.cached(look.genome, budget)
+                look.mesh = build()
             } else {
                 look.building = true
                 exec.execute {
-                    look.mesh = runCatching { MaskSpiritMesher.cached(look.genome, budget) }.getOrNull()
+                    look.mesh = runCatching { build() }.getOrNull()
                     look.building = false
                 }
             }

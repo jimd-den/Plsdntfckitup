@@ -56,6 +56,7 @@ object MaskSpiritPreview {
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
         if (only == "carver") carver(out)
         if (only == "wood") wood(out)
+        if (only == "monsters") monsters(out)
         // spirits, spirits-quick, or one section: spirits-quick:fractures
         if (only != null && only.startsWith("spirits")) SpiritMaskShots.all(out, quick = only.startsWith("spirits-quick"), only = only.substringAfter(':', "").ifEmpty { null })
     }
@@ -228,6 +229,24 @@ object MaskSpiritPreview {
             decals = MeshBuilder(MaterialKind.DECAL).build(recycler), glows = glows.build(recycler),
         )
         return SceneRasterizer(width, height, TextureLibrary(), supersample = 3, shadowSize = 2048).render(frame)
+    }
+
+    /** Generated monsters as the game dresses them: each kind's carved mask from its name and rank. */
+    private fun monsters(out: File) {
+        val ranks = com.stratum.core.domain.actor.EnemyRank.entries
+        val names = listOf(
+            "forest_brute", "river_ghost", "stone_golem", "night_raider", "storm_leopard", "hex_witch", "ram_hunter", "bush_spirit",
+            "ash_wanderer", "grave_keeper", "mire_crawler", "dune_stalker", "royal_guardian", "elder_mother", "sun_bird", "cave_thing",
+        )
+        val cards = names.mapIndexed { i, n ->
+            val rank = ranks[i % ranks.size]
+            val spec = com.stratum.engine.model.mask.CharacterMasks.sculptedFor(n, rank)!!
+            val mesh = com.stratum.engine.model.mask.sculpt.MaskSculptor.carve(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.HIGH)
+            val (tz, dist) = framing(mesh, 4.4f)
+            val tr = com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(spec.tradition)
+            labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.35f)), 300, 360, distance = dist, target = Vec3(0f, 0f, tz)), "$n · ${rank.name.lowercase()} · ${tr.name}")
+        }
+        ImageIO.write(sheet(cards, 4), "png", File(out, "generated-monsters.png"))
     }
 
     /** Close portraits of the traditions, to judge the carving itself: in play's detail and the finest. */
