@@ -96,6 +96,7 @@ object MaskSculptor {
     }
 
     // Materials: what a surface is, which decides its colour and its light.
+    internal const val BROW = 12
     internal const val FACE = 0; internal const val HAIR = 1; internal const val EYE = 2; internal const val MOUTH = 3; internal const val TEETH = 4
     internal const val CREST = 6; internal const val SCAR = 10; internal const val LIP = 11; internal const val PLANK = 13
     internal const val TIER = 20; internal const val STUD = 30; internal const val COWRIE = 31
@@ -120,7 +121,8 @@ object MaskSculptor {
 
         val asym = s.dial(Dial.ASYMMETRY)
 
-        val hw = 0.22f + 0.12f * s.width * (if (s.outline == Outline.LONG) 0.8f else 1f)
+        // Long, narrow faces, as the carvers make them: never wider than about two thirds of their height.
+        val hw = 0.19f + 0.11f * s.width * (if (s.outline == Outline.LONG) 0.8f else 1f)
         val hh = (0.36f + 0.16f * s.length) * (if (s.outline == Outline.ROUND) 0.88f else 1f)
         val helmet = s.form == Form.HELMET
         val dy = (if (helmet) hw * 1.05f else hw * 0.72f) * k(Dial.FACE_DEPTH, 0.75f, 1.3f)
@@ -145,10 +147,11 @@ object MaskSculptor {
                 // Each narrows below the eyes smoothly from the eye line, so no crease runs round the head there.
                 Outline.HEART, Outline.CONCAVE -> if (zn < 0f) 1.04f - 0.54f * a.pow(1.6f) else 1.04f
                 Outline.SHIELD -> if (zn < 0f) 1.06f - 0.48f * a.pow(1.5f) else 1.06f
-                Outline.LONG -> if (zn < 0f) 1f - 0.2f * a.pow(1.6f) else 1f
+                // Tapering to a small, firm chin; the brow domed above.
+                Outline.LONG -> if (zn < 0f) 1f - 0.34f * a.pow(1.7f) else 1f - 0.08f * a * a
                 Outline.ROUND -> 1.08f
                 Outline.SQUARE -> if (zn < 0f) 1f - 0.12f * a.pow(1.6f) else 1f
-                Outline.OVAL -> 1f
+                Outline.OVAL -> if (zn < 0f) 1f - 0.4f * a.pow(1.9f) else 1f - 0.1f * a * a
             }
         }
 
@@ -313,6 +316,12 @@ object MaskSculptor {
                     sc.cut(Ellipsoid(x, y + 0.07f - od, z + hh * 0.015f, rx, 0.07f, rz, tilt * sd), FACE, 0.05f, smooth = true)
                 }
             }
+            if (od > 0.002f) {
+                // The eye band: one shallow trough across both eyes under the brow, so the brow overhangs them and the
+                // cheeks rise out of it, the way the face is roughed out before the eyes are cut.
+                val y = front(0f, eyeZ)
+                sc.cut(Ellipsoid(0f, y + 0.05f - od * 0.55f, eyeZ - hh * 0.01f, hw * 0.95f, 0.05f, hh * 0.13f), FACE, 0.06f, smooth = true)
+            }
             val muzzle = 0.02f * k(Dial.MUZZLE, 0f, 2.2f)
             val mw = hw * 0.44f * k(Dial.MOUTH_SIZE, 0.55f, 1.5f)
             if (muzzle > 0.002f && s.mouth != Mouth.BOX) {
@@ -333,7 +342,8 @@ object MaskSculptor {
             val bw = k(Dial.BROW_WEIGHT, 0.45f, 1.9f)
             when (s.brow) {
                 Brow.NONE -> Unit
-                Brow.ARCH -> sides { sd -> chain(arc(sd * (ex - hw * 0.28f), browZ - hh * 0.06f, sd * ex, browZ + hh * 0.04f, sd * (ex + hw * 0.36f), browZ - hh * 0.09f), 0.022f * bw, 0.014f * bw, 0.004f * bw, true, FACE, 0.022f) }
+                // The arches spring from the root of the nose, so brow and nose are one T-shaped form, as carved.
+                Brow.ARCH -> sides { sd -> chain(arc(sd * hw * 0.03f, browZ - hh * 0.05f, sd * ex * 0.85f, browZ + hh * 0.06f, sd * (ex + hw * 0.38f), browZ - hh * 0.1f), 0.02f * bw, 0.012f * bw, 0.004f * bw, true, BROW, 0.02f) }
                 Brow.HEART -> sides { sd ->
                     // The heart: from the temple over the eye to the top of the nose, then down the cheek to the chin.
                     chain(arc(sd * hw * 0.86f, eyeZ - hh * 0.05f, sd * ex * 1.1f, browZ + hh * 0.08f, 0f, browZ - hh * 0.02f), 0.012f * bw, 0.012f * bw, 0.002f, true, FACE, 0.016f)
@@ -594,20 +604,17 @@ object MaskSculptor {
             // The cap of hair: the head swollen a little where the hair grows.
             val cornrows = s.coiffure == Coiffure.CORNROWS || s.coiffure == Coiffure.LOBES || s.coiffure == Coiffure.CREST
             val capBase = Custom(-hw * 1.4f, -dy * 1.3f, hairZ(-dy * 1.3f) - 0.05f, hw * 1.4f, dy * 1.3f, hh * 1.2f) { x, y, z ->
-                val swell = shell.d(x, y, z) - 0.014f * hv
+                val swell = shell.d(x, y, z) - 0.006f * hv
                 val above = hairZ(y) - z
                 max(swell, above)
             }
             val cap = if (cornrows) Displaced(capBase, 0.008f) { x, y, _ -> 0.005f * vee(atan2(x, y + dy * 0.3f) * rows / PI.toFloat()) }
-            // Otherwise the hair is incised in a lattice, fine V-cuts crossing on a diagonal.
-            else Displaced(capBase, 0.005f) { x, y, z ->
-                val a = atan2(x, y + dy * 0.3f) * rows / PI.toFloat(); val b = z / 0.03f * rows / 16f
-                0.0032f * max(groove(a + b), groove(a - b))
-            }
-            sc.add(cap, HAIR, 0.01f)
-            // The hairline, finished with a raised band where hair meets face.
-            val line = curve(14) { t -> val x = hw * 0.78f * t; x to hairZ(facePlane(x, hh * 0.5f)) + 0.004f }
-            ridge(line, FloatArray(15) { 0.009f * hv }, 0f, 1.3f, true, HAIR, 0.006f)
+            // Otherwise the hair is a polished mass, combed in a few broad, shallow grooves from brow to crown.
+            else Displaced(capBase, 0.004f) { x, y, _ -> 0.0025f * groove(atan2(x, y + dy * 0.3f) * rows * 0.35f / PI.toFloat()) }
+            sc.add(cap, HAIR, 0.008f, smooth = true)
+            // The hairline: a clean incised line where hair meets face.
+            val line = curve(14) { t -> val x = hw * 0.78f * t; x to hairZ(facePlane(x, hh * 0.5f)) }
+            ridge(line, FloatArray(15) { 0.004f }, 0.002f, 1.2f, false, HAIR, 0f)
             when (s.coiffure) {
                 Coiffure.CREST -> sc.add(RoundBox(0f, -dy * 0.05f, top + hh * 0.08f * hv, hw * 0.1f * hv, dy * 0.75f, hh * 0.16f * hv, hw * 0.08f * hv), HAIR, 0.04f)
                 Coiffure.TRIPLE_CREST -> for (k in -1..1) sc.add(RoundBox(k * hw * 0.42f, -dy * 0.05f, top + hh * (0.06f - 0.03f * abs(k)) * hv, hw * 0.08f * hv, dy * 0.7f, hh * (0.15f - 0.04f * abs(k)) * hv, hw * 0.07f * hv), HAIR, 0.035f)
@@ -1173,16 +1180,19 @@ object MaskSculptor {
             var c = when (s.finish) {
                 Finish.KAOLIN -> {
                     // Chipped most where it stands proud.
-                    if (wear > wearAt - 0.14f * max(0f, bendHere)) scale(wood, grain) else mix(Pigments.argb(Pigments.KAOLIN), wood, 0.08f + 0.1f * (1f - cav))
+                    // Chipped only on edges and high points; the open face keeps its chalk, greyed in the hollows.
+                    if (bendHere > 0.25f && wear > wearAt + 0.05f - 0.2f * bendHere) scale(wood, grain) else mix(Pigments.argb(Pigments.KAOLIN), 0xFF6E5A4A.toInt(), 0.04f + 0.22f * (1f - cav))
                 }
                 Finish.BRASS -> {
                     val green = ((1f - cav) * 1.4f + 0.3f * noise(x * 20f, z * 20f, y * 20f) - 0.2f).coerceIn(0f, 1f)
                     mix(Pigments.argb(Pigments.BRASS), 0xFF3F7A62.toInt(), green * 0.7f)
                 }
-                Finish.BLACKENED, Finish.POLYCHROME -> scale(if (wear > wearAt + 0.04f) mix(finishColour(x, y, z), wood, 0.55f) else finishColour(x, y, z), grain)
+                Finish.BLACKENED, Finish.POLYCHROME -> scale(if (bendHere > 0.25f && wear > wearAt + 0.04f) mix(finishColour(x, y, z), wood, 0.55f) else finishColour(x, y, z), grain)
                 else -> scale(finishColour(x, y, z), grain)
             }
             if (m == LIP && (s.finish == Finish.KAOLIN || s.finish == Finish.POLYCHROME)) c = mix(Pigments.argb(s.accent2), c, 0.35f)
+            // The brows painted dark over a whitened or painted face, a bold line as on the dance masks.
+            if (m == BROW && (s.finish == Finish.KAOLIN || s.finish == Finish.POLYCHROME || s.finish == Finish.CAMWOOD)) c = mix(Pigments.argb(s.hair), c, 0.12f)
             if (ny > 0.15f && y > front0 * 0.3f) c = paint(c, x, z)
             return c
         }

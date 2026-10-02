@@ -103,7 +103,7 @@ class MaskCharacters(
      * a strike. [heroSpirit] chooses how it breaks; null rolls its own
      * tradition's. False flies the carving whole.
      */
-    var heroBroken: Boolean = true
+    var heroBroken: Boolean = false
         set(value) { if (field != value) { field = value; carvedFor = null; carving = null } }
 
     var heroSpirit: com.stratum.engine.model.mask.sculpt.SpiritSpec? = null
