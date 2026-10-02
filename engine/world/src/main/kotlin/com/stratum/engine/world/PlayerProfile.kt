@@ -62,7 +62,7 @@ internal class PlayerProfile(
     fun triggers(player: PlayerState): List<KeyedTrigger> = traits(player).triggers + player.skillIds.flatMap { skillId ->
         supports(player, skillId).mapNotNull { support ->
             support.trigger?.let { KeyedTrigger("support:$skillId:${support.id}", it.copy(castSkillId = it.castSkillId ?: skillId)) }
-        }
+        } + content.skill(skillId)?.grants.orEmpty().mapIndexed { i, granted -> KeyedTrigger("grant:$skillId:$i", granted) }
     }
 
     fun attributes(player: PlayerState): Map<Attribute, Int> {

@@ -69,6 +69,8 @@ internal class CombatSystem(
     val projectiles = ProjectileSystem(world)
     val zones = ZoneSystem()
     val triggers = TriggerEngine(rules)
+    /** What attacks do to the blocks, when the world can be changed. */
+    private val terrain = (world as? com.stratum.core.domain.world.MutableWorld)?.let(::TerrainImpacts)
     val flasks = FlaskSystem(content.flasks)
     private val vitals = VitalsSystem(rules)
     private val abilities = MonsterAbilities(content, director::definition)
@@ -180,6 +182,12 @@ internal class CombatSystem(
             val skill = skillFor(p.side, p.skillId) ?: return@forEach
             hit(battle, p.side, p.casterId, skill, impact.targetId, p.depth, p.position)
         }
+        // A shot that struck only the ground or a wall still lands: its voxel payload, and whatever it launches there.
+        projectiles.drainLandings().forEach { p ->
+            val skill = skillFor(p.side, p.skillId) ?: return@forEach
+            landed(battle, p.casterId, p.side, skill, p.position, Aim(p.dx, p.dy), p.depth)
+        }
+        terrain?.advance(deltaSeconds)
         zones.advance(deltaSeconds) { side -> candidatesAgainst(battle, side) }.forEach { pulse ->
             val skill = skillFor(pulse.zone.side, pulse.zone.skillId) ?: return@forEach
             pulse.targetIds.forEach { hit(battle, pulse.zone.side, pulse.zone.casterId, skill, it, pulse.zone.depth, pulse.zone.position) }
@@ -236,6 +244,7 @@ internal class CombatSystem(
         statuses.clear()
         projectiles.clear()
         zones.clear()
+        terrain?.clear()
         triggers.clear()
         vitals.clear()
         flasks.refill()
@@ -268,7 +277,25 @@ internal class CombatSystem(
             }
             else -> SkillTargeting.targets(skill, origin, aim, landing, candidates).forEach { hit(battle, side, casterId, skill, it, depth, origin) }
         }
+        // An area, beam or zone changes the ground where it lands, once, whatever it hit.
+        if (skill.delivery != SkillDelivery.PROJECTILE && skill.delivery != SkillDelivery.SELF) {
+            // A nova is centred on its caster; everything else lands where it was aimed.
+            val ground = if (skill.delivery == SkillDelivery.NOVA) origin else landing
+            skill.resolvedEffects.filterIsInstance<SkillEffect.Terrain>().forEach { terrain?.apply(it, ground, aim) }
+        }
         if (casterId == PLAYER) fire(battle, TriggerEvent.ON_SKILL_USE, depth, skill.allTags, null)
+    }
+
+    /** A projectile that came down on the ground or a wall: its voxel payload, and the attacks it launches where it fell. */
+    private fun landed(battle: Battlefield, casterId: String, side: CombatSide, skill: SkillDefinition, at: WorldPoint, aim: Aim, depth: Int) {
+        val ground = WorldPoint(at.x, at.y, (at.z - ProjectileSystem.BODY_CENTRE).coerceAtLeast(0f))
+        skill.resolvedEffects.forEach { effect ->
+            when (effect) {
+                is SkillEffect.Terrain -> terrain?.apply(effect, ground, aim)
+                is SkillEffect.CastSkill -> if (effect.target == EffectTarget.TARGET) castFollowUp(battle, casterId, side, effect.skillId, ground, at, depth)
+                else -> Unit
+            }
+        }
     }
 
     private fun launch(casterId: String, side: CombatSide, skill: SkillDefinition, origin: WorldPoint, aim: Aim, depth: Int) {
@@ -493,6 +520,8 @@ internal class CombatSystem(
                 }
                 is SkillEffect.Knockback -> if (targetId != PLAYER) impacts.strike(targetId, from, at, effect.force)
                 is SkillEffect.CastSkill -> castFollowUp(battle, casterId, side, effect.skillId, at, from, depth)
+                // A projectile's voxel payload goes off where it struck the body; areas change the ground once, in cast().
+                is SkillEffect.Terrain -> if (skill.delivery == SkillDelivery.PROJECTILE) terrain?.apply(effect, at, Aim.toward(from, at))
                 is SkillEffect.Heal -> heal(battle, targetId, effect.amount, effect.maxShare)
                 else -> Unit
             }
