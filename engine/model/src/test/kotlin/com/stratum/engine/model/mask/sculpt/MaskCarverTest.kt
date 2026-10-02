@@ -20,6 +20,14 @@ class MaskCarverTest {
     }
 
     @Test
+    fun `the peoples' traditions alone roll over a billion different masks`() {
+        assertTrue(MaskCulture.traditions.size >= 40, "traditions: ${MaskCulture.traditions.size}")
+        assertTrue(MaskCulture.traditions.map { it.id }.toSet().size == MaskCulture.traditions.size, "every tradition has its own id")
+        val rollable = MaskCulture.rollable()
+        assertTrue(rollable > BigInteger.valueOf(1_000_000_000L), "rollable from the grammars: $rollable")
+    }
+
+    @Test
     fun `every part of the mask has controls, and every dial is among them`() {
         for (p in Part.entries) assertTrue(MaskCarver.controls(p).isNotEmpty(), "$p has controls")
         for (d in Anatomy.Dial.entries) assertNotNull(MaskCarver.control("dial." + d.name.lowercase()), "$d is a control")

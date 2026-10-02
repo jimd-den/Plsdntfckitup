@@ -56,6 +56,7 @@ object MaskSpiritPreview {
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
         if (only == "carver") carver(out)
         if (only == "wood") wood(out)
+        if (only == "peoples") peoples(out)
         if (only == "monsters") monsters(out)
         // spirits, spirits-quick, or one section: spirits-quick:fractures
         if (only != null && only.startsWith("spirits")) SpiritMaskShots.all(out, quick = only.startsWith("spirits-quick"), only = only.substringAfter(':', "").ifEmpty { null })
@@ -247,6 +248,18 @@ object MaskSpiritPreview {
             labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.35f)), 300, 360, distance = dist, target = Vec3(0f, 0f, tz)), "$n · ${rank.name.lowercase()} · ${tr.name}")
         }
         ImageIO.write(sheet(cards, 4), "png", File(out, "generated-monsters.png"))
+    }
+
+    /** One mask of every people's tradition, labelled with its name and people. */
+    private fun peoples(out: File) {
+        val cu = com.stratum.engine.model.mask.sculpt.MaskCulture
+        val cards = cu.traditions.map { t ->
+            val mesh = com.stratum.engine.model.mask.sculpt.MaskSculptor.carve(cu.generate(t, 3L), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME)
+            val px = com.stratum.engine.model.mask.sculpt.MaskPortrait.render(mesh, 240, 290, yaw = 0.4f)
+            labelled(BufferedImage(240, 290, BufferedImage.TYPE_INT_RGB).also { it.setRGB(0, 0, 240, 290, px, 0, 240) }, "${t.name} · ${t.people}")
+        }
+        println("Traditions: ${cu.traditions.size}; rollable from their grammars: ${cu.rollable()}")
+        ImageIO.write(sheet(cards, 6), "png", File(out, "peoples.png"))
     }
 
     /** Close portraits of the traditions, to judge the carving itself: in play's detail and the finest. */

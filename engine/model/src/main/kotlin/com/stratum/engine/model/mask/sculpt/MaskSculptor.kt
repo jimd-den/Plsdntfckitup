@@ -124,9 +124,10 @@ object MaskSculptor {
 
         // Long, narrow faces, as the carvers make them: never wider than about two thirds of their height.
         val hw = 0.19f + 0.11f * s.width * (if (s.outline == Outline.LONG) 0.8f else 1f)
-        val hh = (0.36f + 0.16f * s.length) * (if (s.outline == Outline.ROUND) 0.88f else 1f)
+        val hh = (0.36f + 0.16f * s.length) * (when (s.outline) { Outline.ROUND -> 0.88f; Outline.DISC -> 0.8f; else -> 1f })
         val helmet = s.form == Form.HELMET
-        val dy = (if (helmet) hw * 1.05f else hw * 0.72f) * k(Dial.FACE_DEPTH, 0.75f, 1.3f)
+        // A disc mask is a flat board; everything else has the depth of a head.
+        val dy = (if (helmet) hw * 1.05f else hw * 0.72f) * k(Dial.FACE_DEPTH, 0.75f, 1.3f) * (if (s.outline == Outline.DISC) 0.5f else 1f)
         val eyeZ = hh * (0.08f - 0.24f * c(Dial.FOREHEAD))
         val browZ = eyeZ + hh * 0.2f
         val tipZ = eyeZ - hh * 0.36f * k(Dial.NOSE_LENGTH, 0.65f, 1.35f)
@@ -151,6 +152,7 @@ object MaskSculptor {
                 // Tapering to a small, firm chin; the brow domed above.
                 Outline.LONG -> if (zn < 0f) 1f - 0.34f * a.pow(1.7f) else 1f - 0.08f * a * a
                 Outline.ROUND -> 1.08f
+                Outline.DISC -> 1.12f
                 Outline.SQUARE -> if (zn < 0f) 1f - 0.12f * a.pow(1.6f) else 1f
                 Outline.OVAL -> if (zn < 0f) 1f - 0.4f * a.pow(1.9f) else 1f - 0.1f * a * a
             }
@@ -444,6 +446,18 @@ object MaskSculptor {
                         sc.cut(RoundBox(x, y + 0.02f, z, hw * 0.11f * sz, 0.05f, hw * 0.11f * sz, 0.004f, ax[0], ax[1], ax[2]), EYE)
                     }
                     Eyes.TROUGH -> sc.cut(RoundBox(x, y + 0.02f, z - hh * 0.02f, hw * 0.12f * sz, 0.06f, hh * 0.13f * sz, 0.01f, bx[0], bx[1], bx[2]), EYE, 0.008f)
+                    Eyes.DOWNCAST -> {
+                        // A heavy lid swelling down over the eye, the opening only a slit curving along its lower edge (as the Pende carve them).
+                        sc.add(Cap(x, y - 0.004f, z + hh * 0.01f, hw * 0.36f * sz, hh * 0.15f * sz, 0.055f * lid, er - sd * 0.12f), FACE, 0.014f)
+                        val w = hw * 0.27f * sz
+                        chain(arc(x - w, z - hh * 0.03f * sz - sd * tilt * w, x, z - hh * 0.085f * sz, x + w, z - hh * 0.03f * sz + sd * tilt * w), 0.009f * sz, 0.009f * sz, 0.003f, false, EYE, 0f)
+                    }
+                    Eyes.BULGING -> {
+                        // A dome standing out of the face, cut across with a slit.
+                        val rd = hw * 0.2f * sz * sqrt(lid)
+                        sc.add(Sphere(x, y - rd * 0.3f, z, rd), FACE, 0.02f, smooth = true)
+                        sc.cut(RoundBox(x, y + rd * 0.7f, z, rd * 0.62f, rd * 0.5f, 0.0075f * sz, 0.003f, bx[0], bx[1], bx[2]), EYE)
+                    }
                 }
             }
         }
@@ -475,6 +489,12 @@ object MaskSculptor {
                     prism(0.012f * nb, 0.07f * nb, 0.085f * ns)
                     alae(nx, yt, ns, nb)
                     nostrils(nx, yt + 0.05f * nb, ns)
+                }
+                Nose.UPTURNED -> {
+                    // A short bridge that turns up at the tip, the nostrils open to the front.
+                    prism(0.02f * nb, 0.055f * nb, 0.05f * ns)
+                    sc.add(Wedge(nx, yt + 0.035f * nb, tipZ - hh * 0.01f, nx, yt + 0.08f * nb, tipZ + hh * 0.07f, 0.03f * nb, 0.012f * nb, 0f, 1f, 0f, 1.3f), FACE, 0.012f, smooth = true)
+                    nostrils(nx, yt + 0.045f * nb, ns)
                 }
                 Nose.BEAK -> {
                     prism(0.02f * nb, 0.09f * nb, 0.042f * ns, tipZ + hh * 0.05f)
@@ -541,6 +561,23 @@ object MaskSculptor {
                 Mouth.TUBE -> {
                     sc.add(Cylinder(mx, y + 0.035f * lf, mouthZ, mw * 0.55f, 0.04f * lf, 0.01f), LIP, 0.016f)
                     sc.cut(Cylinder(mx, y + 0.07f * lf, mouthZ, mw * 0.3f, 0.06f * lf), MOUTH)
+                }
+                Mouth.GRIN -> {
+                    // A crescent grin stretched wide across the lower face, its corners lifted, a row of teeth along it.
+                    val gw = min(mw * 1.4f, hw * 0.8f * taper(mouthZ / hh))
+                    fun smile(t: Float) = mouthZ - 0.012f + 0.04f * t * t
+                    val upper = curve(14) { t -> (mx + gw * t) to (smile(t) + 0.016f + 0.006f * (1f - t * t)) }
+                    ridge(upper, FloatArray(15) { i -> val t = -1f + i / 7f; 0.005f + 0.011f * lf * (1f - t * t).pow(0.6f) }, 0f, 1.5f, true, LIP, 0.006f)
+                    val lower = curve(14) { t -> (mx + gw * 0.96f * t) to (smile(t) - 0.02f - 0.012f * (1f - t * t)) }
+                    ridge(lower, FloatArray(15) { i -> val t = -1f + i / 7f; 0.005f + 0.014f * lf * (1f - t * t).pow(0.6f) }, 0f, 1.6f, true, LIP, 0.006f)
+                    val opening = curve(14) { t -> (mx + gw * 0.95f * t) to smile(t) }
+                    ridge(opening, FloatArray(15) { i -> val t = -1f + i / 7f; 0.006f + 0.022f * (1f - t * t).pow(0.5f) }, 0.016f, 1.4f, false, MOUTH, 0.003f)
+                    val n = 8
+                    for (i in 0 until n) {
+                        val t = -0.8f + 1.6f * i / (n - 1)
+                        val x = mx + gw * 0.95f * t; val z = smile(t)
+                        sc.add(Wedge(x, front(x, z) + 0.004f, z + 0.013f * (1f - 0.4f * t * t), x, front(x, z) + 0.004f, z - 0.004f, gw * 0.06f, 0.002f, aspect = 0.8f), TEETH)
+                    }
                 }
             }
         }
@@ -784,6 +821,31 @@ object MaskSculptor {
                         sc.add(RoundBox(sd * w * 0.9f, -dy * 0.05f, lower - hh * 0.12f, 0.016f, 0.015f, hh * 0.12f, 0.006f), CREST, 0.01f)
                     }
                 }
+                Crown.HORN_ROW -> {
+                    // A row of straight horns standing side by side over the brow (the Bamana n'tomo).
+                    val n = s.count.coerceIn(2, 6)
+                    for (i in 0 until n) {
+                        val u = if (n == 1) 0f else (i - (n - 1) / 2f) / ((n - 1) / 2f)
+                        val x = u * hw * 0.62f * spread
+                        val pts = TubeMesh.curve(
+                            x, -dy * 0.02f, top - hh * 0.1f,
+                            x * 1.06f, -dy * 0.08f * curl, top + L * 0.4f,
+                            x * 1.12f, -dy * 0.16f * curl, top + L * (0.8f - 0.08f * abs(u)),
+                        )
+                        extra.sweep(pts, detailRings, sides, { t -> hw * 0.085f * girth * (1f - 0.85f * t) * TubeMesh.ridge(t, 6f, 0.08f * ridges) }, ::hornColour)
+                    }
+                }
+                Crown.FRAME_HORNS -> sides { sd ->
+                    // Horns rising from the crown and sweeping down round both sides of the face (the Kwele ekuk).
+                    val pts = TubeMesh.curve(
+                        sd * hw * 0.25f, -dy * 0.05f, top - hh * 0.05f,
+                        sd * hw * 0.95f * spread, dy * 0.05f, top + hh * 0.12f * curl,
+                        sd * hw * 1.35f * spread, dy * 0.15f, hh * 0.35f,
+                        sd * hw * 1.38f * spread, dy * 0.22f, -hh * 0.15f,
+                        sd * hw * 1.08f * spread, dy * 0.3f, -hh * 0.55f * curl,
+                    )
+                    extra.sweep(pts, detailRings * 2, sides, { t -> hw * 0.11f * girth * (1f - 0.7f * t) * TubeMesh.ridge(t, 10f, 0.06f * ridges) }, ::hornColour)
+                }
                 Crown.BIRD -> {
                     val z = top + hh * 0.12f
                     sc.add(Ellipsoid(0f, -dy * 0.1f, z, hw * 0.2f, hw * 0.34f, hh * 0.13f), CREST, 0.04f)
@@ -833,6 +895,15 @@ object MaskSculptor {
                     }
                 }
                 Adorn.RAFFIA_COLLAR -> raffia(46, hh * 0.85f, collar = true)
+                Adorn.LIP_PLUG -> {
+                    // A disc set in the upper lip, pale as ivory or bone.
+                    val mx = -asym * hw * 0.1f; val z = mouthZ + 0.022f
+                    sc.add(Cylinder(mx, front(mx, z) + 0.01f, z, hw * 0.16f, 0.012f, 0.004f), TEETH, 0.004f)
+                }
+                Adorn.NECK_RINGS -> {
+                    // Rings of the neck, a sign of beauty and plenty (the Mende sowei).
+                    for (i in 0 until 3) sc.add(Torus(0f, -dy * 0.15f, -hh * (1.0f + 0.13f * i), hw * (0.8f - 0.06f * i), 0.032f, floatArrayOf(0f, 0f, 1f)), FACE, 0.012f)
+                }
             }
             if (s.beard == Beard.RAFFIA) raffia(30, hh * 0.9f, collar = false)
         }
