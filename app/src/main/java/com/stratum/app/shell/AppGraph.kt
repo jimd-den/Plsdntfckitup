@@ -48,4 +48,7 @@ class AppGraph(context: Context, scope: CoroutineScope) {
 
     /** Which play hints the player has already seen, so each teaches once. */
     val hints = HintStore(context)
+
+    /** Attacks forged in the Forge of Will, and which are carried into play. */
+    val forgedAttacks = ForgedAttackStore(context)
 }
