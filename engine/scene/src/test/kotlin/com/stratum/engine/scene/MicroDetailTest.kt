@@ -175,6 +175,33 @@ class MicroDetailTest {
     }
 
     @Test
+    fun `ground dug every frame by a fight keeps showing newer detail, and ends where a fresh mesh does`() {
+        val world = world()
+        val cache = detailCache()
+        settle(cache, world, revision(world))
+        val block = content.registry.indexOf("igbo:red_earth")
+        // Craters and walls landing in one chunk, a change every frame for two seconds of frames.
+        val landed = ArrayList<Long>()
+        var last = cache.generation
+        for (frame in 0 until 240) {
+            val x = 194 + frame % 12; val y = 194 + (frame / 12) % 12
+            val top = world.surfaceAt(x, y)
+            world.setBlock(BlockPos(x, y, if (frame % 3 == 0) top else top + 1), if (frame % 3 == 0) BlockRegistry.AIR_INDEX else block)
+            cache.around(world, 200, 200, 24, revision(world))
+            assertEquals(0, cache.poppedLastCall, "frame $frame dropped a chunk to blocks")
+            if (cache.generation != last) { landed += cache.generation; last = cache.generation }
+            Thread.sleep(4)
+        }
+        // Each finished mesh goes up even though the ground has moved on since; the old way threw it away
+        // and nothing new was drawn until the digging stopped.
+        println("newer meshes drawn while digging: ${landed.size} in 240 frames")
+        assertTrue(landed.size >= 10, "only ${landed.size} newer meshes were drawn while the ground kept changing")
+        val settled = settle(cache, world, revision(world))
+        val fresh = settle(detailCache(), world, revision(world))
+        assertEquals(vertices(fresh), vertices(settled), "the dug cache and a fresh one disagree about the world")
+    }
+
+    @Test
     fun `rapid place, undo and redo at chunk borders ends where a fresh mesh of the same world does`() {
         val world = world()
         val cache = detailCache()
