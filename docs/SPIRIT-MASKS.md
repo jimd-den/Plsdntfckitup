@@ -1,4 +1,9 @@
-# Spirit masks: carved, broken open, breathing
+# Spirit masks: broken open (opt-in)
+
+> Masks fly **whole** by default (see [MASK-CARVING.md](MASK-CARVING.md)).
+> Everything here is an optional mode: `MaskSculptor.shatter` and
+> `MaskCharacters.heroBroken = true`. It is kept for effects such as a
+> boss's death or a transformation, not as the masks' normal look.
 
 A floating mask in the game is not one rigid mesh glued from primitives. It is
 carved as one block, broken along the lines its own forms draw, and flown as
@@ -6,7 +11,6 @@ pieces held round the spirit that broke it. The same pieces are its animation
 rig: even a mask that looks whole breathes, parts its jaw, lifts its brows and
 looks about with its eyes.
 
-![The traditions, broken](screenshots/spirit-masks/spirit-traditions.png)
 
 ## The method
 
@@ -59,7 +63,6 @@ looks about with its eyes.
 Drift 0 keeps the mask whole: its cracks become hairlines of light and it
 only breathes. That is the version of an exact carved mask that comes alive.
 
-![Breathing whole](screenshots/spirit-masks/spirit-breathe-strip.png)
 
 ## Temperaments
 
@@ -78,19 +81,7 @@ times 6 fractures, 8 cores, 64 combinations of relics, 5 temperaments, and
 continuous drift, piece count and splintering: the spirit layer alone
 multiplies every carved design by more than 15,000, before its dials.
 
-## Fractures
-
-![Fractures](screenshots/spirit-masks/spirit-fractures.png)
-
-## Cores
-
-![Cores](screenshots/spirit-masks/spirit-cores.png)
-
-## Alive
-
-The GIFs in `screenshots/spirit-masks/` loop: `spirit-breathe-*.gif` for the
-masks breathing whole, `spirit-anim-*.gif` for a dash and stop, a strike, a
-cast, a blow and a death.
+Pictures render with `-Ponly=spirits` (below); they are not kept in the repo.
 
 ## A note on the cultures
 
@@ -118,5 +109,5 @@ val broken = MaskSculptor.cachedShatter(spec, spirit)
 cast.track("hero", broken, profile, x, y, z, fx, fy) // MaskCast springs its rig every frame
 ```
 
-`MaskCharacters.heroCarved` flies a carved hero this way by default
-(`heroBroken`, `heroSpirit`).
+`MaskCharacters.heroCarved` flies a carved hero this way when
+`heroBroken` is set (`heroSpirit` chooses how it breaks).

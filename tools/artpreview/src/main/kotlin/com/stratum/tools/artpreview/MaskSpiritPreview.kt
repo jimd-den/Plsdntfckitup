@@ -171,6 +171,7 @@ object MaskSpiritPreview {
     }
 
     private var TILT = 0.35f
+    private const val GIF_FRAMES = 30
 
     /** Where to aim and how far back to stand so the whole mask, crown and all, fills the card. */
     private fun framing(mesh: SpiritMesh, base: Float): Pair<Float, Float> {
@@ -331,7 +332,8 @@ object MaskSpiritPreview {
             val cast = com.stratum.engine.scene.MaskCast()
             val dt = 1f / 30f
             val shots = ArrayList<BufferedImage>()
-            val every = (clip.length / dt / clip.frames).toInt().coerceAtLeast(1)
+            // Enough frames for a smooth loop; the strip takes [clip.frames] of them.
+            val every = (clip.length / dt / GIF_FRAMES).toInt().coerceAtLeast(1)
             var t = 0f; var prev = -1f; var step = 0
             // Settle first, so the hover and fringe are in their stride.
             repeat(45) { cast.begin(); cast.track("m", mesh, profile, 0f, 0f, 0f, 0.34f, 0.94f, spawning = false); cast.advance(dt) }
@@ -342,10 +344,11 @@ object MaskSpiritPreview {
                 cast.advance(dt)
                 // Tipped toward the camera above, as the stills are.
                 cast.spirits.forEach { it.pose.pitch += TILT }
-                if (step % every == 0 && shots.size < clip.frames) shots += isoScene(cast.spirits.toList(), 240, 300, distance = 5.4f, target = Vec3(0f, 0f, 1.25f))
+                if (step % every == 0 && shots.size < GIF_FRAMES) shots += isoScene(cast.spirits.toList(), 240, 300, distance = 5.4f, target = Vec3(0f, 0f, 1.25f))
                 prev = t; t += dt; step++
             }
-            ImageIO.write(strip(shots, clip.title), "png", File(out, "sculpt-anim-${c + 1}-${clip.id}.png"))
+            ImageIO.write(strip((0 until clip.frames).map { shots[it * (shots.size - 1) / (clip.frames - 1)] }, clip.title), "png", File(out, "sculpt-anim-${c + 1}-${clip.id}.png"))
+            SpiritMaskShots.gif(shots, File(out, "sculpt-anim-${c + 1}-${clip.id}.gif"), (clip.length * 1000 / shots.size).toInt())
         }
     }
 

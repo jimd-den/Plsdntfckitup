@@ -366,7 +366,11 @@ class Sculpture {
                 Op.INTERSECT -> {
                     val e = s.d(x, y, z)
                     if (e > d && p.material >= 0) mat = p.material
-                    d = if (p.blend > 0f) max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF) else max(d, e)
+                    d = when {
+                        p.blend <= 0f -> max(d, e)
+                        p.smooth -> { val h = max(p.blend - abs(d - e), 0f) / p.blend; max(d, e) + h * h * p.blend * 0.25f }
+                        else -> max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF)
+                    }
                 }
             }
         }
