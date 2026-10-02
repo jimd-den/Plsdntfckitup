@@ -15,7 +15,7 @@ import com.stratum.engine.world.Zone
  */
 internal fun combatMarksOf(projectiles: List<Projectile>, zones: List<Zone>, telegraphs: List<Telegraph>): List<CombatMark> =
     zones.map { zone ->
-        CombatMark(CombatMarkKind.ZONE, zone.position.x, zone.position.y, zone.position.z, zone.radius, zone.color)
+        CombatMark(CombatMarkKind.ZONE, zone.position.x, zone.position.y, zone.position.z, zone.radius, zone.color, look = zone.look)
     } + telegraphs.map { t ->
         CombatMark(
             CombatMarkKind.TELEGRAPH, t.center.x, t.center.y, t.center.z, t.radius, t.color,
@@ -28,5 +28,5 @@ internal fun combatMarksOf(projectiles: List<Projectile>, zones: List<Zone>, tel
             dirX = t.aimX, dirY = t.aimY, angleDegrees = t.angleDegrees, halfWidth = t.halfWidth, hostile = t.hostile,
         )
     } + projectiles.map { p ->
-        CombatMark(CombatMarkKind.PROJECTILE, p.position.x, p.position.y, p.position.z, p.radius, p.color, dirX = p.dx, dirY = p.dy)
+        CombatMark(CombatMarkKind.PROJECTILE, p.position.x, p.position.y, p.position.z, p.radius, p.color, dirX = p.dx, dirY = p.dy, look = p.look)
     }

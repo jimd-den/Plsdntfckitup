@@ -265,7 +265,7 @@ internal class CombatSystem(
             SkillDelivery.PROJECTILE -> launch(casterId, side, skill, origin, aim, depth)
             SkillDelivery.ZONE -> zones.place(
                 Zone(0, skill.id, casterId, side, landing, SkillTargeting.areaRadius(skill), skill.zone.durationSeconds, skill.zone.pulseSeconds,
-                    isTrap = skill.zone.isTrap, depth = depth, color = skill.color),
+                    isTrap = skill.zone.isTrap, depth = depth, color = skill.color, look = skill.look),
             )
             SkillDelivery.SUMMON -> summon(battle, casterId, side, skill, origin)
             SkillDelivery.SELF -> Unit
@@ -307,7 +307,7 @@ internal class CombatSystem(
                     position = WorldPoint(origin.x, origin.y, origin.z + ProjectileSystem.BODY_CENTRE),
                     dx = direction.dx, dy = direction.dy, speed = spec.speed, range = skill.range.toFloat(), radius = spec.radius,
                     pierce = spec.pierce, chain = spec.chain, fork = spec.fork, collidesWithBlocks = spec.collidesWithBlocks,
-                    depth = depth, color = skill.color,
+                    depth = depth, color = skill.color, look = skill.look,
                 ),
             )
         }

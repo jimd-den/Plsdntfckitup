@@ -1,6 +1,10 @@
 package com.stratum.engine.scene
 
 import com.stratum.core.domain.art.ActorPresentation
+import com.stratum.core.domain.attack.AttackLook
+import com.stratum.core.domain.attack.AttackSketch
+import com.stratum.core.domain.attack.DeliveryKind
+import com.stratum.core.domain.attack.SketchMark
 import com.stratum.core.domain.art.ActorStyle
 import com.stratum.core.domain.art.EffectKind
 import com.stratum.core.domain.art.MoteKind
@@ -1076,6 +1080,8 @@ class SceneBuilder(
      */
     private fun mark(mark: CombatMark, camera: SceneCamera, lights: MutableList<PointLight>, seconds: Float) {
         val color = (if (mark.hostile) director.direction.palette.hostile else mark.color) or Tint.OPAQUE
+        val look = mark.look
+        if (look != null && mark.kind != CombatMarkKind.TELEGRAPH) return forged(mark, look, camera, lights, seconds)
         when (mark.kind) {
             CombatMarkKind.PROJECTILE -> {
                 val body = mark.radius.coerceAtLeast(MIN_PROJECTILE_GLOW)
@@ -1095,6 +1101,46 @@ class SceneBuilder(
             CombatMarkKind.TELEGRAPH -> telegraph(mark, color)
         }
     }
+
+    /**
+     * A forged attack in its own look: the same [AttackSketch] marks the
+     * forge previews, laid into the world at the projectile or zone. Glows
+     * stay glows, ground marks become decals, and a streak is a run of
+     * small glows along its line.
+     */
+    private fun forged(mark: CombatMark, look: AttackLook, camera: SceneCamera, lights: MutableList<PointLight>, seconds: Float) {
+        val sketch = when (mark.kind) {
+            CombatMarkKind.PROJECTILE -> AttackSketch.body(look, seconds, if (look.body.delivery == DeliveryKind.SURFACE_WAVE) DeliveryKind.SURFACE_WAVE else DeliveryKind.BALLISTIC)
+            else -> AttackSketch.decal(look, mark.radius * 0.9f) + AttackSketch.field(look, mark.radius, seconds, DeliveryKind.IMPACT_FIELD)
+        }
+        val heading = kotlin.math.atan2(mark.dirY, mark.dirX)
+        // Ground under a flying body is half a body below it; a zone already lies on the ground.
+        val ground = if (mark.kind == CombatMarkKind.PROJECTILE) mark.z - PROJECTILE_GROUND else mark.z
+        val air = mark.z
+        var drawn = 0
+        for (raw in sketch) {
+            if (drawn >= MAX_FORGED_MARKS) break
+            val m = AttackSketch.transform(raw, mark.x, mark.y, heading)
+            when (m) {
+                is SketchMark.Glow -> { glow(camera, m.x, m.y, air + m.z, m.radius.coerceAtLeast(0.04f), argb(m.color), m.alpha * PROJECTILE_OPACITY); drawn++ }
+                is SketchMark.Ground -> { decal(m.x, m.y, ground, m.radius, argb(m.color), m.alpha, if (m.ring) Vertex.RING else Vertex.DISC); drawn++ }
+                is SketchMark.Streak -> {
+                    val dx = m.x1 - m.x0; val dy = m.y1 - m.y0; val dz = m.z1 - m.z0
+                    val length = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz)
+                    val step = (m.width * 0.8f).coerceAtLeast(0.08f)
+                    val n = (length / step).toInt().coerceIn(1, MAX_STREAK_GLOWS)
+                    for (i in 0..n) {
+                        val u = i.toFloat() / n
+                        glow(camera, m.x0 + dx * u, m.y0 + dy * u, air + m.z0 + dz * u, m.width * 0.6f, argb(m.color), m.alpha * PROJECTILE_OPACITY)
+                    }
+                    drawn += n
+                }
+            }
+        }
+        lights += PointLight(mark.x, mark.y, air, argb(look.primary), PROJECTILE_LIGHT * (0.8f + 0.2f * look.glow), 3f)
+    }
+
+    private fun argb(color: Int): Long = (color.toLong() and 0xFFFFFFFFL) or Tint.OPAQUE
 
     /** A wind-up's outline and its fill. Cones and lanes are laid out in discs, since a decal is a round mark. */
     private fun telegraph(mark: CombatMark, color: Long) {
@@ -1279,6 +1325,11 @@ class SceneBuilder(
         const val MIN_PROJECTILE_GLOW = 0.18f
         const val PROJECTILE_OPACITY = 1.6f
         const val PROJECTILE_TRAIL = 4
+        /** A forged attack's mark draws at most this many glows and decals, however busy its look. */
+        const val MAX_FORGED_MARKS = 64
+        const val MAX_STREAK_GLOWS = 10
+        /** How far below a flying body the ground lies, for a wave's or a shell's ground marks. */
+        const val PROJECTILE_GROUND = 0.6f
         const val TRAIL_STEP = 0.18f
         const val PROJECTILE_LIGHT = 0.6f
         const val ZONE_FILL = 0.3f

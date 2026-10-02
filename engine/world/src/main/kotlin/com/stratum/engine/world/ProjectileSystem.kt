@@ -39,6 +39,8 @@ data class Projectile(
     /** How many triggers deep the cast that fired it was. */
     val depth: Int = 0,
     val color: Long = 0xFFFFFFFF,
+    /** A forged attack's look, drawn in full by renderers that can. */
+    val look: com.stratum.core.domain.attack.AttackLook? = null,
 )
 
 /** A projectile touching a body. The projectile has already continued, split or stopped. */
