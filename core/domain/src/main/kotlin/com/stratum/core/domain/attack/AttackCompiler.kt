@@ -214,6 +214,7 @@ object AttackCompiler {
             ),
             zone = zone,
             grants = grants,
+            look = look,
         )
     }
 
@@ -231,6 +232,7 @@ object AttackCompiler {
         tags = setOf("$NS:attack"), castTime = castTime,
         projectile = ProjectileSpec(count = count.coerceIn(1, 12), speed = 10f, spreadDegrees = spread.coerceIn(0f, 360f)),
         zone = ZoneSpec(durationSeconds = 2.5f, pulseSeconds = 0.5f),
+        look = look,
     )
 
     private fun payloadEffects(p: Payload, element: Element, delivery: Delivery): List<SkillEffect> = when (p) {
