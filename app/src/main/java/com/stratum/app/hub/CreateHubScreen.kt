@@ -119,7 +119,7 @@ fun CreateHubScreen(
             tint = StratumTheme.colors.accentAlt,
         )
         HubCard(
-            glyph = "🗿", title = "Mask carver", promise = "Carve a sculpted African mask — sixteen peoples' traditions, every part and proportion yours",
+            glyph = "🗿", title = "Mask carver", promise = "Carve a sculpted African mask — ${com.stratum.engine.model.mask.sculpt.MaskCulture.traditions.size} peoples' traditions, every part and proportion yours",
             onClick = actions.onCarver,
             status = if (status.wearsCarvedMask) "Worn by your hero" else "Ready",
             statusTone = if (status.wearsCarvedMask) StatusTone.NEUTRAL else StatusTone.READY,

@@ -52,6 +52,19 @@ class MaskCast(capacity: Int = MotionBank.DEFAULT_CAPACITY) {
         return body
     }
 
+    /**
+     * A character whose mask is broken open by its spirit: drawn as its
+     * floating pieces round the core, each on its own spring.
+     */
+    fun track(
+        id: String, spirit: ShatteredSpirit, profile: MotionProfile, x: Float, y: Float, z: Float, facingX: Float, facingY: Float,
+        height: Float = DEFAULT_HEIGHT, spawning: Boolean = true,
+    ): MotionBody? {
+        val body = bank.track(id, profile, x, y, z, facingX, facingY, height, spawning) ?: return null
+        body.tag = spirit
+        return body
+    }
+
     fun body(id: String): MotionBody? = bank.body(id)
 
     /** The pose of a character as it will be drawn, or null. */
@@ -66,11 +79,19 @@ class MaskCast(capacity: Int = MotionBank.DEFAULT_CAPACITY) {
         bank.advance(dt)
         drawn.clear()
         bank.forEach { slot, body, pose ->
-            val mesh = body.tag as? SpiritMesh ?: return@forEach
+            val tag = body.tag
+            val broken = tag as? ShatteredSpirit
+            val mesh = broken?.core ?: tag as? SpiritMesh ?: return@forEach
             val instance = instances[slot] ?: SpiritInstance(mesh).also { instances[slot] = it }
-            if (instance.id != body.id) { instance.pose.trailCount = 0; instance.id = body.id }
+            if (instance.id != body.id) { instance.pose.trailCount = 0; instance.id = body.id; instance.rig = null }
             instance.mesh = mesh
             dress(instance.pose, body, pose, bank.fringeAt(slot), body.profile.fringe > 0f, bank.sizeAt(slot))
+            instance.shattered = broken
+            if (broken == null) instance.rig = null
+            else {
+                val rig = instance.rig?.takeIf { it.spirit === broken } ?: ShardRig(broken).also { instance.rig = it }
+                rig.update(instance.pose, dt)
+            }
             drawn += instance
         }
     }

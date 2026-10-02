@@ -48,6 +48,12 @@ data class SkillDefinition(
     val summon: SummonSpec? = null,
     /** "Half of this skill's physical damage is converted to fire", and the like. */
     val conversions: List<com.stratum.core.domain.combat.DamageConversion> = emptyList(),
+    /**
+     * Triggers its owner carries while the skill is equipped: "on a crit with
+     * this skill, cast that one". How a forged attack chains off crits, kills,
+     * blocks and dashes. Each should require a tag only this skill carries.
+     */
+    val grants: List<com.stratum.core.domain.combat.TriggerDefinition> = emptyList(),
 ) {
     init {
         require(charges >= 1) { "skill '$id' needs at least one charge" }
@@ -267,7 +273,20 @@ sealed interface SkillEffect {
      * that casts itself stops at the world's trigger depth.
      */
     data class CastSkill(val skillId: String, override val target: EffectTarget = EffectTarget.TARGET) : SkillEffect
+
+    /**
+     * Changes the blocks where it lands: blasts a crater, raises a wall that
+     * crumbles after [seconds], burns the brush away, or freezes water to ice
+     * that thaws after [seconds]. Towns' walls and the world's ritual stones
+     * are never touched.
+     */
+    data class Terrain(val change: TerrainChange, val radius: Float = 1.5f, val seconds: Float = 6f) : SkillEffect {
+        override val target: EffectTarget get() = EffectTarget.TARGET
+    }
 }
+
+/** What a [SkillEffect.Terrain] does to the blocks. */
+enum class TerrainChange { CRATER, WALL, IGNITE, FREEZE }
 
 /**
  * Live cooldown state, keyed by skill id: time to the next charge, and how

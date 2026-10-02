@@ -166,7 +166,12 @@ object GlowChannel {
     const val LINES: Byte = 2
     /** Jewels, accent bands and tips of the crest. Flares on an attack. */
     const val CREST: Byte = 3
-    const val COUNT = 4
+    /**
+     * The spirit inside a broken mask: its core, and the raw faces where the
+     * wood split, lit by the light coming through. Surges with a strike or a cast.
+     */
+    const val CORE: Byte = 4
+    const val COUNT = 5
 }
 
 /**
@@ -192,6 +197,8 @@ class SpiritPose {
     var eyes = 0f
     var lines = 0f
     var crest = 0f
+    /** The core's own light, on top of [glow]: what burns through a broken mask's cracks. */
+    var core = 0f
 
     /** 1 solid; below it the spirit dissolves through a screen-door fade. */
     var opacity = 1f
@@ -255,7 +262,7 @@ class SpiritPose {
 
     fun copyFrom(o: SpiritPose) {
         x = o.x; y = o.y; z = o.z; yaw = o.yaw; pitch = o.pitch; roll = o.roll; scale = o.scale
-        glow = o.glow; eyes = o.eyes; lines = o.lines; crest = o.crest; opacity = o.opacity
+        glow = o.glow; eyes = o.eyes; lines = o.lines; crest = o.crest; core = o.core; opacity = o.opacity
         flash = o.flash; shield = o.shield; flare = o.flare; shatter = o.shatter
         shieldX = o.shieldX; shieldY = o.shieldY; shieldZ = o.shieldZ; shieldFacingX = o.shieldFacingX; shieldFacingY = o.shieldFacingY
         o.trail.copyInto(trail); trailCount = o.trailCount
@@ -267,7 +274,7 @@ class SpiritPose {
     /** Takes what a part carried by this pose shares with it: place, heading, size, fade and flash. */
     fun copyPartFrom(o: SpiritPose) {
         x = o.x; y = o.y; z = o.z; yaw = o.yaw; pitch = o.pitch; roll = o.roll; scale = o.scale; stretch = 1f
-        opacity = o.opacity; flash = o.flash; eyes = 0f; lines = 0f; crest = 0f; glow = o.glow
+        opacity = o.opacity; flash = o.flash; eyes = 0f; lines = 0f; crest = 0f; core = o.core; glow = o.glow
     }
 
     companion object {
@@ -284,6 +291,15 @@ class SpiritInstance(var mesh: SpiritMesh, val pose: SpiritPose = SpiritPose()) 
 
     /** The live expression drawn on a bare emoji face this frame; null draws the mesh alone. */
     var features: SpiritFeatures? = null
+
+    /**
+     * A mask broken open by the spirit inside it: drawn as its floating
+     * shards round [mesh] (which is then the core) instead of [mesh] alone.
+     */
+    var shattered: ShatteredSpirit? = null
+
+    /** Where this spirit's shards are this frame, for whoever animates it; null holds them at rest. */
+    var rig: ShardRig? = null
 }
 
 /**
@@ -319,12 +335,30 @@ class SpiritEmitter {
         out[at + 2] = pose.z + (m20 * x + m21 * y + m22 * z) * s
     }
 
+    /** The world position of a point of a part moved by [local], as the part's [emit] would place it. */
+    fun worldOf(pose: SpiritPose, local: FloatArray, x: Float, y: Float, z: Float, wx: Float, wy: Float, wz: Float, out: FloatArray, at: Int = 0) {
+        val qx = local[0] * x + local[1] * y + local[2] * z + local[9]
+        val qy = local[3] * x + local[4] * y + local[5] * z + local[10]
+        val qz = local[6] * x + local[7] * y + local[8] * z + local[11]
+        worldOf(pose, qx, qy, qz, out, at)
+        out[at] += wx; out[at + 1] += wy; out[at + 2] += wz
+    }
+
     /**
      * Emits the mesh into [out]. [out] is the opaque actors' batch when the
      * spirit is solid, and the cut-out batch when it is fading, whose
      * occlusion slot is read as opacity (a dithered screen-door dissolve).
      */
-    fun emit(mesh: SpiritMesh, pose: SpiritPose, out: MeshBuilder, fading: Boolean) {
+    fun emit(mesh: SpiritMesh, pose: SpiritPose, out: MeshBuilder, fading: Boolean) = emit(mesh, pose, out, fading, null, 0f, 0f, 0f)
+
+    /**
+     * Emits the mesh as one part of a spirit: first moved in the spirit's own
+     * frame by [local] (a rotation's nine entries row by row, then a
+     * translation, in model units), then posed, then shifted [wx], [wy], [wz]
+     * in the world. A broken mask's shards are drawn this way, each where its
+     * spring has carried it.
+     */
+    fun emit(mesh: SpiritMesh, pose: SpiritPose, out: MeshBuilder, fading: Boolean, local: FloatArray?, wx: Float, wy: Float, wz: Float) {
         orient(pose)
         val s = pose.scale
         // Squash and stretch keep the volume: taller is thinner.
@@ -335,15 +369,28 @@ class SpiritEmitter {
         channel[GlowChannel.EYES.toInt()] = (base * 0.6f + pose.eyes.finite()).coerceIn(0f, 1.5f)
         channel[GlowChannel.LINES.toInt()] = (base * 0.5f + pose.lines.finite()).coerceIn(0f, 1.5f)
         channel[GlowChannel.CREST.toInt()] = (base * 0.4f + pose.crest.finite()).coerceIn(0f, 1.5f)
+        channel[GlowChannel.CORE.toInt()] = (base * 0.5f + pose.core.finite()).coerceIn(0f, 1.5f)
         val flash = pose.flash.finite().coerceIn(0f, 1f)
         val opacity = if (fading) pose.opacity.finite().coerceIn(0f, 1f) else 1f
         val p = mesh.positions; val n = mesh.normals
         val first = out.vertexCount
         val material = if (mesh.face != null) Vertex.CLAY else Vertex.ACTOR
+        val ox = pose.x + wx; val oy = pose.y + wy; val oz = pose.z + wz
         for (i in 0 until mesh.vertexCount) {
             val o = i * 3
-            val lx = p[o] * sxy; val ly = p[o + 1] * sxy; val lz = p[o + 2] * sz
-            val nx = n[o]; val ny = n[o + 1]; val nz = n[o + 2]
+            var px = p[o]; var py = p[o + 1]; var pz = p[o + 2]
+            var nx = n[o]; var ny = n[o + 1]; var nz = n[o + 2]
+            if (local != null) {
+                val qx = local[0] * px + local[1] * py + local[2] * pz + local[9]
+                val qy = local[3] * px + local[4] * py + local[5] * pz + local[10]
+                val qz = local[6] * px + local[7] * py + local[8] * pz + local[11]
+                px = qx; py = qy; pz = qz
+                val mx = local[0] * nx + local[1] * ny + local[2] * nz
+                val my = local[3] * nx + local[4] * ny + local[5] * nz
+                val mz = local[6] * nx + local[7] * ny + local[8] * nz
+                nx = mx; ny = my; nz = mz
+            }
+            val lx = px * sxy; val ly = py * sxy; val lz = pz * sz
             val g = channel[mesh.channels[i].toInt()]
             var color = mesh.colors[i]
             // A lit vertex takes on its glow colour quickly as it brightens,
@@ -353,9 +400,9 @@ class SpiritEmitter {
             if (flash > 0f) color = mixArgb(color, FLASH_WHITE, flash * 0.75f)
             val emissive = g * GLOW_EMISSIVE + base * BASE_EMISSIVE + flash * 0.6f
             out.vertex(
-                pose.x + m00 * lx + m01 * ly + m02 * lz,
-                pose.y + m10 * lx + m11 * ly + m12 * lz,
-                pose.z + m20 * lx + m21 * ly + m22 * lz,
+                ox + m00 * lx + m01 * ly + m02 * lz,
+                oy + m10 * lx + m11 * ly + m12 * lz,
+                oz + m20 * lx + m21 * ly + m22 * lz,
                 m00 * nx + m01 * ny + m02 * nz,
                 m10 * nx + m11 * ny + m12 * nz,
                 m20 * nx + m21 * ny + m22 * nz,

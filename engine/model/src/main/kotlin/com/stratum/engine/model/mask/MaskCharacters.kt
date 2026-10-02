@@ -97,6 +97,19 @@ class MaskCharacters(
     var heroCarved: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
         set(value) { if (field != value) { field = value; carvedProfile = null } }
 
+    /**
+     * The carved hero flies broken open by its spirit: its pieces floating
+     * round a burning core, breathing, dragging behind a dash and flaring on
+     * a strike. [heroSpirit] chooses how it breaks; null rolls its own
+     * tradition's. False flies the carving whole.
+     */
+    var heroBroken: Boolean = false
+        set(value) { if (field != value) { field = value; carvedFor = null; carving = null } }
+
+    var heroSpirit: com.stratum.engine.model.mask.sculpt.SpiritSpec? = null
+        set(value) { if (field != value) { field = value; carvedFor = null; carving = null } }
+
+    @Volatile private var carvedBroken: com.stratum.engine.scene.ShatteredSpirit? = null
     @Volatile private var carvedMesh: SpiritMesh? = null
     @Volatile private var carvedFor: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
     @Volatile private var carving: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
@@ -107,9 +120,14 @@ class MaskCharacters(
         if (carvedFor == spec) return carvedMesh
         if (carving != spec) {
             carving = spec
+            val broken = heroBroken; val spirit = heroSpirit
             val job = Runnable {
-                val mesh = runCatching { com.stratum.engine.model.mask.sculpt.MaskSculptor.cached(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME) }.getOrNull()
-                if (carving == spec) { carvedMesh = mesh; carvedFor = spec }
+                val sculptor = com.stratum.engine.model.mask.sculpt.MaskSculptor
+                val shattered = if (!broken) null else runCatching {
+                    sculptor.cachedShatter(spec, spirit ?: com.stratum.engine.model.mask.sculpt.MaskCulture.spiritOf(spec), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME)
+                }.getOrNull()
+                val mesh = shattered?.core ?: runCatching { sculptor.cached(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME) }.getOrNull()
+                if (carving == spec) { carvedBroken = shattered; carvedMesh = mesh; carvedFor = spec }
             }
             if (builder != null) builder.execute(job) else job.run()
         }
@@ -146,7 +164,15 @@ class MaskCharacters(
     private var frame = 0
 
     /** A monster definition's mask, mesh and profile, worked out once. */
-    private class Look(val genome: MaskGenome, val profile: MotionProfile, val height: Float) {
+    /**
+     * Monsters wear masks carved after the sculpted traditions
+     * ([CharacterMasks.sculptedFor]); false gives them the simpler genome
+     * masks. An override naming a pack's genome or preset is always worn.
+     */
+    var sculptedMonsters: Boolean = true
+        set(value) { if (field != value) { field = value; looks.clear() } }
+
+    private class Look(val genome: MaskGenome, val profile: MotionProfile, val height: Float, val carved: com.stratum.engine.model.mask.sculpt.MaskSpec? = null, val rank: EnemyRank = EnemyRank.MINION) {
         @Volatile var mesh: SpiritMesh? = null
         @Volatile var building = false
     }
@@ -182,7 +208,9 @@ class MaskCharacters(
         val profile = if (carved != null) {
             carvedProfile ?: MotionProfiles.resolve(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(heroCarved!!.tradition.substringBefore('+')).motion, profileOverrides).also { carvedProfile = it }
         } else heroProfile!!
-        val body = cast.track(id, mesh, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false) ?: return null
+        val broken = if (carved != null) carvedBroken else null
+        val body = (if (broken != null) cast.track(id, broken, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false)
+        else cast.track(id, mesh, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false)) ?: return null
         react(id, body, state, flash, impact, casting = false, aimX, aimY)
         return body
     }
@@ -327,19 +355,27 @@ class MaskCharacters(
         val key = key(definitionId, rank, maskOverride)
         val look = looks.getOrPut(key) {
             val genome = CharacterMasks.genomeFor(definitionId, rank, maskOverride)
-            val profileId = motionOverride ?: CharacterMasks.profileIdFor(genome)
-            val profile = MotionProfiles.resolve(profileId, profileOverrides, MotionProfiles.resolve(CharacterMasks.profileIdFor(genome), profileOverrides))
-            Look(genome, profile.copy(scale = profile.scale), CharacterMasks.heightFor(rank))
+            val carved = if (sculptedMonsters) CharacterMasks.sculptedFor(definitionId, rank, maskOverride) else null
+            // A carved mask moves as its tradition's spirits do.
+            val own = carved?.let { com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(it.tradition.substringBefore('+')).motion } ?: CharacterMasks.profileIdFor(genome)
+            val profile = MotionProfiles.resolve(motionOverride ?: own, profileOverrides, MotionProfiles.resolve(own, profileOverrides))
+            Look(genome, profile.copy(scale = profile.scale), CharacterMasks.heightFor(rank), carved, rank)
         }
         if (look.mesh == null && !look.building) {
             val budget = budgetFor(rank)
+            val build = {
+                val carved = look.carved
+                if (carved != null) runCatching { com.stratum.engine.model.mask.sculpt.MaskSculptor.cached(carved, CharacterMasks.sculptDetailFor(look.rank)) }.getOrNull()
+                    ?: MaskSpiritMesher.cached(look.genome, budget)
+                else MaskSpiritMesher.cached(look.genome, budget)
+            }
             val exec = builder
             if (exec == null) {
-                look.mesh = MaskSpiritMesher.cached(look.genome, budget)
+                look.mesh = build()
             } else {
                 look.building = true
                 exec.execute {
-                    look.mesh = runCatching { MaskSpiritMesher.cached(look.genome, budget) }.getOrNull()
+                    look.mesh = runCatching { build() }.getOrNull()
                     look.building = false
                 }
             }

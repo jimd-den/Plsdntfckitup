@@ -56,6 +56,14 @@ object SkillFacts {
                 is SkillEffect.CastSkill -> add("Casts ${effect.skillId.substringAfter(':')} where it lands")
                 is SkillEffect.Heal -> add("Heals")
                 is SkillEffect.RestoreResource -> add("Restores ${effect.amount}")
+                is SkillEffect.Terrain -> add(
+                    when (effect.change) {
+                        com.stratum.core.domain.actor.TerrainChange.CRATER -> "Blasts a crater"
+                        com.stratum.core.domain.actor.TerrainChange.WALL -> "Raises a wall of earth"
+                        com.stratum.core.domain.actor.TerrainChange.IGNITE -> "Burns the brush away"
+                        com.stratum.core.domain.actor.TerrainChange.FREEZE -> "Freezes water to ice"
+                    },
+                )
             }
         }
         support.trigger?.let { trigger ->

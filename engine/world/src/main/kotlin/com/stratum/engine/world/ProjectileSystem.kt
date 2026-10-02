@@ -55,6 +55,7 @@ internal data class ProjectileImpact(val projectile: Projectile, val targetId: S
 internal class ProjectileSystem(private val world: World) {
 
     private val flying = mutableListOf<Projectile>()
+    private val landed = mutableListOf<Projectile>()
     private var nextId = 0L
 
     val active: List<Projectile> get() = flying.toList()
@@ -78,7 +79,14 @@ internal class ProjectileSystem(private val world: World) {
         return impacts
     }
 
-    fun clear() = flying.clear()
+    fun clear() { flying.clear(); landed.clear() }
+
+    /**
+     * Projectiles that came down this tick without striking a body: against a
+     * wall, or at the end of their range. Where a voxel payload lands and an
+     * on-voxel-hit attack begins. Each is handed out once.
+     */
+    fun drainLandings(): List<Projectile> = landed.toList().also { landed.clear() }
 
     /** One projectile's flight this tick, in short steps so it cannot tunnel through a wall or a body. */
     private fun fly(start: Projectile, deltaSeconds: Float, candidates: List<Candidate>, impacts: MutableList<ProjectileImpact>): List<Projectile> {
@@ -90,7 +98,10 @@ internal class ProjectileSystem(private val world: World) {
             val from = projectile.position
             val to = WorldPoint(from.x + projectile.dx * step, from.y + projectile.dy * step, from.z)
             projectile = projectile.copy(position = to, range = projectile.range - step)
-            if (projectile.collidesWithBlocks && world.isSolid(BlockPos(floor(to.x).toInt(), floor(to.y).toInt(), floor(to.z).toInt()))) return emptyList()
+            if (projectile.collidesWithBlocks && world.isSolid(BlockPos(floor(to.x).toInt(), floor(to.y).toInt(), floor(to.z).toInt()))) {
+                if (landed.size < MAX_PROJECTILES) landed += projectile
+                return emptyList()
+            }
             val struck = candidates.firstOrNull { it.id !in projectile.hitIds && touches(from, to, it.position, projectile) }
             if (struck != null) {
                 impacts += ProjectileImpact(projectile, struck.id)
@@ -98,7 +109,10 @@ internal class ProjectileSystem(private val world: World) {
                 // Whatever continues flies on next tick; a split mid-step would double-count this one's travel.
                 return continued
             }
-            if (projectile.range <= 0f) return emptyList()
+            if (projectile.range <= 0f) {
+                if (landed.size < MAX_PROJECTILES) landed += projectile
+                return emptyList()
+            }
         }
         return listOf(projectile)
     }

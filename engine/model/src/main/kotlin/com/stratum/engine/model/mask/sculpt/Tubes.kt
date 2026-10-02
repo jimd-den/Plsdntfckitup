@@ -17,7 +17,22 @@ internal class TubeMesh {
     val pos = SurfaceNets.FloatBuffer(); val nrm = SurfaceNets.FloatBuffer(); val col = SurfaceNets.IntBuffer()
     val glow = SurfaceNets.IntBuffer(); val idx = SurfaceNets.IntBuffer()
 
+    /**
+     * Per vertex, which primitive (sweep, ball or box) it belongs to, and the
+     * [group] that was current when it was made: a broken mask keeps each
+     * primitive whole, and sends horns and raffia off as pieces of their own.
+     */
+    val prims = SurfaceNets.IntBuffer(); val groups = SurfaceNets.IntBuffer()
+
+    /** The group the next primitives are made in. */
+    var group = 0
+    private var prim = -1
+
     val vertexCount: Int get() = pos.size / 3
+
+    private fun begin() { prim++ }
+
+    private fun tag(count: Int) { repeat(count) { prims += prim; groups += group } }
 
     /**
      * A tube along the curve through [points] (x, y, z triples), [rings]
@@ -25,6 +40,8 @@ internal class TubeMesh {
      * functions of t from 0 (start) to 1 (tip).
      */
     fun sweep(points: FloatArray, rings: Int, sides: Int, radius: (Float) -> Float, colour: (Float) -> Int, channel: Int = 0, capEnd: Boolean = true) {
+        begin()
+        val before = vertexCount
         val n = points.size / 3
         val cx = FloatArray(rings); val cy = FloatArray(rings); val cz = FloatArray(rings)
         for (i in 0 until rings) {
@@ -77,10 +94,15 @@ internal class TubeMesh {
             col += colour(1f); glow += channel
             for (s in 0 until sides) { idx += first + last * sides + s; idx += tipIndex; idx += first + last * sides + (s + 1) % sides }
         }
+        tag(vertexCount - before)
     }
 
     /** A little sphere: a bead, a stud, a knob. */
-    fun ball(x: Float, y: Float, z: Float, r: Float, colour: Int, channel: Int = 0, detail: Int = 8) {
+    fun ball(x: Float, y: Float, z: Float, r: Float, colour: Int, channel: Int = 0, detail: Int = 8) = ellipsoid(x, y, z, r, r, r, colour, channel, detail)
+
+    /** An ellipsoid of semi-axes [rx], [ry], [rz]: a cowrie, a flattened bead. */
+    fun ellipsoid(x: Float, y: Float, z: Float, rx: Float, ry: Float, rz: Float, colour: Int, channel: Int = 0, detail: Int = 8) {
+        begin()
         val first = vertexCount
         val rings = detail; val sides = detail * 2
         for (i in 0..rings) {
@@ -88,8 +110,11 @@ internal class TubeMesh {
             for (s in 0 until sides) {
                 val ph = 2f * PI.toFloat() * s / sides
                 val ox = sin(th) * cos(ph); val oy = sin(th) * sin(ph); val oz = cos(th)
-                pos += x + ox * r; pos += y + oy * r; pos += z + oz * r
-                nrm += ox; nrm += oy; nrm += oz
+                pos += x + ox * rx; pos += y + oy * ry; pos += z + oz * rz
+                // The normal of an ellipsoid: the sphere's, stretched the other way.
+                val gx = ox / rx; val gy = oy / ry; val gz = oz / rz
+                val gl = sqrt(gx * gx + gy * gy + gz * gz).coerceAtLeast(1e-6f)
+                nrm += gx / gl; nrm += gy / gl; nrm += gz / gl
                 col += colour; glow += channel
             }
         }
@@ -98,6 +123,40 @@ internal class TubeMesh {
             val c = a + sides; val d = b + sides
             idx += a; idx += b; idx += c; idx += b; idx += d; idx += c
         }
+        tag(vertexCount - first)
+    }
+
+    /**
+     * A box of half-sizes [hx], [hy], [hz] about (x, y, z), turned by [yaw]
+     * about z: a plaque, a bar of a kanaga. Each face has its own vertices,
+     * so its edges stay sharp.
+     */
+    fun box(x: Float, y: Float, z: Float, hx: Float, hy: Float, hz: Float, colour: Int, channel: Int = 0, yaw: Float = 0f) {
+        begin()
+        val first = vertexCount
+        val c = cos(yaw); val s = sin(yaw)
+        for (f in 0 until 6) {
+            val axis = f / 2; val sign = if (f % 2 == 0) 1f else -1f
+            // The face's normal and the two directions across it, in the box's frame.
+            val n = FloatArray(3).also { it[axis] = sign }
+            val u = FloatArray(3).also { it[(axis + 1) % 3] = 1f }
+            val v = FloatArray(3).also { it[(axis + 2) % 3] = 1f }
+            val h = floatArrayOf(hx, hy, hz)
+            for (k in 0 until 4) {
+                val su = if (k == 1 || k == 2) 1f else -1f; val sv = if (k >= 2) 1f else -1f
+                val lx = n[0] * h[0] + u[0] * su * h[0] + v[0] * sv * h[0]
+                val ly = n[1] * h[1] + u[1] * su * h[1] + v[1] * sv * h[1]
+                val lz = n[2] * h[2] + u[2] * su * h[2] + v[2] * sv * h[2]
+                pos += x + lx * c - ly * s; pos += y + lx * s + ly * c; pos += z + lz
+                nrm += n[0] * c - n[1] * s; nrm += n[0] * s + n[1] * c; nrm += n[2]
+                col += colour; glow += channel
+            }
+            val o = first + f * 4
+            // Wound so the face looks out along its normal.
+            if (sign > 0f) { idx += o; idx += o + 1; idx += o + 2; idx += o; idx += o + 2; idx += o + 3 }
+            else { idx += o; idx += o + 2; idx += o + 1; idx += o; idx += o + 3; idx += o + 2 }
+        }
+        tag(24)
     }
 
     companion object {

@@ -56,6 +56,10 @@ object MaskSpiritPreview {
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
         if (only == "carver") carver(out)
         if (only == "wood") wood(out)
+        if (only == "peoples") peoples(out)
+        if (only == "monsters") monsters(out)
+        // spirits, spirits-quick, or one section: spirits-quick:fractures
+        if (only != null && only.startsWith("spirits")) SpiritMaskShots.all(out, quick = only.startsWith("spirits-quick"), only = only.substringAfter(':', "").ifEmpty { null })
     }
 
     private fun turntables(out: File) {
@@ -169,6 +173,7 @@ object MaskSpiritPreview {
     }
 
     private var TILT = 0.35f
+    private const val GIF_FRAMES = 30
 
     /** Where to aim and how far back to stand so the whole mask, crown and all, fills the card. */
     private fun framing(mesh: SpiritMesh, base: Float): Pair<Float, Float> {
@@ -191,7 +196,7 @@ object MaskSpiritPreview {
      * Masks over a stretch of dark earth, from above at the game's own
      * elevation (or [pitch]), lit by a low sun with shadows.
      */
-    private fun isoScene(
+    internal fun isoScene(
         spirits: List<SpiritInstance>, width: Int, height: Int, distance: Float, pitch: Float = com.stratum.core.domain.ai.IsometricCamera.SCENE_ELEVATION_DEGREES.toFloat(),
         target: Vec3 = Vec3(0f, 0f, 1.15f),
     ): BufferedImage {
@@ -225,6 +230,36 @@ object MaskSpiritPreview {
             decals = MeshBuilder(MaterialKind.DECAL).build(recycler), glows = glows.build(recycler),
         )
         return SceneRasterizer(width, height, TextureLibrary(), supersample = 3, shadowSize = 2048).render(frame)
+    }
+
+    /** Generated monsters as the game dresses them: each kind's carved mask from its name and rank. */
+    private fun monsters(out: File) {
+        val ranks = com.stratum.core.domain.actor.EnemyRank.entries
+        val names = listOf(
+            "forest_brute", "river_ghost", "stone_golem", "night_raider", "storm_leopard", "hex_witch", "ram_hunter", "bush_spirit",
+            "ash_wanderer", "grave_keeper", "mire_crawler", "dune_stalker", "royal_guardian", "elder_mother", "sun_bird", "cave_thing",
+        )
+        val cards = names.mapIndexed { i, n ->
+            val rank = ranks[i % ranks.size]
+            val spec = com.stratum.engine.model.mask.CharacterMasks.sculptedFor(n, rank)!!
+            val mesh = com.stratum.engine.model.mask.sculpt.MaskSculptor.carve(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.HIGH)
+            val (tz, dist) = framing(mesh, 4.4f)
+            val tr = com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(spec.tradition)
+            labelled(isoScene(listOf(single(mesh, 0f, 0f, 0.35f)), 300, 360, distance = dist, target = Vec3(0f, 0f, tz)), "$n · ${rank.name.lowercase()} · ${tr.name}")
+        }
+        ImageIO.write(sheet(cards, 4), "png", File(out, "generated-monsters.png"))
+    }
+
+    /** One mask of every people's tradition, labelled with its name and people. */
+    private fun peoples(out: File) {
+        val cu = com.stratum.engine.model.mask.sculpt.MaskCulture
+        val cards = cu.traditions.map { t ->
+            val mesh = com.stratum.engine.model.mask.sculpt.MaskSculptor.carve(cu.generate(t, 3L), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME)
+            val px = com.stratum.engine.model.mask.sculpt.MaskPortrait.render(mesh, 240, 290, yaw = 0.4f)
+            labelled(BufferedImage(240, 290, BufferedImage.TYPE_INT_RGB).also { it.setRGB(0, 0, 240, 290, px, 0, 240) }, "${t.name} · ${t.people}")
+        }
+        println("Traditions: ${cu.traditions.size}; rollable from their grammars: ${cu.rollable()}")
+        ImageIO.write(sheet(cards, 6), "png", File(out, "peoples.png"))
     }
 
     /** Close portraits of the traditions, to judge the carving itself: in play's detail and the finest. */
@@ -295,7 +330,7 @@ object MaskSpiritPreview {
         println("Share code (${code.length} chars): $code")
     }
 
-    private fun labelled(img: BufferedImage, label: String): BufferedImage {
+    internal fun labelled(img: BufferedImage, label: String): BufferedImage {
         val out = BufferedImage(img.width, img.height + 28, BufferedImage.TYPE_INT_RGB)
         val g = out.createGraphics()
         g.color = Color(0x16, 0x12, 0x10); g.fillRect(0, 0, out.width, out.height)
@@ -329,7 +364,8 @@ object MaskSpiritPreview {
             val cast = com.stratum.engine.scene.MaskCast()
             val dt = 1f / 30f
             val shots = ArrayList<BufferedImage>()
-            val every = (clip.length / dt / clip.frames).toInt().coerceAtLeast(1)
+            // Enough frames for a smooth loop; the strip takes [clip.frames] of them.
+            val every = (clip.length / dt / GIF_FRAMES).toInt().coerceAtLeast(1)
             var t = 0f; var prev = -1f; var step = 0
             // Settle first, so the hover and fringe are in their stride.
             repeat(45) { cast.begin(); cast.track("m", mesh, profile, 0f, 0f, 0f, 0.34f, 0.94f, spawning = false); cast.advance(dt) }
@@ -340,10 +376,11 @@ object MaskSpiritPreview {
                 cast.advance(dt)
                 // Tipped toward the camera above, as the stills are.
                 cast.spirits.forEach { it.pose.pitch += TILT }
-                if (step % every == 0 && shots.size < clip.frames) shots += isoScene(cast.spirits.toList(), 240, 300, distance = 5.4f, target = Vec3(0f, 0f, 1.25f))
+                if (step % every == 0 && shots.size < GIF_FRAMES) shots += isoScene(cast.spirits.toList(), 240, 300, distance = 5.4f, target = Vec3(0f, 0f, 1.25f))
                 prev = t; t += dt; step++
             }
-            ImageIO.write(strip(shots, clip.title), "png", File(out, "sculpt-anim-${c + 1}-${clip.id}.png"))
+            ImageIO.write(strip((0 until clip.frames).map { shots[it * (shots.size - 1) / (clip.frames - 1)] }, clip.title), "png", File(out, "sculpt-anim-${c + 1}-${clip.id}.png"))
+            SpiritMaskShots.gif(shots, File(out, "sculpt-anim-${c + 1}-${clip.id}.gif"), (clip.length * 1000 / shots.size).toInt())
         }
     }
 
