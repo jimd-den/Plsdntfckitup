@@ -110,8 +110,23 @@ class VectorCanvas(
         }
     }
 
+    /** Coverage of the current clip, per pixel; null draws everywhere. */
+    private var clipMask: FloatArray? = null
+
+    /**
+     * Draws [draw] clipped to the polygon [points], inside any clip already
+     * set: a glint stays inside its eye, teeth inside their mouth.
+     */
+    fun clipped(points: FloatArray, draw: () -> Unit) {
+        val scratch = VectorCanvas(width, height, left, bottom, unitsWide, unitsHigh)
+        scratch.fill(points, -1)
+        val prev = clipMask
+        clipMask = FloatArray(width * height) { o -> scratch.a[o] * (prev?.get(o) ?: 1f) }
+        try { draw() } finally { clipMask = prev }
+    }
+
     private fun blend(o: Int, argb: Int, coverage: Float) {
-        val sa = ((argb ushr 24) and 255) / 255f * coverage
+        val sa = ((argb ushr 24) and 255) / 255f * coverage * (clipMask?.get(o) ?: 1f)
         if (sa <= 0f) return
         val sr = ((argb shr 16) and 255) / 255f; val sg = ((argb shr 8) and 255) / 255f; val sb = (argb and 255) / 255f
         val da = a[o]

@@ -58,6 +58,8 @@ internal fun CreateRoutes(app: AppViewModel, route: Route.Create, stack: BackSta
         Route.Create.Mapper -> SpriteMapperRoute(app, onBack = back, modifier = modifier)
         Route.Create.Models -> ModelForgeRoute(app, onBack = back, onOpenSettings = settings, modifier = modifier)
         Route.Create.Voxels -> com.stratum.app.tools.VoxelStudioRoute(app, onBack = back, modifier = modifier)
+        Route.Create.Masks -> com.stratum.app.tools.MaskMakerRoute(app, onBack = back, modifier = modifier)
+        Route.Create.Carver -> com.stratum.app.tools.MaskCarverRoute(app, onBack = back, modifier = modifier)
         is Route.Create.Crew -> CrewRoute(
             app,
             route.preset,
@@ -105,6 +107,8 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
         paintedStyle = style.ifBlank { null },
         running = jobs.count { !it.status.settled },
         microModelCount = app.game.microModels.collectAsStateWithLifecycle().value.size,
+        wearsMakerMask = com.stratum.engine.model.mask.MaskMaker.isCode(app.game.loadout.collectAsStateWithLifecycle().value.heroMask),
+        wearsCarvedMask = com.stratum.engine.model.mask.sculpt.MaskCarver.isCode(app.game.loadout.collectAsStateWithLifecycle().value.heroMask),
     )
     CreateHubScreen(
         status = status,
@@ -118,6 +122,8 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
             onLore = { stack.push(Route.Create.Lore) },
             onSprites = { stack.push(Route.Create.Sprites) },
             onModels = { stack.push(Route.Create.Models) },
+            onMasks = { stack.push(Route.Create.Masks) },
+            onCarver = { stack.push(Route.Create.Carver) },
             onVoxels = { stack.push(Route.Create.Voxels) },
             onCrew = { stack.push(Route.Create.Crew()) },
             onMapper = { stack.push(Route.Create.Mapper) },

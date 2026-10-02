@@ -189,6 +189,23 @@ class MaskSpiritTest {
     }
 
     @Test
+    fun `the hero's mask comes back after a respawn instead of staying a finished death`() {
+        val masks = MaskCharacters()
+        fun frame(state: AnimationState, dt: Float = 0.1f) {
+            masks.begin(); masks.hero("player", 0f, 0f, 0f, 0f, 1f, state); masks.advance(dt)
+        }
+        frame(AnimationState.IDLE)
+        repeat(60) { frame(AnimationState.DIE) }
+        val dead = assertNotNull(masks.spirits.firstOrNull { it.id == "player" })
+        assertTrue(dead.pose.opacity < 0.1f || dead.pose.shatter > 0.9f, "the death played out")
+        // Respawned: the game reports the hero alive again under the same id.
+        repeat(40) { frame(AnimationState.IDLE) }
+        val back = assertNotNull(masks.spirits.firstOrNull { it.id == "player" })
+        assertTrue(back.pose.opacity > 0.9f, "the mask is drawn again after the respawn, opacity ${back.pose.opacity}")
+        assertTrue(back.pose.shatter < 0.05f, "and whole, shatter ${back.pose.shatter}")
+    }
+
+    @Test
     fun `the hero wears the chosen mask`() {
         val masks = MaskCharacters()
         masks.heroGenome = MaskGenome.presets[4]
