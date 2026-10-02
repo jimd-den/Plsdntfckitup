@@ -39,6 +39,8 @@ class SpiritStage(
     private val part = SpiritPose()
     /** Hands and a charm for each mask, made the first time that mask carries them. */
     private val parts = java.util.IdentityHashMap<SpiritMesh, Array<SpiritMesh>>()
+    /** Rigs holding broken masks at rest, for spirits nobody animates. */
+    private val still = java.util.IdentityHashMap<ShatteredSpirit, ShardRig>()
     private var tx = 0f; private var ty = 0f; private var tz = 1f
     private var rx = 0f; private var ry = 0f; private var rz = 0f
     private var ux = 0f; private var uy = 0f; private var uz = 0f
@@ -71,16 +73,22 @@ class SpiritStage(
         val glow = pose.glow.coerceIn(0f, 1.5f)
         val flare = pose.flare.coerceIn(0f, 1f)
         val eyeLight = aura
+        val broken = spirit.shattered
+        val rig = if (broken == null) null else spirit.rig?.takeIf { it.spirit === broken } ?: still.getOrPut(broken) { ShardRig(broken) }
 
         if (opacity > 0.02f) {
             val body = if (opacity < 0.999f) fading else solid
             // An emoji head wears the white die-cut edge of a sticker.
-            if (mesh.face != null && opacity > 0.9f && sticker) emitter.emitShell(mesh, pose, body, -tx, -ty, -tz, STICKER_WIDTH, STICKER_PUSH, STICKER_WHITE)
-            emitter.emit(mesh, pose, body, fading = opacity < 0.999f)
-            spirit.features?.let { emitter.emitFeatures(it, pose, body, fading = opacity < 0.999f) }
-            if (pose.fringeRibbons > 0 && pose.fringePoints > 1) fringe(mesh, pose, body, opacity)
+            if (mesh.face != null && opacity > 0.9f && sticker && broken == null) emitter.emitShell(mesh, pose, body, -tx, -ty, -tz, STICKER_WIDTH, STICKER_PUSH, STICKER_WHITE)
+            if (broken != null && rig != null) pieces(broken, rig, pose, body, opacity < 0.999f)
+            else emitter.emit(mesh, pose, body, fading = opacity < 0.999f)
+            if (broken == null) spirit.features?.let { emitter.emitFeatures(it, pose, body, fading = opacity < 0.999f) }
+            // A broken mask carries its raffia as a piece of its own, its shroud.
+            if (pose.fringeRibbons > 0 && pose.fringePoints > 1 && broken == null) fringe(mesh, pose, body, opacity)
             if (pose.handCount > 0 || pose.charms > 0) parts(mesh, pose, body, opacity < 0.999f)
         }
+
+        if (broken != null && rig != null) light(broken, rig, pose, glows, lights, opacity)
 
         // The aura: a soft halo just behind the mask, breathing with its glow.
         val behindX = -sin(pose.yaw) * -s * 0.25f
@@ -89,11 +97,20 @@ class SpiritStage(
 
         // The eyes' light: a soft bloom over each eye whenever they burn,
         // and a hot star on top when they flare (a cast, a critical).
-        val eyes = (glow * 0.5f + pose.eyes).coerceIn(0f, 2f)
+        val eyes = if (rig != null) ((glow * 0.5f + pose.eyes) * rig.eyeLight + 0.4f * rig.eyeLight).coerceIn(0f, 2f) else (glow * 0.5f + pose.eyes).coerceIn(0f, 2f)
         if (eyes > 0.05f && opacity > 0.1f) {
             val e = mesh.eyes
             for (k in 0 until 2) {
-                emitter.worldOf(pose, e[k * 3], e[k * 3 + 1] + 0.05f, e[k * 3 + 2], scratch)
+                val holder = broken?.eyeShards?.get(k) ?: -1
+                if (broken != null && rig != null) {
+                    // A broken mask's eyes ride the pieces they were carved in.
+                    if (holder < 0) continue
+                    val o = holder * 3
+                    emitter.worldOf(pose, rig.locals[holder], broken.eyes[k * 3], broken.eyes[k * 3 + 1] + 0.05f, broken.eyes[k * 3 + 2], rig.lag[o], rig.lag[o + 1], rig.lag[o + 2], scratch)
+                    // The glint: a hot point that looks about inside the eye and locks on as it strikes.
+                    emitter.worldOf(pose, rig.locals[holder], broken.eyes[k * 3] + rig.gazeX, broken.eyes[k * 3 + 1] + 0.03f, broken.eyes[k * 3 + 2] + rig.gazeZ, rig.lag[o], rig.lag[o + 1], rig.lag[o + 2], scratch, 3)
+                    quad(glows, scratch[3], scratch[4], scratch[5], s * (0.022f + 0.02f * rig.surge), HOT, rig.eyeLight * 1.3f * opacity)
+                } else emitter.worldOf(pose, e[k * 3], e[k * 3 + 1] + 0.05f, e[k * 3 + 2], scratch)
                 val strength = eyes * opacity
                 quad(glows, scratch[0], scratch[1], scratch[2], s * (0.1f + 0.08f * strength), eyeLight, strength * 0.9f)
                 if (eyes > 0.6f) quad(glows, scratch[0], scratch[1], scratch[2], s * (0.05f + 0.12f * (eyes - 0.6f)), HOT, (eyes - 0.6f) * 2.2f * opacity)
@@ -175,6 +192,63 @@ class SpiritStage(
                 val oz = rz * cos(a) * out + uz * sin(a) * out + lift
                 val fade = 1f - shatter
                 quad(glows, pose.x + ox, pose.y + oy, pose.z + oz, s * 0.12f * (0.5f + fade), if (k % 2 == 0) aura else HOT, fade * 1.6f)
+            }
+        }
+    }
+
+    /**
+     * A broken mask's solid parts: the core, burning, and every piece where
+     * its spring has carried it. The core's light reaches the raw faces of
+     * the cracks through the CORE channel.
+     */
+    private fun pieces(broken: ShatteredSpirit, rig: ShardRig, pose: SpiritPose, out: MeshBuilder, fading: Boolean) {
+        val saved = pose.core; val savedEyes = pose.eyes
+        pose.core = saved + rig.coreGlow()
+        // The carved eyes themselves burn with the breath and go dark for a blink.
+        pose.eyes = savedEyes * rig.eyeLight + rig.eyeLight - 0.5f
+        emitter.emit(broken.core, pose, out, fading, rig.coreLocal, 0f, 0f, 0f)
+        // The pieces' split faces only smoulder with it: a tint, not a lamp.
+        pose.core = saved + SPLIT_GLOW * (rig.coreGlow() - 0.6f)
+        for (i in broken.shards.indices) {
+            val o = i * 3
+            emitter.emit(broken.shards[i].mesh, pose, out, fading, rig.locals[i], rig.lag[o], rig.lag[o + 1], rig.lag[o + 2])
+        }
+        pose.core = saved; pose.eyes = savedEyes
+    }
+
+    /**
+     * The light of a broken mask: a halo round the core, threads of beads
+     * tethering every piece to it (brighter as they are flung out), and for
+     * a storm spirit, arcs leaping from the core to its pieces as it strikes.
+     */
+    private fun light(broken: ShatteredSpirit, rig: ShardRig, pose: SpiritPose, glows: MeshBuilder, lights: MutableList<PointLight>, opacity: Float) {
+        val s = pose.scale
+        val glow = rig.coreGlow()
+        val colour = broken.core.auraColor.toLong() and 0xFFFFFFFFL
+        val second = broken.core.auraSecond.toLong() and 0xFFFFFFFFL
+        emitter.worldOf(pose, rig.coreLocal, 0f, 0f, 0f, 0f, 0f, 0f, scratch)
+        val cx = scratch[0]; val cy = scratch[1]; val cz = scratch[2]
+        quad(glows, cx, cy, cz, s * (0.2f + 0.14f * rig.surge), colour, (0.35f + 0.45f * glow) * opacity)
+        quad(glows, cx, cy, cz, s * (0.06f + 0.05f * rig.surge), HOT, glow * 0.9f * opacity)
+        if (glow > 0.7f) lights += PointLight(cx, cy, cz, colour, (glow - 0.5f) * CORE_LIGHT, 2.5f)
+        val tether = (0.16f + 0.6f * rig.surge) * opacity * (1f - rig.scatter)
+        val n = broken.shards.size
+        for (i in 0 until n) {
+            val o = i * 3
+            emitter.worldOf(pose, rig.locals[i], 0f, 0f, 0f, rig.lag[o], rig.lag[o + 1], rig.lag[o + 2], scratch)
+            val px = scratch[0]; val py = scratch[1]; val pz = scratch[2]
+            if (tether > 0.02f) for (k in 1..TETHER_BEADS) {
+                val f = k / (TETHER_BEADS + 1f)
+                quad(glows, cx + (px - cx) * f, cy + (py - cy) * f, cz + (pz - cz) * f, s * 0.011f * (1.3f - f * 0.6f), if (k % 2 == 0) second else colour, tether * (1f - 0.5f * f))
+            }
+            // A storm spirit's arcs: a jagged run of sparks to a few of its pieces, flickering as it surges.
+            if (broken.arcs && rig.surge > 0.15f && ((rig.time * 14f).toInt() + i * 5) % 3 == 0) {
+                val strength = (rig.surge - 0.15f) * 1.8f * opacity
+                for (k in 1..ARC_SPARKS) {
+                    val f = k / (ARC_SPARKS + 1f)
+                    val zig = (if (k % 2 == 0) 1f else -1f) * s * 0.025f * kotlin.math.sin(rig.time * 40f + i + k)
+                    quad(glows, cx + (px - cx) * f + rx * zig, cy + (py - cy) * f + ry * zig, cz + (pz - cz) * f + uz * zig, s * 0.016f, if (k % 2 == 0) HOT else colour, strength)
+                }
             }
         }
     }
@@ -263,6 +337,11 @@ class SpiritStage(
         const val SHIELD_BEADS = 18
         const val SHARDS = 12
         const val FLARE_LIGHT = 1.6f
+        const val CORE_LIGHT = 1.2f
+        /** How much of the core's light reaches the split faces of the pieces. */
+        const val SPLIT_GLOW = 0.35f
+        const val TETHER_BEADS = 4
+        const val ARC_SPARKS = 6
         const val HOT = 0xFFFFF6E6L
         /** The sticker edge: how far the white shell swells past the head, how far it sits behind it, and its white. */
         const val STICKER_WIDTH = 0.07f

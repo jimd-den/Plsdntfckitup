@@ -1,5 +1,10 @@
 package com.stratum.engine.model.mask.sculpt
 
+import com.stratum.engine.model.mask.sculpt.Spirit.Core as C
+import com.stratum.engine.model.mask.sculpt.Spirit.Fracture as F
+import com.stratum.engine.model.mask.sculpt.Spirit.Relic as Rl
+import com.stratum.engine.model.mask.sculpt.Spirit.Role as R
+import com.stratum.engine.model.mask.sculpt.Spirit.Temper as T
 import kotlin.random.Random
 
 /**
@@ -34,10 +39,12 @@ object Anatomy {
     enum class Scar(val label: String) {
         ICHI("Ichi lines"), TEMPLES("Temple bars"), CHEEKS("Cheek cuts"), KELOID_DIAMONDS("Keloid diamonds"),
         CENTRE_RIDGE("Centre ridge"), STRIATIONS("Striations"), CHEEK_KELOIDS("Cheek keloids"), TEARS("Tear lines"),
+        NSIBIDI("Nsibidi-style signs"),
     }
     enum class Coiffure(val label: String) {
         NONE("Bare"), CAP("Smooth cap"), CORNROWS("Cornrows"), CREST("Sagittal crest"), TRIPLE_CREST("Three crests"),
         LOBES("Lobed coiffure"), KNOTS("Hair knots"), COMBS("Crested combs"), TOPKNOT("Topknot"),
+        ARCHES("Arched crests"),
     }
     enum class Crown(val label: String) {
         NONE("None"), ANTELOPE("Antelope horns"), RAM("Ram horns"), BUFFALO("Buffalo horns"), TIERS("Tiered superstructure"),
@@ -79,6 +86,87 @@ object Anatomy {
         WEAR("Wear", Part.SURFACE), GRAIN("Grain", Part.SURFACE), PATINA("Patina", Part.SURFACE), TOOL_MARKS("Adze marks", Part.SURFACE),
     }
 }
+
+/**
+ * The spirit inside a mask, and how it breaks the mask open.
+ *
+ * In the traditions the generator draws on, a mask is not an object to hang
+ * on a wall: danced, it is the vessel of a spirit (among the Igbo, *mmuo*).
+ * A floating mask that has cracked into pieces held round a glowing core
+ * shows that power as too much for the wood to hold. Each tradition decides
+ * what the spirit is for ([Role]), how its pieces move ([Temper]), how it
+ * tends to break ([Fracture]), what burns inside ([Core]) and what drifts
+ * round it ([Relic]).
+ */
+object Spirit {
+    /** What the spirit is for among the people who dance it. */
+    enum class Role(val label: String) {
+        ANCESTRAL_PURITY("Ancestral purity"), MARTIAL_FEROCITY("Martial ferocity"), COSMIC_POWER("Cosmic power"),
+        JUDICIAL_JUSTICE("Judgement"), AXIS_MUNDI("Order of the world"), ANCESTRAL_MATRIARCH("Ancestral mother"),
+        ROYAL_MAJESTY("Royal majesty"), WATER_SPIRIT("Water and season"), PERSONAL_POWER("Personal achievement"),
+        SATIRE("Satire and social order"), BUSH_SPIRIT("Spirits of the bush"), MEDIATION("Mediation and grace"),
+        INITIATION("Initiation"), OUR_MOTHERS("Honouring the Mothers"),
+    }
+
+    /** How its pieces move: see [com.stratum.engine.scene.SpiritTemperament]. */
+    enum class Temper(val label: String) {
+        AUSTERE("Austere: still and aligned"), STORM("Storm: crackling, flaring"), MONUMENTAL("Monumental: heavy sway"),
+        BREATHING("Breathing: solemn swell"), RESTLESS("Restless: never still"),
+    }
+
+    /** How the mask breaks. */
+    enum class Fracture(val label: String, val about: String) {
+        SUSPENDED_FACETS("Suspended facets", "Brows, cheeks, bridge, jaw and crest each float apart."),
+        SPLIT_VISAGE("Split visage", "Cleft down the middle, the halves drifting apart round the core."),
+        SHATTERED_CROWN("Shattered crown", "The face holds; the crown, combs and crest break into floating pieces."),
+        FLOATING_QUADRANTS("Floating quadrants", "Quartered across the eyes and down the nose."),
+        DRIFTING_JAW("Drifting jaw", "The jaw breaks away at the mouth and hangs below."),
+        DISSOLVED_CHIN("Dissolved chin", "The jaw crumbles to embers held in the core's light."),
+    }
+
+    /** What burns inside: the light through the cracks, ARGB [glow] and [second]. */
+    enum class Core(val label: String, val glow: Int, val second: Int) {
+        THUNDER("Thunder wisp", 0xFF9CD6FF.toInt(), 0xFFF2FAFF.toInt()),
+        SOLAR("Solar ember", 0xFFFFAE45.toInt(), 0xFFFFE28A.toInt()),
+        LEOPARD("Leopard void", 0xFFB58CFF.toInt(), 0xFF5FFFC4.toInt()),
+        MARSH("Marsh emerald", 0xFF58F2A2.toInt(), 0xFFC8FF8A.toInt()),
+        FIREFLY("Firefly swarm", 0xFFFFE468.toInt(), 0xFFB6FF6A.toInt()),
+        MOON("Kaolin moon", 0xFFDCE9FF.toInt(), 0xFFFFFFFF.toInt()),
+        CAMWOOD("Camwood blood", 0xFFFF5636.toInt(), 0xFFFFA36E.toInt()),
+        INDIGO("Indigo tide", 0xFF6A86FF.toInt(), 0xFF9CE6FF.toInt()),
+    }
+
+    /** What drifts round the head. */
+    enum class Relic(val label: String) {
+        BRONZE_PLAQUE("Bronze plaques"), BRASS_BELL("Brass bells"), HALO("Halo disc"), COWRIE("Cowries"), KANAGA("Kanaga cross"), MIRROR("Mirrors"),
+    }
+}
+
+/** A mask's spirit, fully specified: how it breaks, what burns inside, how it moves. */
+data class SpiritSpec(
+    val fracture: Spirit.Fracture = Spirit.Fracture.SUSPENDED_FACETS,
+    val core: Spirit.Core = Spirit.Core.SOLAR,
+    val temper: Spirit.Temper = Spirit.Temper.BREATHING,
+    /** 0 pieces nearly touching .. 1 flung wide. */
+    val drift: Float = 0.5f,
+    /** 0 fewest pieces .. 1 most. */
+    val pieces: Float = 0.5f,
+    /** 0 clean splits along the grain .. 1 splintered. */
+    val jag: Float = 0.5f,
+    val relics: Set<Spirit.Relic> = emptySet(),
+    val seed: Long = 0L,
+)
+
+/** A tradition's spirit: its role and temper, and weighted ways it breaks and burns. */
+class SpiritGrammar(
+    val role: Spirit.Role,
+    val temper: Spirit.Temper,
+    val fractures: List<Pair<Spirit.Fracture, Int>>,
+    val cores: List<Pair<Spirit.Core, Int>>,
+    /** Each relic with its chance of drifting round the head. */
+    val relics: List<Pair<Spirit.Relic, Float>> = emptyList(),
+    val drift: ClosedFloatingPointRange<Float> = 0.3f..0.75f,
+)
 
 /** A mask, fully specified: every choice the sculptor needs, in the carvers' terms. */
 data class MaskSpec(
@@ -155,6 +243,8 @@ class Tradition(
     /** The motion profile its spirits move with ([com.stratum.core.domain.motion.MotionProfiles]). */
     val motion: String,
     val grammar: Grammar,
+    /** The spirit its masks hold, and how it breaks them. */
+    val spirit: SpiritGrammar,
 )
 
 /** Weighted options for every part of a mask. */
@@ -206,13 +296,14 @@ object MaskCulture {
                 noses = w(Anatomy.Nose.LONG to 4, Anatomy.Nose.TRIANGLE to 1), mouths = w(Anatomy.Mouth.CLOSED to 3, Anatomy.Mouth.OPEN to 2, Anatomy.Mouth.TEETH to 1),
                 ears = w(Anatomy.Ears.NONE to 2, Anatomy.Ears.SMALL to 1),
                 scars = c(Anatomy.Scar.ICHI to 0.4f, Anatomy.Scar.TEMPLES to 0.5f, Anatomy.Scar.CENTRE_RIDGE to 0.3f),
-                coiffures = w(Anatomy.Coiffure.COMBS to 5, Anatomy.Coiffure.TRIPLE_CREST to 2, Anatomy.Coiffure.KNOTS to 1), counts = 3..5,
+                coiffures = w(Anatomy.Coiffure.ARCHES to 4, Anatomy.Coiffure.COMBS to 3, Anatomy.Coiffure.TRIPLE_CREST to 2, Anatomy.Coiffure.KNOTS to 1), counts = 3..5,
                 adorn = c(Anatomy.Adorn.COWRIES to 0.3f, Anatomy.Adorn.EARRINGS to 0.3f, Anatomy.Adorn.BEADS to 0.2f),
                 finishes = w(Anatomy.Finish.KAOLIN to 6, Anatomy.Finish.POLYCHROME to 2),
                 patterns = c(Anatomy.Pattern.ULI to 0.7f, Anatomy.Pattern.EYE_RINGS to 0.2f),
                 woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER), hairs = listOf(Pigments.LAMPBLACK, Pigments.BLACKWOOD),
                 accents = listOf(Pigments.VERMILION, Pigments.OCHRE, Pigments.LAMPBLACK, Pigments.CAMWOOD), glows = listOf(EMBER, GOLDEN), raffia = 0.1f..0.5f,
             ),
+            spirit = SpiritGrammar(role = R.ANCESTRAL_PURITY, temper = T.BREATHING, fractures = w(F.SHATTERED_CROWN to 4, F.SUSPENDED_FACETS to 2, F.SPLIT_VISAGE to 1), cores = w(C.MOON to 3, C.SOLAR to 2, C.FIREFLY to 1), relics = c(Rl.MIRROR to 0.3f, Rl.HALO to 0.3f)),
         ),
         Tradition(
             "mgbedike", "Mgbedike", "Igbo", "South-eastern Nigeria",
@@ -224,7 +315,7 @@ object MaskCulture {
                 brows = w(Anatomy.Brow.SHELF to 3, Anatomy.Brow.ARCH to 1), eyes = w(Anatomy.Eyes.TUBE to 5, Anatomy.Eyes.ROUND to 1),
                 noses = w(Anatomy.Nose.BROAD to 4, Anatomy.Nose.TRIANGLE to 1), mouths = w(Anatomy.Mouth.TEETH to 6, Anatomy.Mouth.BOX to 1),
                 ears = w(Anatomy.Ears.SMALL to 3, Anatomy.Ears.NONE to 1),
-                scars = c(Anatomy.Scar.CHEEKS to 0.5f, Anatomy.Scar.ICHI to 0.3f),
+                scars = c(Anatomy.Scar.CHEEKS to 0.5f, Anatomy.Scar.ICHI to 0.3f, Anatomy.Scar.NSIBIDI to 0.12f),
                 coiffures = w(Anatomy.Coiffure.NONE to 2, Anatomy.Coiffure.CAP to 2, Anatomy.Coiffure.CORNROWS to 1),
                 crowns = w(Anatomy.Crown.ANTELOPE to 4, Anatomy.Crown.BUFFALO to 3, Anatomy.Crown.RAM to 1), crownSize = 0.55f..1f,
                 beards = w(Anatomy.Beard.RAFFIA to 3, Anatomy.Beard.CARVED to 1, Anatomy.Beard.NONE to 1),
@@ -234,6 +325,7 @@ object MaskCulture {
                 woods = listOf(Pigments.MAHOGANY, Pigments.BLACKWOOD, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.VERMILION, Pigments.OCHRE),
                 horns = listOf(Pigments.BONE, Pigments.KAOLIN, Pigments.UMBER), glows = listOf(BLOOD, EMBER), raffia = 0.4f..0.9f,
             ),
+            spirit = SpiritGrammar(role = R.MARTIAL_FEROCITY, temper = T.STORM, fractures = w(F.SUSPENDED_FACETS to 3, F.DRIFTING_JAW to 3, F.SPLIT_VISAGE to 1), cores = w(C.THUNDER to 4, C.CAMWOOD to 2), relics = c(Rl.BRASS_BELL to 0.2f), drift = 0.45f..0.9f),
         ),
         Tradition(
             "okoroshi", "Okoroshi", "Igbo", "Owerri region, south-eastern Nigeria",
@@ -244,13 +336,14 @@ object MaskCulture {
                 width = 0.3f..0.6f, length = 0.55f..0.95f,
                 brows = w(Anatomy.Brow.HEART to 3, Anatomy.Brow.ARCH to 2), eyes = w(Anatomy.Eyes.SLIT to 2, Anatomy.Eyes.ROUND to 2, Anatomy.Eyes.CRESCENT to 2),
                 noses = w(Anatomy.Nose.LONG to 5), mouths = w(Anatomy.Mouth.TEETH to 3, Anatomy.Mouth.PURSED to 2, Anatomy.Mouth.OPEN to 1),
-                scars = c(Anatomy.Scar.ICHI to 0.5f, Anatomy.Scar.CENTRE_RIDGE to 0.4f),
+                scars = c(Anatomy.Scar.ICHI to 0.5f, Anatomy.Scar.CENTRE_RIDGE to 0.4f, Anatomy.Scar.NSIBIDI to 0.15f),
                 coiffures = w(Anatomy.Coiffure.CREST to 2, Anatomy.Coiffure.CAP to 2, Anatomy.Coiffure.NONE to 1),
                 finishes = w(Anatomy.Finish.KAOLIN to 3, Anatomy.Finish.BLACKENED to 3),
                 patterns = c(Anatomy.Pattern.EYE_RINGS to 0.4f, Anatomy.Pattern.BANDS to 0.2f),
                 woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.OCHRE, Pigments.LAMPBLACK),
                 glows = listOf(MOON, EMBER), raffia = 0.2f..0.8f,
             ),
+            spirit = SpiritGrammar(role = R.WATER_SPIRIT, temper = T.RESTLESS, fractures = w(F.SPLIT_VISAGE to 2, F.DISSOLVED_CHIN to 2, F.FLOATING_QUADRANTS to 1), cores = w(C.INDIGO to 3, C.MOON to 2, C.MARSH to 1), relics = c(Rl.COWRIE to 0.3f)),
         ),
         Tradition(
             "ikenga", "Ikenga", "Igbo", "South-eastern Nigeria",
@@ -269,6 +362,7 @@ object MaskCulture {
                 woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER, Pigments.MAHOGANY), horns = listOf(Pigments.UMBER, Pigments.BLACKWOOD, Pigments.BONE),
                 glows = listOf(GOLDEN, EMBER), raffia = 0f..0.3f,
             ),
+            spirit = SpiritGrammar(role = R.PERSONAL_POWER, temper = T.MONUMENTAL, fractures = w(F.SHATTERED_CROWN to 2, F.SUSPENDED_FACETS to 2), cores = w(C.SOLAR to 3, C.CAMWOOD to 1), relics = c(Rl.BRONZE_PLAQUE to 0.3f)),
         ),
         Tradition(
             "ijele", "Ijele", "Igbo", "Anambra, south-eastern Nigeria",
@@ -287,6 +381,7 @@ object MaskCulture {
                 woods = listOf(Pigments.MAHOGANY, Pigments.UMBER), accents = listOf(Pigments.VERMILION, Pigments.OCHRE, Pigments.JADE, Pigments.KAOLIN),
                 glows = listOf(GOLDEN), raffia = 0.5f..1f,
             ),
+            spirit = SpiritGrammar(role = R.ROYAL_MAJESTY, temper = T.MONUMENTAL, fractures = w(F.SHATTERED_CROWN to 5, F.SUSPENDED_FACETS to 1), cores = w(C.SOLAR to 2, C.FIREFLY to 2), relics = c(Rl.MIRROR to 0.7f, Rl.BRASS_BELL to 0.5f, Rl.BRONZE_PLAQUE to 0.3f)),
         ),
         Tradition(
             "afikpo", "Okumkpa", "Afikpo Igbo (Ehugbo)", "Ebonyi, south-eastern Nigeria",
@@ -303,6 +398,7 @@ object MaskCulture {
                 woods = listOf(Pigments.IROKO, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.VERMILION, Pigments.OCHRE, Pigments.LAMPBLACK),
                 glows = listOf(EMBER, MOON), raffia = 0.4f..0.9f,
             ),
+            spirit = SpiritGrammar(role = R.SATIRE, temper = T.RESTLESS, fractures = w(F.SPLIT_VISAGE to 4, F.FLOATING_QUADRANTS to 2, F.DRIFTING_JAW to 1), cores = w(C.FIREFLY to 2, C.SOLAR to 1, C.MOON to 1)),
         ),
         Tradition(
             "ogbodo_enyi", "Ogbodo Enyi", "Igbo", "Northern Igbo, south-eastern Nigeria",
@@ -318,6 +414,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.EYE_RINGS to 0.6f),
                 woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.CAMWOOD), glows = listOf(EMBER, BLOOD), raffia = 0.3f..0.8f,
             ),
+            spirit = SpiritGrammar(role = R.MARTIAL_FEROCITY, temper = T.MONUMENTAL, fractures = w(F.DRIFTING_JAW to 4, F.SUSPENDED_FACETS to 2), cores = w(C.CAMWOOD to 2, C.SOLAR to 2), relics = c(Rl.BRASS_BELL to 0.3f)),
         ),
         Tradition(
             "punu", "Okuyi", "Punu", "Southern Gabon",
@@ -332,6 +429,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.EYE_RINGS to 0.2f),
                 woods = listOf(Pigments.UMBER, Pigments.BLACKWOOD), hairs = listOf(Pigments.LAMPBLACK), accents = listOf(Pigments.CAMWOOD, Pigments.LAMPBLACK), glows = listOf(MOON),
             ),
+            spirit = SpiritGrammar(role = R.ANCESTRAL_PURITY, temper = T.AUSTERE, fractures = w(F.SHATTERED_CROWN to 3, F.SPLIT_VISAGE to 1, F.SUSPENDED_FACETS to 1), cores = w(C.MOON to 4), relics = c(Rl.HALO to 0.3f), drift = 0.2f..0.55f),
         ),
         Tradition(
             "fang", "Ngil", "Fang", "Gabon and Equatorial Guinea",
@@ -345,6 +443,7 @@ object MaskCulture {
                 coiffures = w(Anatomy.Coiffure.CREST to 3, Anatomy.Coiffure.NONE to 1), finishes = w(Anatomy.Finish.KAOLIN to 6),
                 woods = listOf(Pigments.UMBER, Pigments.BLACKWOOD), accents = listOf(Pigments.LAMPBLACK), glows = listOf(MOON),
             ),
+            spirit = SpiritGrammar(role = R.JUDICIAL_JUSTICE, temper = T.AUSTERE, fractures = w(F.SPLIT_VISAGE to 4, F.SUSPENDED_FACETS to 2), cores = w(C.MOON to 3, C.LEOPARD to 1), drift = 0.2f..0.5f),
         ),
         Tradition(
             "dan", "Deangle and Gunye Ge", "Dan", "Liberia and Côte d'Ivoire",
@@ -359,6 +458,7 @@ object MaskCulture {
                 adorn = c(Anatomy.Adorn.RAFFIA_COLLAR to 0.5f), patterns = c(Anatomy.Pattern.EYE_RINGS to 0.4f),
                 woods = listOf(Pigments.BLACKWOOD), accents = listOf(Pigments.KAOLIN), glows = listOf(EMBER), raffia = 0.3f..0.8f,
             ),
+            spirit = SpiritGrammar(role = R.MEDIATION, temper = T.AUSTERE, fractures = w(F.FLOATING_QUADRANTS to 2, F.SUSPENDED_FACETS to 2, F.DRIFTING_JAW to 1), cores = w(C.SOLAR to 2, C.MOON to 2), drift = 0.2f..0.55f),
         ),
         Tradition(
             "songye", "Kifwebe", "Songye", "Democratic Republic of the Congo",
@@ -373,6 +473,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.STRIATED to 1f),
                 woods = listOf(Pigments.UMBER, Pigments.MAHOGANY), accents = listOf(Pigments.KAOLIN), glows = listOf(BLOOD, EMBER), raffia = 0.5f..1f,
             ),
+            spirit = SpiritGrammar(role = R.COSMIC_POWER, temper = T.STORM, fractures = w(F.FLOATING_QUADRANTS to 3, F.SUSPENDED_FACETS to 3, F.SHATTERED_CROWN to 1), cores = w(C.THUNDER to 3, C.LEOPARD to 2, C.CAMWOOD to 1), drift = 0.45f..0.9f),
         ),
         Tradition(
             "bwa", "Nwantantay", "Bwa", "Burkina Faso",
@@ -387,6 +488,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.CHECKER to 0.8f, Anatomy.Pattern.CONCENTRIC to 0.9f, Anatomy.Pattern.TRIANGLES to 0.6f),
                 woods = listOf(Pigments.UMBER, Pigments.IROKO), accents = listOf(Pigments.KAOLIN, Pigments.LAMPBLACK, Pigments.VERMILION), glows = listOf(EMBER), raffia = 0.6f..1f,
             ),
+            spirit = SpiritGrammar(role = R.BUSH_SPIRIT, temper = T.MONUMENTAL, fractures = w(F.SHATTERED_CROWN to 5, F.DISSOLVED_CHIN to 1), cores = w(C.FIREFLY to 3, C.MARSH to 2), relics = c(Rl.HALO to 0.2f)),
         ),
         Tradition(
             "dogon", "Kanaga", "Dogon", "Bandiagara, Mali",
@@ -401,6 +503,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.TRIANGLES to 0.4f, Anatomy.Pattern.DOTS to 0.4f),
                 woods = listOf(Pigments.IROKO, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.LAMPBLACK, Pigments.VERMILION), glows = listOf(EMBER), raffia = 0.6f..1f,
             ),
+            spirit = SpiritGrammar(role = R.AXIS_MUNDI, temper = T.MONUMENTAL, fractures = w(F.SHATTERED_CROWN to 4, F.FLOATING_QUADRANTS to 2), cores = w(C.SOLAR to 3, C.MOON to 1), relics = c(Rl.KANAGA to 0.5f)),
         ),
         Tradition(
             "kuba", "Ngady aMwaash", "Kuba", "Democratic Republic of the Congo",
@@ -416,6 +519,7 @@ object MaskCulture {
                 patterns = c(Anatomy.Pattern.TRIANGLES to 0.9f, Anatomy.Pattern.BANDS to 0.4f),
                 woods = listOf(Pigments.UMBER, Pigments.MAHOGANY), accents = listOf(Pigments.KAOLIN, Pigments.LAMPBLACK, Pigments.OCHRE), glows = listOf(GOLDEN),
             ),
+            spirit = SpiritGrammar(role = R.ROYAL_MAJESTY, temper = T.BREATHING, fractures = w(F.SUSPENDED_FACETS to 3, F.DISSOLVED_CHIN to 2), cores = w(C.SOLAR to 3, C.FIREFLY to 1), relics = c(Rl.COWRIE to 0.8f, Rl.BRONZE_PLAQUE to 0.2f)),
         ),
         Tradition(
             "chokwe", "Mwana Pwo", "Chokwe", "Angola, DRC and Zambia",
@@ -430,6 +534,7 @@ object MaskCulture {
                 adorn = c(Anatomy.Adorn.EARRINGS to 0.6f),
                 woods = listOf(Pigments.CAMWOOD, Pigments.MAHOGANY), hairs = listOf(Pigments.LAMPBLACK, Pigments.UMBER), glows = listOf(EMBER),
             ),
+            spirit = SpiritGrammar(role = R.ANCESTRAL_MATRIARCH, temper = T.BREATHING, fractures = w(F.SUSPENDED_FACETS to 3, F.DISSOLVED_CHIN to 2, F.SPLIT_VISAGE to 1), cores = w(C.CAMWOOD to 3, C.SOLAR to 1), relics = c(Rl.HALO to 0.2f)),
         ),
         Tradition(
             "senufo", "Kpeliye'e", "Senufo", "Côte d'Ivoire, Mali and Burkina Faso",
@@ -444,6 +549,58 @@ object MaskCulture {
                 finishes = w(Anatomy.Finish.BLACKENED to 3, Anatomy.Finish.RAW to 2),
                 woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER), glows = listOf(GOLDEN),
             ),
+            spirit = SpiritGrammar(role = R.INITIATION, temper = T.AUSTERE, fractures = w(F.SHATTERED_CROWN to 3, F.SUSPENDED_FACETS to 2), cores = w(C.SOLAR to 2, C.FIREFLY to 2, C.MARSH to 1)),
+        ),
+        Tradition(
+            "gelede", "Gelede", "Yoruba", "South-western Nigeria and Benin",
+            "Danced in pairs to honour and appease the Mothers (awon iya wa), the elder women whose power can heal or harm: a calm helmet face with full cheeks and heavy-lidded eyes under a carved superstructure, brightly painted.",
+            "spirit:ijele",
+            Grammar(
+                forms = w(Anatomy.Form.HELMET to 4), outlines = w(Anatomy.Outline.OVAL to 3, Anatomy.Outline.ROUND to 1), width = 0.55f..0.8f, length = 0.4f..0.6f,
+                brows = w(Anatomy.Brow.ARCH to 3), eyes = w(Anatomy.Eyes.BEAN to 4, Anatomy.Eyes.SLIT to 1), noses = w(Anatomy.Nose.BROAD to 2, Anatomy.Nose.LONG to 1),
+                mouths = w(Anatomy.Mouth.CLOSED to 3, Anatomy.Mouth.PURSED to 1), ears = w(Anatomy.Ears.SMALL to 3, Anatomy.Ears.NONE to 1),
+                scars = c(Anatomy.Scar.CHEEKS to 0.6f, Anatomy.Scar.TEMPLES to 0.4f),
+                coiffures = w(Anatomy.Coiffure.CAP to 2, Anatomy.Coiffure.KNOTS to 1, Anatomy.Coiffure.CREST to 1),
+                crowns = w(Anatomy.Crown.TIERS to 4, Anatomy.Crown.BIRD to 2, Anatomy.Crown.NONE to 1), crownSize = 0.4f..0.9f, counts = 2..3,
+                finishes = w(Anatomy.Finish.POLYCHROME to 6), patterns = c(Anatomy.Pattern.BANDS to 0.5f, Anatomy.Pattern.DOTS to 0.3f, Anatomy.Pattern.EYE_RINGS to 0.2f),
+                woods = listOf(Pigments.IROKO, Pigments.UMBER), accents = listOf(Pigments.VERMILION, Pigments.INDIGO, Pigments.KAOLIN, Pigments.OCHRE, Pigments.JADE),
+                glows = listOf(GOLDEN, MOON), raffia = 0.2f..0.6f,
+            ),
+            spirit = SpiritGrammar(role = R.OUR_MOTHERS, temper = T.MONUMENTAL, fractures = w(F.SHATTERED_CROWN to 4, F.SUSPENDED_FACETS to 2), cores = w(C.MOON to 2, C.SOLAR to 2, C.INDIGO to 1), relics = c(Rl.BRASS_BELL to 0.5f, Rl.MIRROR to 0.2f)),
+        ),
+        Tradition(
+            "mwaash_ambooy", "Mwaash aMbooy", "Kuba", "Democratic Republic of the Congo",
+            "The royal mask of Woot, the founding ancestor, danced by or for the king: a helmet of raffia cloth and hide worked with cowries, beads and copper, its features built up in relief.",
+            "spirit:ijele",
+            Grammar(
+                forms = w(Anatomy.Form.HELMET to 5), outlines = w(Anatomy.Outline.ROUND to 2, Anatomy.Outline.OVAL to 2), width = 0.6f..0.85f, length = 0.45f..0.65f,
+                brows = w(Anatomy.Brow.SHELF to 2, Anatomy.Brow.ARCH to 1), eyes = w(Anatomy.Eyes.BEAN to 2, Anatomy.Eyes.ROUND to 1, Anatomy.Eyes.SLIT to 1),
+                noses = w(Anatomy.Nose.BROAD to 3), mouths = w(Anatomy.Mouth.CLOSED to 2, Anatomy.Mouth.BOX to 1), ears = w(Anatomy.Ears.SMALL to 2, Anatomy.Ears.NONE to 1),
+                scars = c(Anatomy.Scar.TEARS to 0.3f),
+                coiffures = w(Anatomy.Coiffure.CAP to 3), crowns = w(Anatomy.Crown.NONE to 3, Anatomy.Crown.BIRD to 1),
+                beards = w(Anatomy.Beard.RAFFIA to 2, Anatomy.Beard.NONE to 1),
+                adorn = c(Anatomy.Adorn.COWRIES to 1f, Anatomy.Adorn.BEADS to 0.9f, Anatomy.Adorn.BRASS_STUDS to 0.8f, Anatomy.Adorn.RAFFIA_COLLAR to 0.4f),
+                finishes = w(Anatomy.Finish.BRASS to 3, Anatomy.Finish.POLYCHROME to 3), patterns = c(Anatomy.Pattern.TRIANGLES to 0.8f, Anatomy.Pattern.BANDS to 0.5f),
+                woods = listOf(Pigments.UMBER, Pigments.MAHOGANY), accents = listOf(Pigments.KAOLIN, Pigments.LAMPBLACK, Pigments.OCHRE, Pigments.LAPIS),
+                glows = listOf(GOLDEN), raffia = 0.3f..0.8f,
+            ),
+            spirit = SpiritGrammar(role = R.ROYAL_MAJESTY, temper = T.MONUMENTAL, fractures = w(F.SUSPENDED_FACETS to 3, F.DISSOLVED_CHIN to 2), cores = w(C.SOLAR to 3, C.FIREFLY to 1), relics = c(Rl.COWRIE to 0.9f, Rl.BRONZE_PLAQUE to 0.5f)),
+        ),
+        Tradition(
+            "bugle", "Bugle", "Dan and Kran", "Liberia and Côte d'Ivoire",
+            "The fierce masks once tied to war and the settling of disputes: projecting tube eyes, a heavy jutting mouth and nose, darkened wood and coarse fibre, the opposite of the gentle Deangle.",
+            "spirit:mgbedike",
+            Grammar(
+                forms = w(Anatomy.Form.FACE to 4), outlines = w(Anatomy.Outline.OVAL to 2, Anatomy.Outline.SQUARE to 1, Anatomy.Outline.SHIELD to 1), width = 0.5f..0.75f, length = 0.45f..0.7f,
+                brows = w(Anatomy.Brow.SHELF to 3, Anatomy.Brow.BULGE to 1), eyes = w(Anatomy.Eyes.TUBE to 6, Anatomy.Eyes.ROUND to 1),
+                noses = w(Anatomy.Nose.TRIANGLE to 3, Anatomy.Nose.BROAD to 2), mouths = w(Anatomy.Mouth.TEETH to 3, Anatomy.Mouth.OPEN to 2, Anatomy.Mouth.BOX to 1),
+                scars = c(Anatomy.Scar.CENTRE_RIDGE to 0.3f),
+                coiffures = w(Anatomy.Coiffure.NONE to 2, Anatomy.Coiffure.CAP to 1),
+                beards = w(Anatomy.Beard.RAFFIA to 3, Anatomy.Beard.NONE to 1), adorn = c(Anatomy.Adorn.RAFFIA_COLLAR to 0.6f, Anatomy.Adorn.BRASS_STUDS to 0.3f),
+                finishes = w(Anatomy.Finish.BLACKENED to 5, Anatomy.Finish.RAW to 1), patterns = c(Anatomy.Pattern.EYE_RINGS to 0.3f),
+                woods = listOf(Pigments.BLACKWOOD, Pigments.UMBER), accents = listOf(Pigments.KAOLIN, Pigments.VERMILION), glows = listOf(BLOOD, EMBER), raffia = 0.5f..1f,
+            ),
+            spirit = SpiritGrammar(role = R.MARTIAL_FEROCITY, temper = T.STORM, fractures = w(F.DRIFTING_JAW to 3, F.SUSPENDED_FACETS to 2, F.SPLIT_VISAGE to 1), cores = w(C.THUNDER to 2, C.CAMWOOD to 2, C.LEOPARD to 1), drift = 0.45f..0.9f),
         ),
     )
 
@@ -491,6 +648,31 @@ object MaskCulture {
     /** How far a roll moves each dial off its tradition's own setting. */
     private const val VARIATION = 0.6f
     private val BEADS = listOf(Pigments.VERMILION, Pigments.LAPIS, Pigments.CORAL, Pigments.GOLD, Pigments.JADE, Pigments.KAOLIN)
+
+    /**
+     * The spirit inside a mask of [tradition], from [seed]: how it breaks,
+     * what burns in it and what drifts round it, rolled within the
+     * tradition's spirit grammar; its temper is the tradition's own.
+     */
+    fun spirit(tradition: Tradition, seed: Long): SpiritSpec {
+        val r = Random(seed * 0x2545F491L + tradition.id.hashCode() * 31L)
+        val g = tradition.spirit
+        fun <T> pick(xs: List<Pair<T, Int>>): T {
+            var n = r.nextInt(xs.sumOf { it.second }.coerceAtLeast(1))
+            for ((v, wt) in xs) { if (n < wt) return v; n -= wt }
+            return xs.first().first
+        }
+        return SpiritSpec(
+            fracture = pick(g.fractures), core = pick(g.cores), temper = g.temper,
+            drift = g.drift.start + r.nextFloat() * (g.drift.endInclusive - g.drift.start),
+            pieces = r.nextFloat(), jag = 0.2f + 0.7f * r.nextFloat(),
+            relics = g.relics.filter { r.nextFloat() < it.second }.map { it.first }.toSet(),
+            seed = seed,
+        )
+    }
+
+    /** The spirit of a mask already carved: its (first) tradition's, from its seed. */
+    fun spiritOf(spec: MaskSpec): SpiritSpec = spirit(tradition(spec.tradition.substringBefore('+')), spec.seed)
 
     /** A spirit that belongs to two traditions: its parts drawn from each in turn. */
     fun blend(a: Tradition, b: Tradition, seed: Long, name: String = "${a.name}–${b.name}"): MaskSpec {

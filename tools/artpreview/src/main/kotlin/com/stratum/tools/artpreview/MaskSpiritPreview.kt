@@ -56,6 +56,8 @@ object MaskSpiritPreview {
         if (only == "sculpt-stills") sculptedMasks(out, animations = false, quick = true)
         if (only == "carver") carver(out)
         if (only == "wood") wood(out)
+        // spirits, spirits-quick, or one section: spirits-quick:fractures
+        if (only != null && only.startsWith("spirits")) SpiritMaskShots.all(out, quick = only.startsWith("spirits-quick"), only = only.substringAfter(':', "").ifEmpty { null })
     }
 
     private fun turntables(out: File) {
@@ -191,7 +193,7 @@ object MaskSpiritPreview {
      * Masks over a stretch of dark earth, from above at the game's own
      * elevation (or [pitch]), lit by a low sun with shadows.
      */
-    private fun isoScene(
+    internal fun isoScene(
         spirits: List<SpiritInstance>, width: Int, height: Int, distance: Float, pitch: Float = com.stratum.core.domain.ai.IsometricCamera.SCENE_ELEVATION_DEGREES.toFloat(),
         target: Vec3 = Vec3(0f, 0f, 1.15f),
     ): BufferedImage {
@@ -295,7 +297,7 @@ object MaskSpiritPreview {
         println("Share code (${code.length} chars): $code")
     }
 
-    private fun labelled(img: BufferedImage, label: String): BufferedImage {
+    internal fun labelled(img: BufferedImage, label: String): BufferedImage {
         val out = BufferedImage(img.width, img.height + 28, BufferedImage.TYPE_INT_RGB)
         val g = out.createGraphics()
         g.color = Color(0x16, 0x12, 0x10); g.fillRect(0, 0, out.width, out.height)

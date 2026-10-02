@@ -299,18 +299,24 @@ class Custom(bx0: Float, by0: Float, bz0: Float, bx1: Float, by1: Float, bz1: Fl
 }
 
 /**
- * A sculpture: parts laid down in order, each added (smoothly blended by its
+ * A sculpture: parts laid down in order, each added (blended in over its
  * [Part.blend]) or cut away, each with the material its surface shows.
+ *
+ * A join is chamfered by default, a flat facet as a chisel leaves it. A
+ * [Part.smooth] join instead flows in with a polynomial smooth minimum, so
+ * the big masses of a face (sockets, cheeks, muzzle, a domed brow) read as
+ * one continuous surface with no seam where they meet, as a carver roughs
+ * them out of one block before cutting any detail.
  */
 class Sculpture {
     enum class Op { ADD, CUT, INTERSECT }
 
-    class Part(val shape: Shape, val op: Op, val blend: Float, val material: Int)
+    class Part(val shape: Shape, val op: Op, val blend: Float, val material: Int, val smooth: Boolean = false)
 
     val parts = ArrayList<Part>()
 
-    fun add(shape: Shape, material: Int, blend: Float = 0f) { parts += Part(shape, Op.ADD, blend, material) }
-    fun cut(shape: Shape, material: Int, blend: Float = 0f) { parts += Part(shape, Op.CUT, blend, material) }
+    fun add(shape: Shape, material: Int, blend: Float = 0f, smooth: Boolean = false) { parts += Part(shape, Op.ADD, blend, material, smooth) }
+    fun cut(shape: Shape, material: Int, blend: Float = 0f, smooth: Boolean = false) { parts += Part(shape, Op.CUT, blend, material, smooth) }
     fun keepInside(shape: Shape, material: Int, blend: Float = 0f) { parts += Part(shape, Op.INTERSECT, blend, material) }
 
     /** Bounds of everything added. */
@@ -339,14 +345,23 @@ class Sculpture {
                     if (s.boxDistance(x, y, z) - p.blend > d) continue
                     val e = s.d(x, y, z)
                     if (e < d) mat = p.material
-                    d = if (p.blend > 0f) min(min(d, e), (d + e - p.blend * CHAMFER) * SQRT_HALF) else min(d, e)
+                    d = when {
+                        p.blend <= 0f -> min(d, e)
+                        // Quadratic smooth minimum: tangent-continuous across the join.
+                        p.smooth -> { val h = max(p.blend - abs(d - e), 0f) / p.blend; min(d, e) - h * h * p.blend * 0.25f }
+                        else -> min(min(d, e), (d + e - p.blend * CHAMFER) * SQRT_HALF)
+                    }
                 }
                 Op.CUT -> {
                     if (s.boxDistance(x, y, z) - p.blend > -d) continue
                     val e = -s.d(x, y, z)
-                    // A cut: its lip bevelled as a knife takes it.
+                    // A cut: its lip bevelled as a knife takes it, or swept smoothly into the surface round it.
                     if (e > d) mat = p.material
-                    d = if (p.blend > 0f) max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF) else max(d, e)
+                    d = when {
+                        p.blend <= 0f -> max(d, e)
+                        p.smooth -> { val h = max(p.blend - abs(d - e), 0f) / p.blend; max(d, e) + h * h * p.blend * 0.25f }
+                        else -> max(max(d, e), (d + e + p.blend * CHAMFER) * SQRT_HALF)
+                    }
                 }
                 Op.INTERSECT -> {
                     val e = s.d(x, y, z)

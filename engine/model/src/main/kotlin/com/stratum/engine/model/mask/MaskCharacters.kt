@@ -97,6 +97,19 @@ class MaskCharacters(
     var heroCarved: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
         set(value) { if (field != value) { field = value; carvedProfile = null } }
 
+    /**
+     * The carved hero flies broken open by its spirit: its pieces floating
+     * round a burning core, breathing, dragging behind a dash and flaring on
+     * a strike. [heroSpirit] chooses how it breaks; null rolls its own
+     * tradition's. False flies the carving whole.
+     */
+    var heroBroken: Boolean = true
+        set(value) { if (field != value) { field = value; carvedFor = null; carving = null } }
+
+    var heroSpirit: com.stratum.engine.model.mask.sculpt.SpiritSpec? = null
+        set(value) { if (field != value) { field = value; carvedFor = null; carving = null } }
+
+    @Volatile private var carvedBroken: com.stratum.engine.scene.ShatteredSpirit? = null
     @Volatile private var carvedMesh: SpiritMesh? = null
     @Volatile private var carvedFor: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
     @Volatile private var carving: com.stratum.engine.model.mask.sculpt.MaskSpec? = null
@@ -107,9 +120,14 @@ class MaskCharacters(
         if (carvedFor == spec) return carvedMesh
         if (carving != spec) {
             carving = spec
+            val broken = heroBroken; val spirit = heroSpirit
             val job = Runnable {
-                val mesh = runCatching { com.stratum.engine.model.mask.sculpt.MaskSculptor.cached(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME) }.getOrNull()
-                if (carving == spec) { carvedMesh = mesh; carvedFor = spec }
+                val sculptor = com.stratum.engine.model.mask.sculpt.MaskSculptor
+                val shattered = if (!broken) null else runCatching {
+                    sculptor.cachedShatter(spec, spirit ?: com.stratum.engine.model.mask.sculpt.MaskCulture.spiritOf(spec), com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME)
+                }.getOrNull()
+                val mesh = shattered?.core ?: runCatching { sculptor.cached(spec, com.stratum.engine.model.mask.sculpt.MaskSculptor.Detail.GAME) }.getOrNull()
+                if (carving == spec) { carvedBroken = shattered; carvedMesh = mesh; carvedFor = spec }
             }
             if (builder != null) builder.execute(job) else job.run()
         }
@@ -182,7 +200,9 @@ class MaskCharacters(
         val profile = if (carved != null) {
             carvedProfile ?: MotionProfiles.resolve(com.stratum.engine.model.mask.sculpt.MaskCulture.tradition(heroCarved!!.tradition.substringBefore('+')).motion, profileOverrides).also { carvedProfile = it }
         } else heroProfile!!
-        val body = cast.track(id, mesh, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false) ?: return null
+        val broken = if (carved != null) carvedBroken else null
+        val body = (if (broken != null) cast.track(id, broken, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false)
+        else cast.track(id, mesh, profile, x, y, z, facingX, facingY, CharacterMasks.HERO_HEIGHT, spawning = false)) ?: return null
         react(id, body, state, flash, impact, casting = false, aimX, aimY)
         return body
     }
