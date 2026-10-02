@@ -123,6 +123,15 @@ object PowerBudget {
 
     fun power(sequence: List<SkillPhase>): Float = sequence.sumOf { power(it).toDouble() }.toFloat()
 
+    /**
+     * The forge's guardrail: past this much power an attack is unstable and
+     * cannot be kept. Cost and cooldown already climb steeply; this stops
+     * stacking everything onto one button outright.
+     */
+    const val LIMIT = 16f
+
+    fun stable(skill: ProceduralSkill): Boolean = power(skill) <= LIMIT
+
     /** Energy per cast. */
     fun energyCost(power: Float): Float = (6f + 7f * power.pow(1.15f)).let { (it * 2f).toInt() / 2f }
 

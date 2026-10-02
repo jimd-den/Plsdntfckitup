@@ -60,6 +60,7 @@ internal fun CreateRoutes(app: AppViewModel, route: Route.Create, stack: BackSta
         Route.Create.Voxels -> com.stratum.app.tools.VoxelStudioRoute(app, onBack = back, modifier = modifier)
         Route.Create.Masks -> com.stratum.app.tools.MaskMakerRoute(app, onBack = back, modifier = modifier)
         Route.Create.Carver -> com.stratum.app.tools.MaskCarverRoute(app, onBack = back, modifier = modifier)
+        Route.Create.Attacks -> com.stratum.app.tools.AttackForgeRoute(app, onBack = back, modifier = modifier)
         is Route.Create.Crew -> CrewRoute(
             app,
             route.preset,
@@ -109,6 +110,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
         microModelCount = app.game.microModels.collectAsStateWithLifecycle().value.size,
         wearsMakerMask = com.stratum.engine.model.mask.MaskMaker.isCode(app.game.loadout.collectAsStateWithLifecycle().value.heroMask),
         wearsCarvedMask = com.stratum.engine.model.mask.sculpt.MaskCarver.isCode(app.game.loadout.collectAsStateWithLifecycle().value.heroMask),
+        carriedAttacks = app.game.forgedAttacks.collectAsStateWithLifecycle().value.equipped.size,
     )
     CreateHubScreen(
         status = status,
@@ -124,6 +126,7 @@ private fun CreateHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifi
             onModels = { stack.push(Route.Create.Models) },
             onMasks = { stack.push(Route.Create.Masks) },
             onCarver = { stack.push(Route.Create.Carver) },
+            onAttacks = { stack.push(Route.Create.Attacks) },
             onVoxels = { stack.push(Route.Create.Voxels) },
             onCrew = { stack.push(Route.Create.Crew()) },
             onMapper = { stack.push(Route.Create.Mapper) },

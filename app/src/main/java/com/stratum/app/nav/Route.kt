@@ -42,6 +42,9 @@ sealed interface Route {
 
         /** Carve a sculpted African mask with every part open, and wear it. */
         data object Carver : Create
+
+        /** The Forge of Will: forge attacks from a core, catalysts and resonators. */
+        data object Attacks : Create
         data object Mapper : Create
 
         /** The agent crew, opened on [preset] when the way in chose one. */
