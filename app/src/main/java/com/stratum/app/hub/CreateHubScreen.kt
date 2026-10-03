@@ -35,6 +35,8 @@ data class StudioStatus(
     /** Whether the hero wears a mask from the mask maker. */
     val wearsMakerMask: Boolean = false,
     val wearsCarvedMask: Boolean = false,
+    /** Forged attacks carried into play. */
+    val carriedAttacks: Int = 0,
 )
 
 /** Every way into the studio's tools. */
@@ -51,6 +53,7 @@ data class CreateHubActions(
     val onVoxels: () -> Unit = {},
     val onMasks: () -> Unit = {},
     val onCarver: () -> Unit = {},
+    val onAttacks: () -> Unit = {},
     val onCrew: () -> Unit = {},
     val onMapper: () -> Unit = {},
     val onSettings: () -> Unit = {},
@@ -117,6 +120,14 @@ fun CreateHubScreen(
             links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accentAlt,
+        )
+        HubCard(
+            glyph = "⚔️", title = "Forge of Will", promise = "Forge attacks from a core, catalysts and resonators — billions of them, each in a look of its own",
+            onClick = actions.onAttacks,
+            status = if (status.carriedAttacks > 0) "${status.carriedAttacks} carried into play" else "Ready",
+            statusTone = if (status.carriedAttacks > 0) StatusTone.NEUTRAL else StatusTone.READY,
+            modifier = Modifier.fillMaxWidth(),
+            tint = StratumTheme.colors.accent,
         )
         HubCard(
             glyph = "🗿", title = "Mask carver", promise = "Carve a sculpted African mask — ${com.stratum.engine.model.mask.sculpt.MaskCulture.traditions.size} peoples' traditions, every part and proportion yours",

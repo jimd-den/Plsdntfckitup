@@ -1,5 +1,7 @@
 package com.stratum.app.shell
 
+import com.stratum.engine.world.StreamingWorld
+
 import android.content.Context
 import com.stratum.app.AiWiring
 import com.stratum.app.GraphicsWiring
@@ -48,4 +50,18 @@ class AppGraph(context: Context, scope: CoroutineScope) {
 
     /** Which play hints the player has already seen, so each teaches once. */
     val hints = HintStore(context)
+
+    /** Attacks forged in the Forge of Will, and which are carried into play. */
+    val forgedAttacks = ForgedAttackStore(context)
+
+    init {
+        // Worlds generate the ground ahead of the player on these, not on the game thread.
+        // Below normal priority, and at most two, so meshing and the frame keep their cores.
+        if (StreamingWorld.sharedWorkers == null) {
+            val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 2)
+            StreamingWorld.sharedWorkers = java.util.concurrent.Executors.newFixedThreadPool(threads) { r ->
+                Thread(r, "chunk-gen").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 }
+            }
+        }
+    }
 }

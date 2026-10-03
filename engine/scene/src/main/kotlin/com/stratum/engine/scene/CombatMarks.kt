@@ -33,4 +33,6 @@ data class CombatMark(
     val halfWidth: Float = 0f,
     /** Aimed at the player: drawn in the style's hostile colour whatever the skill's own. */
     val hostile: Boolean = false,
+    /** A forged attack's look: drawn as its sketch rather than a plain glow or disc. */
+    val look: com.stratum.core.domain.attack.AttackLook? = null,
 )

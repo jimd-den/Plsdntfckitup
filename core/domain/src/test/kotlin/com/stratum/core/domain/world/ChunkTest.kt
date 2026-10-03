@@ -74,4 +74,20 @@ class ChunkTest {
         assertEquals(9, copy.blockAt(5, 6, 7))
         assertEquals(11, copy.lightAt(5, 6, 7))
     }
+
+    @Test
+    fun `the surface stays true through thousands of edits without rescanning the chunk`() {
+        val chunk = Chunk(ChunkPos(0, 0))
+        val r = kotlin.random.Random(3)
+        for (x in 0 until Chunk.SIZE) for (y in 0 until Chunk.SIZE) for (z in 0..r.nextInt(20)) chunk.setBlock(x, y, z, 1)
+        chunk.surfaceAt(0, 0) // the map is built once here, then kept current edit by edit
+        repeat(5_000) {
+            val x = r.nextInt(Chunk.SIZE); val y = r.nextInt(Chunk.SIZE); val z = r.nextInt(Chunk.HEIGHT)
+            chunk.setBlock(x, y, z, if (r.nextInt(3) == 0) 1 else BlockRegistry.AIR_INDEX)
+            val truth = (Chunk.HEIGHT - 1 downTo 0).firstOrNull { chunk.blockAt(x, y, it) != BlockRegistry.AIR_INDEX } ?: -1
+            kotlin.test.assertEquals(truth, chunk.surfaceAt(x, y), "column ($x, $y) after setting z=$z")
+        }
+        val fresh = Chunk.restore(chunk.pos, chunk.exportBlocks(), chunk.exportLight())
+        for (x in 0 until Chunk.SIZE) for (y in 0 until Chunk.SIZE) kotlin.test.assertEquals(fresh.surfaceAt(x, y), chunk.surfaceAt(x, y))
+    }
 }

@@ -111,7 +111,7 @@ internal class EncounterSystem(
     fun advance(deltaSeconds: Float, biomeId: String) {
         val player = state.player
         val towns = politics.townsInSight()
-        state.enemies = director.maintainPopulation(state.enemies, player.position, biomeId, player.level, random, politics.spawnAllowed(towns))
+        state.enemies = director.maintainPopulation(state.enemies, player.position, biomeId, player.level, random, politics.spawnAllowed(towns), facingOf(player.facing))
         state.enemies = state.enemies + politics.musterGarrisons(towns)
         val before = state.enemies
         state.enemies = combat.constrain(before, crowd.advance(before, player.position, politics::isHostile, deltaSeconds, politics.allyOrders()), deltaSeconds)
@@ -154,6 +154,10 @@ internal class EncounterSystem(
             .mapNotNull { content.skill(it.skillId) }.filterNot { it.isBeneficial }.maxOfOrNull { it.range.toFloat() } ?: 0f
         return maxOf(swing, longest * RANGED_HOLD)
     }
+
+    /** A facing as a bearing in radians, or null for straight up or down. */
+    private fun facingOf(direction: com.stratum.core.domain.world.Direction): Float? =
+        if (direction.dx == 0 && direction.dy == 0) null else kotlin.math.atan2(direction.dy.toFloat(), direction.dx.toFloat())
 
     private fun forget(actorId: String) {
         combat.forget(actorId)

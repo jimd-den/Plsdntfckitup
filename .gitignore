@@ -35,3 +35,5 @@ debug.keystore
 # is published in app/build.gradle.kts. It must never be used to publish.
 *.jks
 !/ci-signing.jks
+jev_audit.json
+__pycache__/
