@@ -37,3 +37,4 @@ debug.keystore
 !/ci-signing.jks
 jev_audit.json
 __pycache__/
+jev_bigo.json
