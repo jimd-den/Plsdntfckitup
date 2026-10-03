@@ -100,11 +100,18 @@ object SkillTargeting {
     private fun chain(nearestFirst: List<Candidate>, origin: WorldPoint, reach: Float, hop: Float, leaps: Int): List<String> {
         val first = nearestFirst.firstOrNull { it.position.horizontalDistanceTo(origin) <= reach } ?: return emptyList()
         val hit = mutableListOf(first)
+        // Who has been struck, by id: each leap checks every candidate, and a list scan made that leaps x candidates x leaps.
+        val struck = hashSetOf(first.id)
         repeat(leaps) {
             val from = hit.last().position
-            val next = nearestFirst.filter { c -> hit.none { it.id == c.id } && c.position.horizontalDistanceTo(from) <= hop }
-                .minByOrNull { it.position.horizontalDistanceTo(from) } ?: return hit.map { it.id }
-            hit += next
+            var next: Candidate? = null; var nearest = Float.MAX_VALUE
+            for (c in nearestFirst) {
+                if (c.id in struck) continue
+                val d = c.position.horizontalDistanceTo(from)
+                if (d <= hop && d < nearest) { nearest = d; next = c }
+            }
+            if (next == null) return hit.map { it.id }
+            hit += next; struck += next.id
         }
         return hit.map { it.id }
     }
