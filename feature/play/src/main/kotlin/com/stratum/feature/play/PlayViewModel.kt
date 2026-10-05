@@ -118,6 +118,8 @@ class PlayViewModel(
     hero: HeroSave? = null,
     /** The player's standing procedural options: towns, quests, combat variety, physics, ragdolls. */
     private val settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
+    /** False holds the game loop: for tests that only read the starting state. */
+    autoStart: Boolean = true,
     /** Keeps the character for next time, in the roster that carries heroes between worlds. Called off the main thread. */
     saveHero: (HeroSave) -> Unit = {},
     /** Prop blocks drawn as generated 3D models, by block id. */
@@ -226,7 +228,7 @@ class PlayViewModel(
         // A new world is written at once, so it is in the list even if the app dies in its first minute.
         if (resume == null && worlds != null) persist(SaveReason.NEW_WORLD) else saver.mark(elapsed, session.player.level)
         publish()
-        startLoop()
+        if (autoStart) startLoop()
     }
 
     /**
@@ -1606,6 +1608,7 @@ class PlayViewModel(
             maskCharacters: Boolean = true,
             saveMaskCharacters: (Boolean) -> Unit = {},
             settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
+            autoStart: Boolean = true,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
@@ -1616,7 +1619,7 @@ class PlayViewModel(
                 propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
                 heroMask = heroMask, maskCharacters = maskCharacters, saveMaskCharacters = saveMaskCharacters,
-                settings = settings,
+                settings = settings, autoStart = autoStart,
             ) as T
         }
     }
