@@ -34,7 +34,6 @@ val pureModules = listOf(
   ":importer:flame",
   ":plugins",
   ":tools:artpreview",
-  ":legacy:domain",
 )
 
 tasks.register("architectureCheck") {

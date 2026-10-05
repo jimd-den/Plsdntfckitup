@@ -27,7 +27,6 @@ wrapped in an ARPG shell, where the content is data rather than code.
 
   Tools, never shipped:  :tools:artpreview ──► :engine:render, :engine:scene, :engine:world, :plugins, :content:igbo
 
-  Frozen, built but reached by nothing:  :feature:studio ──► :legacy:data ──► :legacy:domain
 ```
 
 Dependencies point inward only. Nothing in `:core:domain` knows that Android,
@@ -62,15 +61,12 @@ world generator, towns and the crowd brain, and `:engine:render` and
 | `:feature:hero` | Android library | The class builder and the character screens. |
 | `:feature:library` | Android library | The Plugins screen: install, order, switch, remove and share plugins. |
 | `:app` | Android app | The Activity, navigation between destinations, and the wiring that connects ports to adapters. |
-| `:legacy:domain` | Pure Kotlin | **Frozen.** The original engine's rules. Still compiles; nothing depends on it but the frozen modules below. |
-| `:legacy:data` | Android library | **Frozen.** The original engine's Room and network layer. |
-| `:feature:studio` | Android library | **Frozen.** The original creator studio. Disconnected from `:app`: no tile, no destination, no Gemini wiring. Whether to delete the three frozen modules is an open decision; until then they stay in `settings.gradle.kts` so they keep compiling. |
 
 ## How the boundary is enforced
 
 Not by review. `:core:domain`, every `:engine:*` module, `:content:igbo`,
-the three `:importer:*` modules, `:plugins`, `:agents`, `:tools:artpreview`
-and the frozen `:legacy:domain` apply only the Kotlin JVM plugin, so the
+the three `:importer:*` modules, `:plugins`, `:agents` and `:tools:artpreview`
+apply only the Kotlin JVM plugin, so the
 Android SDK is not on their compile classpath and `import android.*` fails
 to compile.
 
