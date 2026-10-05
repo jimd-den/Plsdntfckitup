@@ -1,14 +1,10 @@
 package com.stratum.app.hub
 
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.stratum.core.designsystem.component.HubCard
 import com.stratum.core.designsystem.component.HubLink
-import com.stratum.core.designsystem.component.LocalJobsTray
-import com.stratum.core.designsystem.component.StatusChip
 import com.stratum.core.designsystem.component.StatusTone
 import com.stratum.core.designsystem.component.StratumScreen
 import com.stratum.core.designsystem.theme.StratumTheme
@@ -17,19 +13,8 @@ import com.stratum.core.designsystem.theme.StratumTheme
 data class StudioStatus(
     val classCount: Int = 0,
     val customClassCount: Int = 0,
+    /** Sprite sheets imported or mapped on this device. */
     val sheetCount: Int = 0,
-    /** Characters drawn in the pose forge but not yet packed into a sheet. */
-    val unpackedCharacters: Int = 0,
-    val keptCreations: Int = 0,
-    val modelCount: Int = 0,
-    /** Whether a text and image model is set up, which the writers and painters need. */
-    val modelReady: Boolean = false,
-    /** Whether a 3D provider is set up. */
-    val meshReady: Boolean = false,
-    /** The style the world is painted in, when one was painted. */
-    val paintedStyle: String? = null,
-    /** Creation jobs still queued or running, from the job centre. */
-    val running: Int = 0,
     /** Microvoxel models the player has kept in the model studio. */
     val microModelCount: Int = 0,
     /** Whether the hero wears a mask from the mask maker. */
@@ -43,83 +28,32 @@ data class StudioStatus(
 data class CreateHubActions(
     val onBack: () -> Unit = {},
     val onClasses: () -> Unit = {},
-    val onPoses: () -> Unit = {},
-    val onWeapons: () -> Unit = {},
-    val onWorldCrew: () -> Unit = {},
-    val onTextures: () -> Unit = {},
-    val onLore: () -> Unit = {},
-    val onSprites: () -> Unit = {},
-    val onModels: () -> Unit = {},
     val onVoxels: () -> Unit = {},
     val onMasks: () -> Unit = {},
     val onCarver: () -> Unit = {},
     val onAttacks: () -> Unit = {},
-    val onCrew: () -> Unit = {},
     val onMapper: () -> Unit = {},
     val onSettings: () -> Unit = {},
 )
 
 /**
- * The studio: five places to make things, each a big card with one line of
- * promise and where it stands right now. The card goes to the main tool;
- * the links under it go straight to the rest.
+ * The studio: every tool is procedural, works offline, and makes something
+ * the game uses straight away. Each card goes to its tool and says where it
+ * stands right now.
  */
 @Composable
 fun CreateHubScreen(
     status: StudioStatus,
     actions: CreateHubActions,
     modifier: Modifier = Modifier,
-    jobsTray: @Composable () -> Unit = LocalJobsTray.current,
 ) {
-    val needsKey = "Needs a model key" to StatusTone.NEEDS
-    fun ai(ready: Pair<String, StatusTone>): Pair<String, StatusTone> = if (status.modelReady) ready else needsKey
-
-    StratumScreen(title = "Create", onBack = actions.onBack, modifier = modifier, jobsTray = jobsTray, subtitle = "Everything you make works straight away and gets better as AI finishes it.") {
-        if (!status.modelReady) {
-            Text(
-                "Most tools start from the built-in pack and work without AI. Connect a model in settings to write and paint for real.",
-                style = MaterialTheme.typography.bodySmall,
-                color = StratumTheme.colors.inkMuted,
-            )
-        }
-        if (status.running > 0) {
-            StatusChip(if (status.running == 1) "1 job running" else "${status.running} jobs running", tone = StatusTone.BUSY)
-        }
-        val heroes = when {
-            status.unpackedCharacters > 0 -> "${status.unpackedCharacters} to pack" to StatusTone.BUSY
-            status.customClassCount > 0 -> "${status.customClassCount} made · ${status.classCount} classes" to StatusTone.NEUTRAL
-            else -> "${status.classCount} classes" to StatusTone.NEUTRAL
-        }
+    StratumScreen(title = "Create", onBack = actions.onBack, modifier = modifier, subtitle = "Procedural tools: everything you make is played at once.") {
+        val heroes = if (status.customClassCount > 0) "${status.customClassCount} made · ${status.classCount} classes" else "${status.classCount} classes"
         HubCard(
-            glyph = "⚔", title = "Heroes", promise = "A class, a look, a weapon",
-            onClick = actions.onClasses, status = heroes.first, statusTone = heroes.second,
-            links = listOf(HubLink("Class", actions.onClasses), HubLink("Look", actions.onPoses), HubLink("Weapons", actions.onWeapons)),
+            glyph = "🛡", title = "Heroes", promise = "Build a class from skills, traits and stats",
+            onClick = actions.onClasses, status = heroes, statusTone = StatusTone.NEUTRAL,
+            links = listOf(HubLink("Class", actions.onClasses), HubLink("Sprite mapper", actions.onMapper)),
             modifier = Modifier.fillMaxWidth(),
-        )
-        val worlds = ai(status.paintedStyle?.let { "Wearing: $it" to StatusTone.READY } ?: ("Ready" to StatusTone.READY))
-        HubCard(
-            glyph = "🌍", title = "Worlds", promise = "AI writes a whole world and paints it",
-            onClick = actions.onWorldCrew, status = worlds.first, statusTone = worlds.second,
-            links = listOf(HubLink("World crew", actions.onWorldCrew), HubLink("Texture style", actions.onTextures)),
-            modifier = Modifier.fillMaxWidth(),
-            tint = StratumTheme.colors.accentAlt,
-        )
-        val lore = if (status.keptCreations > 0) "${status.keptCreations} kept" to StatusTone.NEUTRAL else ai("Ready" to StatusTone.READY)
-        HubCard(
-            glyph = "⚒", title = "Lore & gear", promise = "Uniques, sets, affixes and lore",
-            onClick = actions.onLore, status = lore.first, statusTone = lore.second,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        val art = when {
-            status.sheetCount > 0 || status.modelCount > 0 -> "${status.sheetCount} sprites · ${status.modelCount} models" to StatusTone.NEUTRAL
-            else -> ai("Ready" to StatusTone.READY)
-        }
-        HubCard(
-            glyph = "🎨", title = "Art", promise = "Textures, sprites and 3D props",
-            onClick = actions.onTextures, status = art.first, statusTone = art.second,
-            links = listOf(HubLink("Textures", actions.onTextures), HubLink("Sprites", actions.onSprites), HubLink("3D models", actions.onModels)),
-            modifier = Modifier.fillMaxWidth(),
-            tint = StratumTheme.colors.accentAlt,
         )
         HubCard(
             glyph = "⚔️", title = "Forge of Will", promise = "Forge attacks from a core, catalysts and resonators — billions of them, each in a look of its own",
@@ -153,11 +87,9 @@ fun CreateHubScreen(
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.accent,
         )
-        val advanced = ai("Every step on the record" to StatusTone.NEUTRAL)
         HubCard(
-            glyph = "🤖", title = "Advanced", promise = "The agent crew and the sprite mapper",
-            onClick = actions.onCrew, status = advanced.first, statusTone = advanced.second,
-            links = listOf(HubLink("Agent crew", actions.onCrew), HubLink("Sprite mapper", actions.onMapper), HubLink("Model keys", actions.onSettings)),
+            glyph = "⚙", title = "Settings", promise = "Every procedural option in one place: worlds, quests, towns, combat, physics, graphics",
+            onClick = actions.onSettings, status = "All options", statusTone = StatusTone.NEUTRAL,
             modifier = Modifier.fillMaxWidth(),
             tint = StratumTheme.colors.inkMuted,
         )

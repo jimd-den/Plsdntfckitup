@@ -61,7 +61,9 @@ class EnemyDirector(
     ): List<EnemyInstance> {
         val alive = current.filter { it.isAlive }
         val nearby = alive.filter { it.position.horizontalDistanceTo(focus) <= keepWithin(it) }
-        if (nearby.size >= config.maxAlive) return nearby
+        // Townsfolk walk their streets; they are not part of the wild's population.
+        val wild = nearby.count { !it.civilian }
+        if (wild >= config.maxAlive) return nearby
 
         // A spawn weight of zero means "never on its own": garrison troops and pack-only followers.
         val eligible = definitions.filter { it.spawnWeight > 0 && (it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds) }
@@ -70,10 +72,10 @@ class EnemyDirector(
 
         val spawned = mutableListOf<EnemyInstance>()
         var attempts = 0
-        while (nearby.size + spawned.size < config.maxAlive && attempts < config.maxSpawnAttempts) {
+        while (wild + spawned.size < config.maxAlive && attempts < config.maxSpawnAttempts) {
             attempts++
             val position = findSpawnPoint(focus, random)?.takeIf(spawnAllowed) ?: continue
-            val room = config.maxAlive - nearby.size - spawned.size
+            val room = config.maxAlive - wild - spawned.size
             val pack = eligiblePacks.takeIf { random.nextFloat() < config.packChance }?.let { pickPack(it, room, random) }
             spawned += if (pack != null) spawnPack(pack, position, playerLevel, random, focus = focus, facing = facing, allowed = spawnAllowed) else {
                 val definition = pickWeighted(eligible, random) ?: continue

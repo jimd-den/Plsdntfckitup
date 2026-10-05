@@ -28,7 +28,13 @@ import kotlin.math.sqrt
  * Walls and ice are temporary: each remembers what it replaced and puts it
  * back when it runs out, unless something else has changed that block since.
  */
-internal class TerrainImpacts(private val world: MutableWorld) {
+internal class TerrainImpacts(
+    private val world: MutableWorld,
+    /** How far payloads go: nothing, scars, or blocks thrown loose as [debris]. */
+    private val mode: com.stratum.core.domain.settings.VoxelDestruction = com.stratum.core.domain.settings.VoxelDestruction.SCARS,
+    /** Where thrown blocks fly, in [com.stratum.core.domain.settings.VoxelDestruction.PHYSICS]. */
+    val debris: DebrisField? = null,
+) {
 
     private class Temporary(val pos: BlockPos, val placed: Int, val previous: Int, var left: Float)
 
@@ -38,7 +44,13 @@ internal class TerrainImpacts(private val world: MutableWorld) {
     /** Blocks changed so far, for tests and a map. */
     val standing: Int get() = temporary.size
 
+    /** Voxel payloads applied since the world began: craters dug, walls raised, brush burnt, water frozen. */
+    var applied: Int = 0
+        private set
+
     fun apply(effect: SkillEffect.Terrain, at: WorldPoint, aim: Aim) {
+        if (mode == com.stratum.core.domain.settings.VoxelDestruction.OFF) return
+        applied++
         when (effect.change) {
             TerrainChange.CRATER -> crater(at, effect.radius)
             TerrainChange.WALL -> wall(at, aim, effect.radius, effect.seconds)
@@ -49,6 +61,7 @@ internal class TerrainImpacts(private val world: MutableWorld) {
 
     /** Lets temporary walls and ice run out; each puts back what it replaced. */
     fun advance(deltaSeconds: Float) {
+        debris?.advance(deltaSeconds)
         if (temporary.isEmpty()) return
         val done = ArrayList<Temporary>()
         temporary.forEach { t ->
@@ -61,6 +74,7 @@ internal class TerrainImpacts(private val world: MutableWorld) {
 
     /** Puts every temporary block back at once: when the fight is reset or the world saved. */
     fun clear() {
+        debris?.clear()
         temporary.forEach(::revert)
         temporary.clear()
     }
@@ -79,6 +93,7 @@ internal class TerrainImpacts(private val world: MutableWorld) {
     }
 
     private fun crater(at: WorldPoint, radius: Float) = columns(at, radius) { x, y, d ->
+        val throwing = mode == com.stratum.core.domain.settings.VoxelDestruction.PHYSICS && debris != null
         val surface = world.surfaceAt(x, y)
         if (surface < 2) return@columns
         // Deepest at the centre, a block at the rim.
@@ -87,7 +102,16 @@ internal class TerrainImpacts(private val world: MutableWorld) {
             val pos = BlockPos(x, y, z)
             val block = world.blockAt(pos)
             if (block.isAir || !block.isBreakable || block.material !in NATURAL) break
+            val index = world.blockIndexAt(pos)
             world.setBlock(pos, BlockRegistry.AIR_INDEX)
+            if (throwing) {
+                // Out from the centre and up: harder near the middle, where the blow landed.
+                val dx = x + 0.5f - at.x; val dy = y + 0.5f - at.y
+                val len = sqrt(dx * dx + dy * dy).coerceAtLeast(0.3f)
+                val push = THROW_OUT * (1.2f - d / (radius + 0.5f))
+                val jitter = ((x * 73856093) xor (y * 19349663) xor (z * 83492791)) and 0xFF
+                debris!!.launch(pos, index, dx / len * push, dy / len * push, THROW_UP * (0.7f + jitter / 255f * 0.6f))
+            }
         }
     }
 
@@ -135,6 +159,9 @@ internal class TerrainImpacts(private val world: MutableWorld) {
 
     companion object {
         const val WALL_HEIGHT = 2
+        /** How hard a crater throws its blocks out and up, in blocks a second. */
+        private const val THROW_OUT = 5.5f
+        private const val THROW_UP = 9f
         /** At most this many temporary blocks stand at once, however many walls are raised. */
         const val MAX_TEMPORARY = 512
         private val NATURAL = setOf(BlockMaterial.SOIL, BlockMaterial.STONE, BlockMaterial.ORE, BlockMaterial.FOLIAGE)

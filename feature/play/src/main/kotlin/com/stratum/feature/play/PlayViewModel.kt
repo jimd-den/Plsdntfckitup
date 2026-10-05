@@ -36,7 +36,6 @@ import com.stratum.engine.world.FlaskResult
 import com.stratum.engine.world.BuildResult
 import com.stratum.engine.world.BuildTool
 import com.stratum.engine.world.CheckAttempt
-import com.stratum.engine.scene.forge.ForgeProgress
 import com.stratum.engine.world.CombatEvent
 import com.stratum.engine.world.CraftResult
 import com.stratum.engine.world.Held
@@ -101,11 +100,6 @@ class PlayViewModel(
      * simulation.
      */
     private val stylePrompt: String = "",
-    /**
-     * Draws new art for a style the player typed, or null when no image model
-     * is configured. OpenRouter with `meta/muse-image` in the shipped app.
-     */
-    private val imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
     /** Where kits forged on this device are kept between runs. */
     private val kitDirectory: File? = null,
     /** Texture folders of imported packs, drawn over whichever kit the style picks. */
@@ -122,6 +116,8 @@ class PlayViewModel(
     private val saveStyle: (String) -> Unit = {},
     /** The character carried in from earlier play, or null for a new one. */
     hero: HeroSave? = null,
+    /** The player's standing procedural options: towns, quests, combat variety, physics, ragdolls. */
+    private val settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
     /** Keeps the character for next time, in the roster that carries heroes between worlds. Called off the main thread. */
     saveHero: (HeroSave) -> Unit = {},
     /** Prop blocks drawn as generated 3D models, by block id. */
@@ -168,7 +164,7 @@ class PlayViewModel(
      * rather than capturing it, so starting a fresh world cannot leave a lambda
      * pointing at the world the player just left.
      */
-    private var session = resume?.let { WorldSession.restore(content, it) } ?: WorldSession(content, worldConfig, this.heroClassId, hero = hero)
+    private var session = resume?.let { WorldSession.restore(content, it, settings = settings) } ?: WorldSession(content, worldConfig, this.heroClassId, hero = hero, settings = settings)
 
     /** The slot this world saves into. Changes only when the player leaves for a new world from inside play. */
     private var identity: WorldIdentity = resume?.identity ?: slot ?: WorldIdentity(
@@ -298,37 +294,6 @@ class PlayViewModel(
     fun chooseMaskCharacters(on: Boolean) {
         _state.value = _state.value.copy(maskCharacters = on)
         saveMaskCharacters(on)
-    }
-
-    /**
-     * Paints this style's textures, the part of the world the lighting
-     * restyle cannot change. Runs in the background while the player plays;
-     * each finished texture is swapped in as it lands, and the Style panel
-     * shows how far along it is.
-     */
-    fun forgeStyle() {
-        val model = imageModel ?: return publish(message = "Add an OpenRouter key in Model provider to paint textures")
-        val root = kitDirectory ?: return publish(message = "No storage for forged art")
-        if (_state.value.forgeProgress?.isFinished == false) return
-        val direction = artDirector.direction
-        val biome = session.currentBiome.id
-        val pack = content.packs.firstOrNull { p -> p.biomes.any { it.id == biome } } ?: content.packs.first()
-        val runner = TextureForgeRunner(model, root)
-        val plan = runner.plan(direction, pack, setOf(biome), includeActors = true)
-        if (plan.isEmpty) {
-            _state.value = _state.value.copy(kit = plan.kit)
-            return publish(message = "This style is already painted")
-        }
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val finished = runner.run(plan) { progress ->
-                _state.value = _state.value.copy(forgeProgress = progress, kit = plan.kit)
-            }
-            // Back on the main thread: publishing reads the session, which the
-            // game loop mutates there.
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                publish(message = "Painted ${finished.made.size} of ${plan.orders.size}")
-            }
-        }
     }
 
     /** The same request again, somewhere else. Asking twice should not be futile. */
@@ -475,6 +440,26 @@ class PlayViewModel(
     }
 
     // ---- realm -------------------------------------------------------------
+
+    fun toggleQuests() {
+        _state.value = _state.value.copy(questOpen = !_state.value.questOpen)
+        publish()
+    }
+
+    fun acceptQuest(id: String) = publish(message = when (val r = session.acceptQuest(id)) {
+        is com.stratum.engine.world.QuestResult.Accepted -> "Taken: ${r.quest.title}"
+        com.stratum.engine.world.QuestResult.LogFull -> "Your quest log is full"
+        else -> null
+    })
+
+    fun abandonQuest(id: String) = publish(message = (session.abandonQuest(id) as? com.stratum.engine.world.QuestResult.Abandoned)?.let { "Let go: ${it.quest.title}" })
+
+    fun turnInQuest(id: String) = publish(message = when (val r = session.turnInQuest(id)) {
+        is com.stratum.engine.world.QuestResult.Rewarded -> "+${r.experience} xp · ${r.quest.giver.name} thanks you" + (r.next?.let { ". ${it.giver.name} has more: ${it.title}" } ?: "")
+        com.stratum.engine.world.QuestResult.NotHere -> "Hand it in where it was asked for"
+        com.stratum.engine.world.QuestResult.NotReady -> "Not done yet"
+        else -> null
+    })
 
     fun toggleRealm() {
         _state.value = _state.value.copy(realmOpen = !_state.value.realmOpen)
@@ -659,7 +644,7 @@ class PlayViewModel(
             name = if (difficulty.isBase) base else "$base$TIER_SEPARATOR${difficulty.tier}",
             createdAt = System.currentTimeMillis(),
         )
-        session = WorldSession(content, worldConfig.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave())
+        session = WorldSession(content, worldConfig.copy(seed = System.nanoTime()), heroClassId, difficulty = difficulty, hero = session.heroSave(), settings = settings)
         persist(SaveReason.NEW_WORLD)
         // The panels belong to the run that just ended; a fresh world opens on
         // the world, not on someone else's bag.
@@ -1150,7 +1135,11 @@ class PlayViewModel(
 
     private fun publish(message: String? = null) {
         val snapshot = session.snapshot()
+        val questNews = session.questNews().firstOrNull()?.let { a ->
+            if (a.status == com.stratum.core.domain.quest.QuestStatus.READY) "Quest done: ${a.quest.title}" else "Quest failed: ${a.quest.title}"
+        }
         _state.value = _state.value.copy(
+            quests = questPanel(),
             player = snapshot.player,
             camera = snapshot.player.position,
             biomeName = snapshot.biome.name,
@@ -1193,6 +1182,10 @@ class PlayViewModel(
             projectiles = snapshot.projectiles,
             zones = snapshot.zones,
             telegraphs = snapshot.telegraphs,
+            debris = session.debris().map { d ->
+                com.stratum.engine.scene.DebrisMark(d.x, d.y, d.z, d.size, materialColor(content.registry.typeOf(d.blockIndex).material))
+            },
+            ragdolls = session.ragdolls().map { r -> com.stratum.engine.scene.RagdollMark(r.points, r.color, r.scale, r.alpha) },
             flasks = snapshot.flasks,
             maxHealth = snapshot.maxHealth,
             maxResource = snapshot.maxResource,
@@ -1201,8 +1194,37 @@ class PlayViewModel(
             sandbox = sandboxPanel(),
             lifePaysCosts = com.stratum.core.domain.combat.Keystone.LIFE_PAYS_COSTS in session.keystones,
             frame = _state.value.frame + 1,
-            message = message ?: _state.value.message,
+            message = message ?: questNews ?: _state.value.message,
             saveNotice = lastSave.value,
+        )
+    }
+
+    /** A thrown block's colour, from what it is made of. */
+    private fun materialColor(m: com.stratum.core.domain.world.BlockMaterial): Long = when (m) {
+        com.stratum.core.domain.world.BlockMaterial.SOIL -> 0xFF7A5232
+        com.stratum.core.domain.world.BlockMaterial.STONE -> 0xFF8A8580
+        com.stratum.core.domain.world.BlockMaterial.ORE -> 0xFF5E5A63
+        com.stratum.core.domain.world.BlockMaterial.FOLIAGE -> 0xFF4E7A35
+        com.stratum.core.domain.world.BlockMaterial.WOOD -> 0xFF8C6239
+        com.stratum.core.domain.world.BlockMaterial.LIQUID -> 0xFF3F6E9A
+        else -> 0xFFB09070
+    }
+
+    /** The quest panel, read from the session: cheap when shut, the board only while the player stands in a town. */
+    private fun questPanel(): QuestPanel {
+        val town = session.currentTown
+        val active = session.quests
+        val p = session.player.position
+        val handIn = active.filter { a ->
+            a.status == com.stratum.core.domain.quest.QuestStatus.READY && town != null &&
+                (if (a.quest.objective.kind == com.stratum.core.domain.quest.ObjectiveKind.DELIVER) a.quest.objective.toTownId == town.id else a.quest.giver.townId == town.id)
+        }.mapTo(HashSet()) { it.quest.id }
+        val open = _state.value.questOpen
+        return QuestPanel(
+            townName = town?.name,
+            people = if (open) session.townsfolk.size else 0,
+            board = if (open && town != null) session.questBoard() else emptyList(),
+            active = active, playerX = p.x, playerY = p.y, handInHere = handIn,
         )
     }
 
@@ -1477,7 +1499,7 @@ class PlayViewModel(
         miningJob?.cancel()
         loopJob?.cancel()
         worldConfig = config
-        session = WorldSession.restore(content, session.worldSave(identity).copy(config = config, hero = hero))
+        session = WorldSession.restore(content, session.worldSave(identity).copy(config = config, hero = hero), settings = settings)
         val panel = _state.value.sandbox
         _state.value = initialState(content).copy(sandbox = panel.copy(exported = null))
         publish(message = message)
@@ -1560,7 +1582,6 @@ class PlayViewModel(
             config: WorldConfig,
             heroClassId: String? = null,
             spriteResolver: (SpriteKey) -> DrawableSprite? = { null },
-            imageModel: com.stratum.core.domain.ai.ImageModelPort? = null,
             kitDirectory: File? = null,
             kitOverlays: List<File> = emptyList(),
             quality: QualityTier? = null,
@@ -1584,16 +1605,18 @@ class PlayViewModel(
             heroMask: String? = null,
             maskCharacters: Boolean = true,
             saveMaskCharacters: (Boolean) -> Unit = {},
+            settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayViewModel(
                 content, config, heroClassId, spriteResolver,
-                imageModel = imageModel, kitDirectory = kitDirectory, kitOverlays = kitOverlays,
+                kitDirectory = kitDirectory, kitOverlays = kitOverlays,
                 quality = quality, saveQuality = saveQuality, terrain = terrain, saveTerrain = saveTerrain, hero = if (resume == null) loadHero() else null, saveHero = saveHero,
                 stylePrompt = stylePrompt, saveStyle = saveStyle,
                 propModels = propModels, blueprints = blueprints, microModels = microModels,
                 resume = resume, worlds = worlds, slot = slot,
                 heroMask = heroMask, maskCharacters = maskCharacters, saveMaskCharacters = saveMaskCharacters,
+                settings = settings,
             ) as T
         }
     }
@@ -1629,6 +1652,10 @@ data class PlayUiState(
     val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
     val zones: List<com.stratum.engine.world.Zone> = emptyList(),
     val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
+    /** Blocks thrown loose by attacks, still flying. */
+    val debris: List<com.stratum.engine.scene.DebrisMark> = emptyList(),
+    /** Fallen bodies tumbling loose, when ragdolls are on. */
+    val ragdolls: List<com.stratum.engine.scene.RagdollMark> = emptyList(),
     val flasks: List<com.stratum.engine.world.FlaskView> = emptyList(),
     /** The bars' ceilings with traits and boons counted, from the session; the player's own fields cannot see those. */
     val maxHealth: Int = player.maxHealthWithGear,
@@ -1687,13 +1714,15 @@ data class PlayUiState(
     /** The lit 3D view, or the flat 2D canvas it replaced. */
     val use3D: Boolean = true,
     /** The texture forge's latest progress, or null when it has not run. */
-    val forgeProgress: ForgeProgress? = null,
     /** Needs, food and the camp's recipes. */
     val survival: SurvivalPanel = SurvivalPanel(),
     val campOpen: Boolean = false,
     /** Outposts, their stock and the followers in the field. */
     val realm: RealmPanel = RealmPanel(),
     val realmOpen: Boolean = false,
+    val questOpen: Boolean = false,
+    /** The quest panel: the town's board and the player's quests. */
+    val quests: QuestPanel = QuestPanel(),
     /** The town the player stands in, or null in the wilds. */
     val settlementName: String? = null,
     /** Whether that town is a stronghold held against the player. */

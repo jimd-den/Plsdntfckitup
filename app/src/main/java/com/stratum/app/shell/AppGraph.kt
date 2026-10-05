@@ -3,7 +3,7 @@ package com.stratum.app.shell
 import com.stratum.engine.world.StreamingWorld
 
 import android.content.Context
-import com.stratum.app.AiWiring
+import com.stratum.app.AssetWiring
 import com.stratum.app.GraphicsWiring
 import com.stratum.app.PluginWiring
 import com.stratum.app.world.SavedWorlds
@@ -23,10 +23,11 @@ import java.io.File
  * screens are handed what they need.
  */
 class AppGraph(context: Context, scope: CoroutineScope) {
-    val ai = AiWiring(context)
+    /** Art, models and preferences kept on the device. */
+    val assets = AssetWiring(context)
 
     /** Installed plugins: imported games, the crew's packs and the player's own creations. */
-    val plugins = PluginWiring(context, ai.sprites)
+    val plugins = PluginWiring(context, assets.sprites)
 
     val graphics = GraphicsWiring(context)
 
@@ -39,7 +40,7 @@ class AppGraph(context: Context, scope: CoroutineScope) {
     /** The look the world is worn in. */
     val styles = WorldStyleStore(context)
 
-    /** Where painted textures live. */
+    /** Where texture kits kept on the device live. */
     val forgeDirectory = File(context.filesDir, "forge")
 
     /** The model studio's microvoxel models. */
@@ -50,6 +51,9 @@ class AppGraph(context: Context, scope: CoroutineScope) {
 
     /** Which play hints the player has already seen, so each teaches once. */
     val hints = HintStore(context)
+
+    /** Every procedural option the player set on the settings screen. */
+    val settings = com.stratum.core.data.settings.GameSettingsStore(context)
 
     /** Attacks forged in the Forge of Will, and which are carried into play. */
     val forgedAttacks = ForgedAttackStore(context)

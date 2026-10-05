@@ -144,6 +144,9 @@ fun PlayScreen(
             onOrder = viewModel::command,
         )
     }
+    val questActions = remember(viewModel) {
+        QuestActions(onToggle = viewModel::toggleQuests, onAccept = viewModel::acceptQuest, onAbandon = viewModel::abandonQuest, onTurnIn = viewModel::turnInQuest)
+    }
     // A light tick, not a buzz: building is dozens of these a minute.
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     PlayScreenContent(
@@ -181,7 +184,6 @@ fun PlayScreen(
         onToggleTable = viewModel::toggleTable,
         onRollCheck = viewModel::rollCheck,
         onToggle3D = viewModel::toggle3D,
-        onForgeStyle = viewModel::forgeStyle,
         onChooseQuality = viewModel::chooseQuality,
         onChooseTerrain = viewModel::chooseTerrain,
         onChooseMasks = viewModel::chooseMaskCharacters,
@@ -195,6 +197,7 @@ fun PlayScreen(
         looks = looks,
         survivalActions = survivalActions,
         realmActions = realmActions,
+        questActions = questActions,
         shaperActions = shaperActions,
         gearActions = gearActions,
         sandboxActions = sandboxActions,
@@ -237,7 +240,6 @@ fun PlayScreenContent(
     onToggleTable: () -> Unit = {},
     onRollCheck: (String) -> Unit = {},
     onToggle3D: () -> Unit = {},
-    onForgeStyle: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
     onChooseTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     onChooseMasks: (Boolean) -> Unit = {},
@@ -252,6 +254,7 @@ fun PlayScreenContent(
     looks: HeroLooks = HeroLooks(),
     survivalActions: SurvivalActions = SurvivalActions(),
     realmActions: RealmActions = RealmActions(),
+    questActions: QuestActions = QuestActions(),
     shaperActions: WorldShaperActions = WorldShaperActions(),
     gearActions: GearActions = GearActions(),
     sandboxActions: SandboxActions = SandboxActions(),
@@ -307,6 +310,8 @@ fun PlayScreenContent(
                     projectiles = state.projectiles,
                     zones = state.zones,
                     telegraphs = state.telegraphs,
+                    debris = state.debris,
+                    ragdolls = state.ragdolls,
                     maskCharacters = state.maskCharacters,
                     heroMask = state.heroMask,
                     masks = state.masks,
@@ -359,7 +364,7 @@ fun PlayScreenContent(
             )
         }
 
-        val menuEntries = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle) +
+        val menuEntries = dockEntries(state, onToggleSatchel, onToggleAnvil, heroActions.onClose, onToggleTable, onToggleStyle, onToggle3D, survivalActions.onToggleCamp, realmActions.onToggle, questActions.onToggle) +
             listOfNotNull(
                 DockEntry("⛰", "World", shaperActions.onToggle, active = state.worldShaper.open).takeIf { state.worldShaper.available },
                 DockEntry("🧪", "Sandbox", sandboxActions.onToggle, active = state.sandbox.open).takeIf { state.sandbox.active },
@@ -399,7 +404,6 @@ fun PlayScreenContent(
                 onRestyle = onRestyle,
                 onReroll = onRerollStyle,
                 onClose = onToggleStyle,
-                onForge = onForgeStyle,
                 onChooseQuality = onChooseQuality,
                 onChooseTerrain = onChooseTerrain,
                 onChooseMasks = onChooseMasks,
@@ -449,6 +453,10 @@ fun PlayScreenContent(
 
         if (state.realmOpen && !state.isDead) {
             RealmOverlay(panel = state.realm, actions = realmActions)
+        }
+
+        if (state.questOpen && !state.isDead) {
+            QuestOverlay(panel = state.quests, actions = questActions)
         }
 
         if (state.worldShaper.open && !state.isDead) {
@@ -760,6 +768,7 @@ private fun dockEntries(
     onToggle3D: () -> Unit,
     onToggleCamp: () -> Unit,
     onToggleRealm: () -> Unit,
+    onToggleQuests: () -> Unit = {},
 ): List<DockEntry> {
     val points = state.player.unspentPassivePoints
     val craftables = state.heldInserts.sumOf { it.count } + state.heldCurrency.sumOf { it.count }
@@ -773,7 +782,10 @@ private fun dockEntries(
             .takeIf { state.survival.active },
         DockEntry("🏰", "Realm", onToggleRealm, badge = state.realm.followers.takeIf { it > 0 }?.toString(), active = state.realmOpen)
             .takeIf { state.realm.active },
-        DockEntry("🎨", "Style", onToggleStyle, badge = state.forgeProgress?.takeUnless { it.isFinished }?.let { "${(it.fraction * 100).toInt()}%" }, active = state.styleOpen),
+        // Quests: always there; it calls when one is done, and names the town's board when standing in one.
+        DockEntry("📜", "Quests", onToggleQuests, badge = state.quests.ready.takeIf { it > 0 }?.toString() ?: "!".takeIf { state.quests.townName != null && state.quests.active.isEmpty() },
+            active = state.questOpen, calling = state.quests.ready > 0),
+        DockEntry("🎨", "Style", onToggleStyle, active = state.styleOpen),
         DockEntry(if (state.use3D) "3D" else "2D", "View", onToggle3D),
     )
 }

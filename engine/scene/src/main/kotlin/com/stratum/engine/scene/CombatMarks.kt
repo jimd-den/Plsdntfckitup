@@ -36,3 +36,18 @@ data class CombatMark(
     /** A forged attack's look: drawn as its sketch rather than a plain glow or disc. */
     val look: com.stratum.core.domain.attack.AttackLook? = null,
 )
+
+/** A block flying loose after an attack tore it up, drawn as a small cube of its colour. */
+data class DebrisMark(val x: Float, val y: Float, val z: Float, val size: Float, val color: Long)
+
+/**
+ * A fallen body lying loose: [points] holds x, y, z for eleven joints --
+ * head, chest, pelvis, left elbow and hand, right elbow and hand, left knee
+ * and foot, right knee and foot -- drawn as a figure of small voxels.
+ */
+class RagdollMark(val points: FloatArray, val color: Long, val scale: Float, val alpha: Float) {
+    companion object {
+        /** Joint pairs drawn as limbs. */
+        val LIMBS = listOf(0 to 1, 1 to 2, 1 to 3, 3 to 4, 1 to 5, 5 to 6, 2 to 7, 7 to 8, 2 to 9, 9 to 10)
+    }
+}

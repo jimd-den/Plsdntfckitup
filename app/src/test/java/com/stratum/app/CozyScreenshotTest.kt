@@ -111,7 +111,6 @@ class CozyScreenshotTest {
                     draft = draft,
                     heroes = listOf(HeroChoice(id = "h", name = "Dike", line = "260 health", level = 3)),
                     actions = NewWorldActions(),
-                    modelReady = true,
                     modifier = Modifier.fillMaxSize(),
                     jobsTray = {},
                 )

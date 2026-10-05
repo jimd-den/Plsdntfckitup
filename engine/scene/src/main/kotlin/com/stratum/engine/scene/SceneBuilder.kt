@@ -291,6 +291,10 @@ class SceneBuilder(
         effects: List<ActiveEffect> = emptyList(),
         /** Projectiles in flight, pulsing ground and wind-ups; see [CombatMark]. */
         marks: List<CombatMark> = emptyList(),
+        /** Blocks thrown loose by attacks, still in the air. */
+        debris: List<DebrisMark> = emptyList(),
+        /** Fallen bodies lying loose. */
+        ragdolls: List<RagdollMark> = emptyList(),
         /** Floating mask spirits, posed by whoever animates them; see [SpiritStage]. */
         spirits: List<SpiritInstance> = emptyList(),
     ): SceneFrame {
@@ -383,6 +387,8 @@ class SceneBuilder(
         val flashes = ArrayList<PointLight>()
         effects.forEach { effect(it, camera, flashes) }
         marks.forEach { mark(it, camera, flashes, time.elapsedSeconds) }
+        debris.forEach { d -> cube(actorMesh, d.x, d.y, d.z, d.size, d.color, shade(d.color)) }
+        ragdolls.forEach(::ragdoll)
         if (spirits.isNotEmpty()) spiritStage.draw(spirits, camera, actorMesh, cutout, glows, flashes)
 
         val hero = actors.firstOrNull { it.presentation.role == com.stratum.core.domain.art.ActorRole.PLAYER }
@@ -886,6 +892,34 @@ class SceneBuilder(
         }
     }
 
+    /**
+     * A fallen body as a figure of small voxels: a run of cubes along each
+     * limb and a bigger one for the head, shrinking away as it fades.
+     */
+    private fun ragdoll(r: RagdollMark) {
+        if (r.alpha <= 0f) return
+        val p = r.points
+        val size = RAGDOLL_VOXEL * r.scale * (0.35f + 0.65f * r.alpha)
+        val side = shade(r.color)
+        for ((a, b) in RagdollMark.LIMBS) {
+            val ax = p[a * 3]; val ay = p[a * 3 + 1]; val az = p[a * 3 + 2]
+            val bx = p[b * 3]; val by = p[b * 3 + 1]; val bz = p[b * 3 + 2]
+            val length = kotlin.math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay) + (bz - az) * (bz - az))
+            val n = (length / (size * 0.8f)).toInt().coerceIn(1, 8)
+            for (i in 0..n) {
+                val t = i.toFloat() / n
+                cube(actorMesh, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, size, r.color, side)
+            }
+        }
+        cube(actorMesh, p[0], p[1], p[2], size * 2.2f, r.color, side)
+    }
+
+    /** A colour a little darker, for the sides of a cube lit from above. */
+    private fun shade(color: Long): Long {
+        val r = ((color shr 16) and 0xFF) * 3 / 4; val g = ((color shr 8) and 0xFF) * 3 / 4; val b = (color and 0xFF) * 3 / 4
+        return (color and 0xFF000000L) or (r shl 16) or (g shl 8) or b
+    }
+
     /** An axis-aligned cube of edge [size] centred on a point: top and four sides, flat-coloured like microvoxel ground. */
     private fun cube(out: MeshBuilder, cx: Float, cy: Float, cz: Float, size: Float, top: Long, side: Long) {
         val h = size / 2
@@ -1325,6 +1359,8 @@ class SceneBuilder(
         const val MIN_PROJECTILE_GLOW = 0.18f
         const val PROJECTILE_OPACITY = 1.6f
         const val PROJECTILE_TRAIL = 4
+        /** Edge of one voxel of a fallen body, in blocks. */
+        const val RAGDOLL_VOXEL = 0.16f
         /** A forged attack's mark draws at most this many glows and decals, however busy its look. */
         const val MAX_FORGED_MARKS = 64
         const val MAX_STREAK_GLOWS = 10

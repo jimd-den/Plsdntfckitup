@@ -93,7 +93,6 @@ class ContentPackAssembler {
             resources = merger.merge(ContentPack::resources, ResourceDefinition::id),
             structures = merger.merge(ContentPack::structures, StructureDefinition::id),
             units = merger.merge(ContentPack::units, UnitDefinition::id),
-            agentRoles = merger.merge(ContentPack::agentRoles, com.stratum.core.domain.ai.AgentRoleDefinition::id),
             models = merger.merge(ContentPack::models, ModelDefinition::id),
             statuses = merger.merge(ContentPack::statuses, com.stratum.core.domain.status.StatusDefinition::id),
             traits = merger.merge(ContentPack::traits, com.stratum.core.domain.combat.TraitDefinition::id),
@@ -264,12 +263,8 @@ internal object WorldPoliticsValidation {
             content.enemies.filter { unknownFaction(it.factionId) }.map { "enemy '${it.id}' belongs to unknown faction '${it.factionId}'" } +
             content.enemyPacks.flatMap { pack -> packProblems(pack, enemyIds) } +
             content.settlements.flatMap { recipe -> settlementProblems(recipe, content, enemyIds, factionIds) } +
-            survivalProblems(content) + strategyProblems(content) + crewProblems(content)
+            survivalProblems(content) + strategyProblems(content)
     }
-
-    /** A crew that cannot be put in order: unknown dependencies, or a circle of them. */
-    private fun crewProblems(content: AssembledContent): List<String> =
-        (com.stratum.core.domain.ai.CrewPlan.of(content.agentRoles) as? com.stratum.core.domain.ai.CrewPlan.Invalid)?.problems.orEmpty()
 
     /** Costs in resources nobody defined, requirements on structures that do not exist, soldiers with no body. */
     private fun strategyProblems(content: AssembledContent): List<String> {
@@ -346,8 +341,6 @@ data class AssembledContent(
     val resources: List<ResourceDefinition> = emptyList(),
     val structures: List<StructureDefinition> = emptyList(),
     val units: List<UnitDefinition> = emptyList(),
-    /** Studio crew the packs bring; empty means the standard crew. */
-    val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
     /** 3D models the packs bring, by id; see [ModelDefinition]. */
     val models: List<ModelDefinition> = emptyList(),
     /** The rules the loaded packs suggest, before the player changes them. */

@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stratum.core.designsystem.component.LookChoice
 import com.stratum.core.domain.sprite.AnimationState
-import com.stratum.app.AiWiring
+import com.stratum.app.AssetWiring
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.session.PlayerLoadout
 import com.stratum.core.domain.sprite.SpriteFallback
@@ -31,7 +31,7 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): List<LookChoice> {
-    val drawnSheets by app.graph.ai.sprites.sheets.collectAsStateWithLifecycle()
+    val drawnSheets by app.graph.assets.sprites.sheets.collectAsStateWithLifecycle()
     val looks by produceState(emptyList<LookChoice>(), drawnSheets, content.spriteSheets) {
         value = withContext(Dispatchers.IO) {
             (drawnSheets + content.spriteSheets)
@@ -42,7 +42,7 @@ internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): 
                     LookChoice(
                         id = sheet.id,
                         name = if (SpriteNamespace.servesHero(sheet.id)) sheet.name else "${sheet.name} · ${SpriteNamespace.kindOf(sheet.id)}",
-                        portrait = app.graph.ai.sprites.drawableBitmapFor(sheet.id)?.asImageBitmap(),
+                        portrait = app.graph.assets.sprites.drawableBitmapFor(sheet.id)?.asImageBitmap(),
                         frame = sheet.frameRect(idle),
                     )
                 }
@@ -64,7 +64,7 @@ internal fun rememberLookChoices(app: AppViewModel, content: AssembledContent): 
  * actor per frame inside the draw loop.
  */
 internal fun heroSpriteResolver(
-    ai: AiWiring,
+    ai: AssetWiring,
     content: AssembledContent,
     loadout: PlayerLoadout,
 ): (SpriteKey) -> DrawableSprite? {

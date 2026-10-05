@@ -41,6 +41,8 @@ internal class EncounterSystem(
     private val flashes: HitFlashes,
     private val impacts: ImpactField,
     private val random: Random,
+    /** Deals each newcomer its own forged attacks. */
+    private val spread: AttackSpread? = null,
 ) {
     private val level = landscape as? MarkedLevel
 
@@ -80,7 +82,7 @@ internal class EncounterSystem(
     fun populateMarkers() {
         val population = markers ?: return
         population.follow(world.residency) { world.loadedChunks.map { it.pos } }
-        val room = (directorConfig.maxAlive * MARKER_CROWD - state.enemies.size).coerceAtLeast(0)
+        val room = (directorConfig.maxAlive * MARKER_CROWD - state.enemies.count { !it.civilian }).coerceAtLeast(0)
         population.wake(state.player.position, room).forEach { marker ->
             val dice = MarkerEncounters.diceFor(seed, marker)
             when (val encounter = markerEncounters.resolve(marker, dice)) {
@@ -113,6 +115,7 @@ internal class EncounterSystem(
         val towns = politics.townsInSight()
         state.enemies = director.maintainPopulation(state.enemies, player.position, biomeId, player.level, random, politics.spawnAllowed(towns), facingOf(player.facing))
         state.enemies = state.enemies + politics.musterGarrisons(towns)
+        spread?.let { state.enemies = it.deal(state.enemies) }
         val before = state.enemies
         state.enemies = combat.constrain(before, crowd.advance(before, player.position, politics::isHostile, deltaSeconds, politics.allyOrders()), deltaSeconds)
     }
@@ -121,8 +124,12 @@ internal class EncounterSystem(
      * Takes the fallen out of the world: loot, valuables, experience and
      * standing for a monster; a follower simply falls.
      */
+    /** Told of every body buried, after the fact: what quests count kills from. */
+    var onBuried: (List<EnemyInstance>) -> Unit = {}
+
     fun bury(slain: List<EnemyInstance>) {
         if (slain.isEmpty()) return
+        onBuried(slain)
         val gone = slain.mapTo(HashSet()) { it.instanceId }
         state.enemies = state.enemies.filterNot { it.instanceId in gone }
         slain.forEach { forget(it.instanceId) }

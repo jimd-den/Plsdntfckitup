@@ -24,7 +24,6 @@ val pureModules = listOf(
   ":engine:settlement",
   ":engine:worldgen",
   ":engine:crowd",
-  ":agents",
   ":engine:render",
   ":engine:scene",
   ":engine:model",

@@ -63,6 +63,9 @@ internal class CombatSystem(
     private val playerSkill: (String) -> SkillDefinition?,
     /** Share of a monster's damage that reaches the player; see [com.stratum.core.domain.world.WorldRules.enemyDamage]. */
     private val incomingDamage: Float = 1f,
+    /** How far attacks reshape the ground, and how many thrown blocks fly at once. */
+    destruction: com.stratum.core.domain.settings.VoxelDestruction = com.stratum.core.domain.settings.VoxelDestruction.SCARS,
+    maxDebris: Int = 0,
 ) {
     private val book = content.statusBook
     val statuses = StatusSystem(book, rules)
@@ -70,7 +73,15 @@ internal class CombatSystem(
     val zones = ZoneSystem()
     val triggers = TriggerEngine(rules)
     /** What attacks do to the blocks, when the world can be changed. */
-    private val terrain = (world as? com.stratum.core.domain.world.MutableWorld)?.let(::TerrainImpacts)
+    private val terrain = (world as? com.stratum.core.domain.world.MutableWorld)?.let { w ->
+        TerrainImpacts(w, destruction, if (destruction == com.stratum.core.domain.settings.VoxelDestruction.PHYSICS && maxDebris > 0) DebrisField(w, maxDebris) else null)
+    }
+
+    /** Blocks thrown loose and still flying, for the renderer. */
+    fun debris(): List<DebrisPiece> = terrain?.debris?.pieces().orEmpty()
+
+    /** Voxel payloads this fight has applied, for the quests that want things kept quiet. */
+    val blasts: Int get() = terrain?.applied ?: 0
     val flasks = FlaskSystem(content.flasks)
     private val vitals = VitalsSystem(rules)
     private val abilities = MonsterAbilities(content, director::definition)

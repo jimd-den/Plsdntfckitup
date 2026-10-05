@@ -32,7 +32,7 @@ object GameSetup {
         val packs = listOf(IgboContentPack.pack) + additionalPacks
         val base = assembler.assemble(packs)
         val attacks = forged.mapNotNull(AttackCode::decode).distinctBy { it.id }
-        val forge = AttackCompiler.pack(attacks, AttackVocabulary.from(base.damageTypes), enemies = base.enemies)
+        val forge = AttackCompiler.pack(attacks, AttackVocabulary.from(base.damageTypes), enemies = base.enemies, perEnemy = AttackCompiler.POOL)
         val heroes = if (attacks.isEmpty()) emptyList() else base.heroClasses.map { hero ->
             hero.copy(abilityIds = hero.abilityIds + attacks.map { it.id }.filterNot(hero.abilityIds::contains))
         }

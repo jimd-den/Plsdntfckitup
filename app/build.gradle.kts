@@ -156,7 +156,6 @@ dependencies {
   implementation(project(":feature:hero"))
   implementation(project(":feature:library"))
   implementation(project(":plugins"))
-  implementation(project(":agents"))
   implementation(project(":core:data"))
 
   implementation(platform(libs.androidx.compose.bom))

@@ -35,7 +35,18 @@ import kotlinx.coroutines.flow.update
 @OptIn(ExperimentalCoroutinesApi::class)
 class GameState(private val graph: AppGraph, scope: CoroutineScope) {
 
-    private val ai = graph.ai
+    private val ai = graph.assets
+
+    private val settingsState = MutableStateFlow(graph.settings.load())
+
+    /** Every procedural option, as the settings screen last left them. */
+    val settings: StateFlow<com.stratum.core.domain.settings.GameSettings> = settingsState.asStateFlow()
+
+    fun changeSettings(next: com.stratum.core.domain.settings.GameSettings) {
+        val coerced = next.coerced()
+        graph.settings.save(coerced)
+        settingsState.value = coerced
+    }
 
     private val customClassList = MutableStateFlow(graph.classes.all())
 
