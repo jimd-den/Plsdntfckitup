@@ -19,6 +19,7 @@ import com.stratum.core.designsystem.component.StratumSection
 import com.stratum.core.designsystem.theme.Space
 import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.settings.GameSettings
+import com.stratum.core.domain.settings.Challenge
 import com.stratum.core.domain.settings.VoxelDestruction
 import com.stratum.engine.scene.SplatMode
 import com.stratum.engine.scene.quality.QualityTier
@@ -55,7 +56,9 @@ fun SettingsScreen(settings: GameSettings, display: DisplayChoices, actions: Set
             Steps("Quest difficulty", listOf("Errands", "Balanced", "Heroic", "Legendary"), settings.questDifficulty) { set(settings.copy(questDifficulty = it)) }
             Toggle("Quest chains", "A finished quest can lead to the giver's next one.", settings.questChains) { set(settings.copy(questChains = it)) }
         }
-        StratumSection("Combat", subtitle = "How varied monsters' attacks are.") {
+        StratumSection("Combat", subtitle = "How hard monsters press you, and how varied their attacks are.") {
+            Steps("Difficulty", Challenge.entries.map { it.label }, settings.challenge.ordinal) { set(settings.copy(challenge = Challenge.entries[it])) }
+            Hint(settings.challenge.blurb)
             Steps("Attacks per monster", listOf("1", "2", "3"), settings.attacksPerMonster - 1) { set(settings.copy(attacksPerMonster = it + 1)) }
             Toggle("Never the same move twice", "Monsters fighting together never share an attack.", settings.distinctAttacks) { set(settings.copy(distinctAttacks = it)) }
         }

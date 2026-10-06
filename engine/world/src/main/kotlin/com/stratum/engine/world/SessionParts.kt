@@ -94,6 +94,7 @@ internal class SessionParts(
         incomingDamage = config.rules.enemyDamage,
         destruction = settings.voxelDestruction,
         maxDebris = settings.maxDebris,
+        challenge = settings.challenge,
     )
     val encounters: EncounterSystem = EncounterSystem(
         state, content, config.seed, director, directorConfig, world, landscape, { x, y -> biomeSource?.biomeAt(x, y)?.id },

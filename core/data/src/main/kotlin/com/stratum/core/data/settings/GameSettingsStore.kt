@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.stratum.core.domain.settings.GameSettings
+import com.stratum.core.domain.settings.Challenge
 import com.stratum.core.domain.settings.VoxelDestruction
 
 /**
@@ -22,6 +23,7 @@ class GameSettingsStore(context: Context) {
             questsPerTown = prefs.getInt("quests_per_town", d.questsPerTown),
             questDifficulty = prefs.getInt("quest_difficulty", d.questDifficulty),
             questChains = prefs.getBoolean("quest_chains", d.questChains),
+            challenge = prefs.getString("challenge", null)?.let { n -> Challenge.entries.firstOrNull { it.name == n } } ?: d.challenge,
             attacksPerMonster = prefs.getInt("attacks_per_monster", d.attacksPerMonster),
             distinctAttacks = prefs.getBoolean("distinct_attacks", d.distinctAttacks),
             voxelDestruction = prefs.getString("voxel_destruction", null)?.let { n -> VoxelDestruction.entries.firstOrNull { it.name == n } } ?: d.voxelDestruction,
@@ -38,6 +40,7 @@ class GameSettingsStore(context: Context) {
             putInt("quests_per_town", s.questsPerTown)
             putInt("quest_difficulty", s.questDifficulty)
             putBoolean("quest_chains", s.questChains)
+            putString("challenge", s.challenge.name)
             putInt("attacks_per_monster", s.attacksPerMonster)
             putBoolean("distinct_attacks", s.distinctAttacks)
             putString("voxel_destruction", s.voxelDestruction.name)
