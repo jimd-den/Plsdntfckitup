@@ -78,7 +78,7 @@ class MaskMakerScreenshotTest {
         val content = GameSetup.assemble()
         composeTestRule.setContent {
             StratumTheme(palette = content.palette, darkTheme = true) {
-                CreateHubScreen(status = StudioStatus(classCount = 6, wearsMakerMask = true), actions = CreateHubActions(), jobsTray = {})
+                CreateHubScreen(status = StudioStatus(classCount = 6, wearsMakerMask = true), actions = CreateHubActions())
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/create_hub_masks.png")

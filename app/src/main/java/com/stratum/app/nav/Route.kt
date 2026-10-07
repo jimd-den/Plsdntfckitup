@@ -13,7 +13,7 @@ import com.stratum.app.world.WorldLaunch
 sealed interface Route {
     data object Title : Route
 
-    /** The gear icon's destination: model providers and graphics. */
+    /** The gear icon's destination: every procedural option, in one place. */
     data object Settings : Route
 
     /** Everything behind the Play door. */
@@ -29,12 +29,6 @@ sealed interface Route {
     sealed interface Create : Route {
         data object Hub : Create
         data object Classes : Create
-        data object Lore : Create
-        data object Textures : Create
-        data object Sprites : Create
-        data object Poses : Create
-        data object Weapons : Create
-        data object Models : Create
         data object Voxels : Create
 
         /** Make your own Igbo mask, and wear it. */
@@ -42,10 +36,10 @@ sealed interface Route {
 
         /** Carve a sculpted African mask with every part open, and wear it. */
         data object Carver : Create
-        data object Mapper : Create
 
-        /** The agent crew, opened on [preset] when the way in chose one. */
-        data class Crew(val preset: String? = null) : Create
+        /** The Forge of Will: forge attacks from a core, catalysts and resonators. */
+        data object Attacks : Create
+        data object Mapper : Create
     }
 
     /** Everything behind the Import & Share door. */

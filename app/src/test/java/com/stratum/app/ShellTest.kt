@@ -21,9 +21,9 @@ class ShellTest {
     fun `back goes up one level and never past the title`() {
         val stack = BackStack()
         stack.push(Route.Create.Hub)
-        stack.push(Route.Create.Sprites)
-        stack.push(Route.Create.Sprites)
-        assertEquals(listOf(Route.Title, Route.Create.Hub, Route.Create.Sprites), stack.routes)
+        stack.push(Route.Create.Masks)
+        stack.push(Route.Create.Masks)
+        assertEquals(listOf(Route.Title, Route.Create.Hub, Route.Create.Masks), stack.routes)
         assertTrue(stack.pop())
         assertTrue(stack.pop())
         assertFalse(stack.pop())

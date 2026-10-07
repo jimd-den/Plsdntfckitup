@@ -122,6 +122,14 @@ data class SettlementRecipe(
         const val ORGANIC = "stratum:organic"
         const val FORTRESS = "stratum:fortress"
         const val CAMP = "stratum:camp"
+        /**
+         * A town made by its people's own way of making places: a
+         * [com.stratum.core.domain.settlement.culture.CityGenome] rolled for
+         * the site decides its form, quarters, walls and history, and the
+         * layout follows it -- kraal rings, dispersed compounds, walled
+         * cities, stone lanes, cliff terraces, ksars, hill citadels.
+         */
+        const val AFRICAN = "stratum:african"
         const val MIN_RADIUS = 10
         /** Keeps a town inside one site cell with a margin, so two never overlap. */
         const val MAX_RADIUS = 56
@@ -175,6 +183,8 @@ data class SettlementPlan(
     val walled: Boolean = recipe.wallBlockId != null,
     /** Square rather than round, for grid and fortress layouts. */
     val square: Boolean = false,
+    /** Who made it and how, its quarters and its history, for a town laid out by its people's ways; null otherwise. */
+    val character: com.stratum.core.domain.settlement.culture.CityGenome? = null,
 ) {
     val factionId: String? get() = recipe.factionId
 

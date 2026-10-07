@@ -36,6 +36,8 @@ internal class SessionParts(
     terrainGenerator: TerrainGenerator?,
     val difficulty: Difficulty,
     val hero: HeroSave?,
+    /** The player's standing procedural options: towns, quests, combat variety, voxel physics. */
+    val settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
 ) {
     val state = SessionState()
 
@@ -85,18 +87,38 @@ internal class SessionParts(
     val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert, profile)
     val politics = PoliticsSystem(state, content, generator as? SettlementAtlas, director, RealmSystem(content, config.rules.raids), cues, random)
 
+    /** Friendly towns in sight, where hostiles may not go or strike. */
+    val safeGround = SafeGround(settings.safeTowns)
+
     /** The fight itself: casting, hits, statuses, projectiles, triggers, flasks. */
     val combat = CombatSystem(
         content, config.rules.combat, world, director, cues, flashes, impacts, random, profile,
         playerSkill = { id -> content.skill(id)?.let(gear::tuned) },
         incomingDamage = config.rules.enemyDamage,
+        destruction = settings.voxelDestruction,
+        maxDebris = settings.maxDebris,
+        challenge = settings.challenge,
+        stunLocks = settings.stunLocks,
+        safe = safeGround,
+        tier = difficulty.tier,
     )
     val encounters: EncounterSystem = EncounterSystem(
         state, content, config.seed, director, directorConfig, world, landscape, { x, y -> biomeSource?.biomeAt(x, y)?.id },
         combat, CrowdControl(world, director, reachOf = { encounters.fightingReach(it) }), LootDrops(content, lootRoller, config.seaLevel, difficulty),
         ground, politics, progression, survival, flashes, impacts, random,
+        AttackSpread({ id -> content.enemies.firstOrNull { it.id == id } }, settings.attacksPerMonster, settings.distinctAttacks),
+        safeGround,
     )
     val inspector = BuildInspector(content, config.rules.combat, profile, survivalRules::modifiers, { table.boons }, combat.statuses::of, workbench::linkedTo)
+    /** Fallen bodies tumbling loose, when the player turned ragdolls on. */
+    val ragdolls: Ragdolls? = if (settings.ragdolls) Ragdolls(world) else null
+
+    /** The people of friendly towns, walking their day. */
+    val townLife = TownLife(settings, config.seed, safeGround) { x, y ->
+        val surface = world.surfaceAt(x, y)
+        if (surface < 0) null else WorldPoint(x + 0.5f, y + 0.5f, surface + 1f)
+    }
+    val quests = QuestSystem(content, settings, config.seed, townLife)
     val fight = FightSystem(state, content, combat, profile, gear, encounters, politics, animator) { motion.isInvulnerable }
 
     /** The region under a column: the generator's answer, else the packs' first, else a placeholder. */

@@ -89,10 +89,9 @@ internal class PoliticsSystem(
 
     private val player: PlayerState get() = state.player
 
-    override fun isHostile(enemy: EnemyInstance): Boolean =
-        enemy.instanceId in provoked || content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE
+    override fun isHostile(enemy: EnemyInstance): Boolean = !enemy.civilian && (enemy.instanceId in provoked || content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.HOSTILE)
 
-    override fun isAllied(enemy: EnemyInstance): Boolean =
+    override fun isAllied(enemy: EnemyInstance): Boolean = enemy.civilian ||
         enemy.instanceId !in provoked && content.factionBook.stanceToPlayer(enemy.factionId, player.reputation) == Stance.ALLIED
 
     override fun isHostileTown(town: SettlementPlan): Boolean {

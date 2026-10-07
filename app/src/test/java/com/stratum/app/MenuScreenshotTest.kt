@@ -129,7 +129,7 @@ class MenuScreenshotTest {
     fun new_world_described() = shoot("new_world_3_go_described") {
         NewWorldScreen(
             draft = NewWorldDraft(step = NewWorldStep.GO, heroClassId = "dike", prompt = "A drowned bronze city under a red moon"),
-            heroes = HEROES, actions = NewWorldActions(), existingWorlds = 3, modelReady = true, modifier = Modifier.fillMaxSize(),
+            heroes = HEROES, actions = NewWorldActions(), existingWorlds = 3, modifier = Modifier.fillMaxSize(),
         )
     }
 
@@ -137,8 +137,38 @@ class MenuScreenshotTest {
     fun create_hub() = shoot("create_hub") { CreateHubScreen(status = STUDIO, actions = CreateHubActions(), modifier = Modifier.fillMaxSize()) }
 
     @Test
-    fun create_hub_no_key() = shoot("create_hub_no_key") {
+    fun create_hub_fresh() = shoot("create_hub_fresh") {
         CreateHubScreen(status = StudioStatus(classCount = 4), actions = CreateHubActions(), modifier = Modifier.fillMaxSize())
+    }
+
+    @Test
+    fun quests() = shoot("quests") {
+        val world = com.stratum.core.domain.quest.QuestWorld(
+            monsters = listOf("igbo:mmuo_hunter" to "spirit hunters", "igbo:bush_cat" to "bush cats", "igbo:soldier_ant" to "soldier ants").map { com.stratum.core.domain.quest.QuestTarget(it.first, it.second) },
+            gatherables = listOf(com.stratum.core.domain.quest.QuestTarget("igbo:kola", "kola nuts"), com.stratum.core.domain.quest.QuestTarget("igbo:red_earth", "red earth")),
+            mineables = listOf(com.stratum.core.domain.quest.QuestTarget("igbo:iron", "iron ore")),
+            buildables = listOf(com.stratum.core.domain.quest.QuestTarget("igbo:mud_brick", "mud bricks")),
+            towns = listOf(com.stratum.core.domain.quest.QuestTarget("t:2", "Nri")),
+        )
+        val town = com.stratum.core.domain.settlement.culture.CityGenerator.roll(7L, "igbo", com.stratum.core.domain.settlement.culture.Form.VILLAGE_GROUP)
+        val people = com.stratum.core.domain.quest.QuestGenerator.residents("t:1", town.name, 11L, 9)
+        val board = com.stratum.core.domain.quest.QuestGenerator.board(people, world, 11L, day = 2, count = 4, difficulty = 1)
+        val taken = com.stratum.core.domain.quest.QuestGenerator.board(people, world, 12L, day = 1, count = 2, difficulty = 2)
+            .mapIndexed { i, q -> com.stratum.core.domain.quest.ActiveQuest(q, 0, 0, progress = i, status = if (i == 1) com.stratum.core.domain.quest.QuestStatus.READY else com.stratum.core.domain.quest.QuestStatus.ACTIVE) }
+        com.stratum.feature.play.QuestOverlay(
+            panel = com.stratum.feature.play.QuestPanel(townName = town.name, people = people.size, board = board, active = taken, playerX = 0f, playerY = 0f, handInHere = setOf(taken[1].quest.id), townStory = town.describe()),
+            actions = com.stratum.feature.play.QuestActions(),
+        )
+    }
+
+    @Test
+    fun settings() = shoot("settings") {
+        com.stratum.app.hub.SettingsScreen(
+            settings = com.stratum.core.domain.settings.GameSettings(ragdolls = true),
+            display = com.stratum.app.hub.DisplayChoices(),
+            actions = com.stratum.app.hub.SettingsActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 
     @Test
@@ -180,9 +210,6 @@ class MenuScreenshotTest {
             HeroChoice("ikenga", "Ikenga Warden", "Shield bearer · 320 health · 11 attack"),
         )
 
-        val STUDIO = StudioStatus(
-            classCount = 5, customClassCount = 1, sheetCount = 6, keptCreations = 12, modelCount = 2,
-            modelReady = true, meshReady = false, paintedStyle = "wet bronze at dusk", running = 2,
-        )
+        val STUDIO = StudioStatus(classCount = 5, customClassCount = 1, sheetCount = 6, microModelCount = 3, carriedAttacks = 2)
     }
 }

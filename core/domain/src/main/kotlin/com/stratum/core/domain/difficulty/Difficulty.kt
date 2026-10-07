@@ -28,7 +28,7 @@ data class Waystone(val id: String, val tier: Int, val mods: List<WaystoneMod> =
         require(tier >= 1) { "A waystone opens tier 1 or harder, not $tier" }
     }
 
-    val name: String get() = "Tier $tier waystone"
+    val name: String get() = "${TierLadder.rung(tier).name} waystone · tier $tier"
 }
 
 /**

@@ -33,10 +33,7 @@ internal fun startNewWorld(
         heroName = content.heroClasses.firstOrNull { it.id == heroId }?.name.orEmpty(),
         packIds = content.packs.map { it.id },
     )
-    if (described != null) {
-        app.game.saveStyle(described.stylePrompt)
-        queueWorldCrew(app, described.prompt, identity.name) { pack -> app.deliver(pack) }
-    }
+    if (described != null) app.game.saveStyle(described.stylePrompt)
     app.game.chooseHeroClass(heroId)
     val base = com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.basePasses(content.terrain)
     val passes = scene?.takeIf { !it.isEmpty && base.isNotEmpty() }?.passSpecs(base)

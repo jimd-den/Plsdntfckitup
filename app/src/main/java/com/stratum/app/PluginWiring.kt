@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.core.content.FileProvider
-import com.stratum.agents.forge.Creations
 import com.stratum.content.igbo.IgboContentPack
 import com.stratum.core.data.importing.AndroidImportedAssetWriter
 import com.stratum.core.data.importing.ImportedPackStore
@@ -69,56 +68,24 @@ class PluginWiring(private val context: Context, sprites: SpriteLibrary) {
     /** Installed plugins' textures, for the 3D view to lay over its kit. Read fresh, since installs add folders. */
     fun textureDirectories(): List<File> = store.textureDirectories()
 
-    /** The player's own plugin -- what they kept from the content forge -- or null before anything was kept. */
-    fun creations(): ContentPack? = repository.library.value.installed.firstOrNull { it.manifest.id == Creations.ID }?.pack
-
-    /** How many things the player has kept, for the home screen's tile. */
-    fun creationCount(): Int = creations()?.let { it.itemBases.size + it.affixes.size + it.uniques.size + it.itemSets.size + it.loreEntries.size } ?: 0
-
     /**
-     * Installs the player's creations over the last version of themselves:
-     * one plugin that grows, rather than one per thing kept. It depends on
-     * the built-in pack whose bases and damage types its gear is made on.
-     */
-    suspend fun installCreations(pack: ContentPack) {
-        val manifest = PluginManifest(
-            id = Creations.ID,
-            name = Creations.NAME,
-            version = Version(1, 0, 0),
-            author = pack.author.ifBlank { "A Stratum player" },
-            description = pack.description,
-            dependencies = listOf(builtInDependency()),
-        )
-        repository.install("${Creations.ID}.${PluginArchive.EXTENSION}", PluginArchive.write(manifest, pack.copy(id = Creations.ID)))
-        repository.refresh()
-    }
-
-    /**
-     * Packs the player's classes and their kept creations into one
-     * `.stratum` plugin and opens the share sheet. The plugin names the
-     * built-in pack as a dependency, because both use its skills, weapons
-     * and bases, so it installs cleanly anywhere this game runs. The
-     * creations move to the shared namespace, so a friend's copy sits
-     * beside their own rather than replacing it. Returns false when there
-     * is nothing to share.
+     * Packs the player's classes into one `.stratum` plugin and opens the
+     * share sheet. The plugin names the built-in pack as a dependency,
+     * because the classes use its skills and weapons, so it installs cleanly
+     * anywhere this game runs. Returns false when there is nothing to share.
      */
     fun shareCreations(classes: List<HeroClassDefinition>): Boolean {
-        val creations = creations()?.let { Creations.renamespaced(it, CREATIONS_ID) }
-        if (classes.isEmpty() && creations == null) return false
+        if (classes.isEmpty()) return false
         val manifest = PluginManifest(
             id = CREATIONS_ID,
             name = "Shared creations",
             version = Version(1, 0, 0),
             author = "A Stratum player",
             license = "CC-BY-4.0",
-            description = listOfNotNull(
-                "${classes.size} classes built in the class forge".takeIf { classes.isNotEmpty() },
-                creations?.let { "${it.uniques.size + it.itemBases.size + it.affixes.size + it.itemSets.size} pieces of gear and ${it.loreEntries.size} lore entries from the content forge" },
-            ).joinToString(", ") + ".",
+            description = "${classes.size} classes built in the class forge.",
             dependencies = listOf(builtInDependency()),
         )
-        val classPack = CustomClassPack.of(classes).copy(id = CREATIONS_ID, name = manifest.name, author = manifest.author)
-        val pack = Creations.combine(classPack, creations)
+        val pack = CustomClassPack.of(classes).copy(id = CREATIONS_ID, name = manifest.name, author = manifest.author)
         val file = File(File(context.cacheDir, "share").apply { mkdirs() }, "shared-creations.${PluginArchive.EXTENSION}")
         file.writeBytes(PluginArchive.write(manifest, pack))
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)

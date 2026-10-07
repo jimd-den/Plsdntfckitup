@@ -4,6 +4,8 @@ import com.stratum.core.domain.settlement.BuildingTemplate
 import com.stratum.core.domain.settlement.SettlementAtlas
 import com.stratum.core.domain.settlement.SettlementPlan
 import com.stratum.core.domain.settlement.SettlementRecipe
+import com.stratum.core.domain.settlement.culture.CityGenerator
+import com.stratum.core.domain.settlement.culture.Mark
 import com.stratum.core.domain.world.Chunk
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.floor
@@ -34,6 +36,12 @@ class SettlementPlanner(
     private val welcoming: (SettlementRecipe) -> Boolean = { it.garrison.isEmpty() },
     /** How the starting town is shaped, when a player has changed it; the default leaves it to the seed. */
     private val home: HomeTown = HomeTown(),
+    /**
+     * The people whose way of building a town at (x, y) follows, by
+     * building-tradition id, for towns laid out by their culture; null leaves
+     * it to the recipe's own people.
+     */
+    private val cultureAt: (x: Int, y: Int) -> String? = { _, _ -> null },
 ) : SettlementAtlas {
 
     private val plans = ConcurrentHashMap<Long, Any>()
@@ -68,21 +76,39 @@ class SettlementPlanner(
             ?: chooseRecipe(biomeAt(centerX, centerY), random, starting) ?: return null
         val recipe = if (starting) home.applyTo(chosen) else chosen
         val rolled = recipe.minRadius + random.nextInt(recipe.maxRadius - recipe.minRadius + 1)
-        val radius = if (starting) home.radiusFor(rolled) else rolled
-        val site = SettlementSite(centerX, centerY, groundLevel(centerX, centerY, recipe), radius)
+        // A town of a people's own making: its character first, which sets how big a place it is.
+        val character = if (recipe.layoutId == SettlementRecipe.AFRICAN) {
+            CityGenerator.roll(random.nextLong(), cultureAt(centerX, centerY) ?: CultureOfRecipe.of(recipe), gathering = starting)
+        } else null
+        val sized = character?.let { c ->
+            val grown = if (Mark.GROWTH in c.marks) GROWN else 1f
+            (rolled * c.form.scale.radius * grown).toInt().coerceIn(SettlementRecipe.MIN_RADIUS, SettlementRecipe.MAX_RADIUS)
+        } ?: rolled
+        val radius = if (starting) home.radiusFor(sized) else sized
+        val site = SettlementSite(centerX, centerY, groundLevel(centerX, centerY, recipe), radius, character)
         val layout = layouts.layoutFor(recipe.layoutId).arrange(site, recipe, random)
-        val name = recipe.names.takeIf { it.isNotEmpty() }?.random(random) ?: recipe.name
+        val name = character?.name ?: recipe.names.takeIf { it.isNotEmpty() }?.random(random) ?: recipe.name
+        // The player's own say over their home town's wall stands over the town's character.
+        val built = (layout.recipe ?: recipe).let { b ->
+            when {
+                !starting || home.walled == null -> b
+                home.walled -> b.copy(wallBlockId = b.wallBlockId ?: recipe.wallBlockId ?: recipe.foundationBlockId)
+                else -> b.copy(wallBlockId = null)
+            }
+        }
         return SettlementPlan(
             id = "${recipe.id}@$cellX,$cellY",
             name = name,
-            recipe = recipe,
+            recipe = built,
             centerX = centerX,
             centerY = centerY,
             groundZ = site.groundZ,
             radius = radius,
             roads = layout.roads,
             buildings = layout.buildings,
+            walled = built.wallBlockId != null,
             square = layout.square,
+            character = character,
         )
     }
 
@@ -116,6 +142,8 @@ class SettlementPlanner(
         private const val MARGIN = SettlementRecipe.MAX_RADIUS + BLEND
         private const val MIN_GROUND = 4
         private const val HEADROOM = 2
+        /** A town whose history says it grew stands this much wider. */
+        private const val GROWN = 1.15f
         private const val PRIME_A = 6364136223846793005L
         private const val PRIME_B = 1442695040888963407L
         private const val PRIME_C = 2862933555777941757L

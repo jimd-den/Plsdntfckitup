@@ -34,7 +34,8 @@ class LatticeHeight(private val source: HeightFunction, private val step: Int = 
 
     private fun node(ix: Int, iy: Int, m: Memo): Float {
         val key = (ix.toLong() shl 32) or (iy.toLong() and 0xFFFFFFFFL)
-        val slot = ((ix * 73856093) xor (iy * 19349663)) and (SIZE - 1)
+        // A 64 x 64 grid of nodes: a chunk's neighbouring samples never evict each other.
+        val slot = Math.floorMod(iy, SIDE) * SIDE + Math.floorMod(ix, SIDE)
         if (m.keys[slot] == key) return m.values[slot]
         val v = source.heightAt(ix * step, iy * step)
         m.keys[slot] = key; m.values[slot] = v
@@ -52,7 +53,7 @@ class LatticeHeight(private val source: HeightFunction, private val step: Int = 
         return top + (c + (d - c) * fx - top) * fy
     }
 
-    private companion object { const val SIZE = 4096 }
+    private companion object { const val SIDE = 64; const val SIZE = SIDE * SIDE }
 }
 
 /** Heat and wet in 0..1, for choosing surface materials and vegetation. */

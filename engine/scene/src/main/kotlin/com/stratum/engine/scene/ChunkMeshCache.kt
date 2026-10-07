@@ -7,6 +7,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Terrain meshed a chunk at a time, and remeshed only where the world changed.
@@ -88,8 +89,19 @@ class ChunkMeshCache(
         val signature: Signature,
         val lod: Int,
         val snapshot: BlockSnapshot,
+        /** Set by the worker as it begins: a job still queued can be replaced for nothing, a running one is let finish. */
+        val started: AtomicBoolean,
         val future: Future<List<TerrainMesher.Result>?>,
-    )
+    ) {
+        /** Already being meshed: replacing it would throw away work a worker is doing. */
+        val running: Boolean get() = started.get() && !future.isDone
+    }
+
+    /** Submits [work] to [pool] as a [Job] that records when a worker picks it up. */
+    private fun submit(pool: ExecutorService, signature: Signature, lod: Int, snapshot: BlockSnapshot, work: () -> List<TerrainMesher.Result>?): Job {
+        val started = AtomicBoolean(false)
+        return Job(signature, lod, snapshot, started, pool.submit(Callable { started.set(true); work() }))
+    }
 
     /**
      * Detail is meshed on its own low-priority thread from a snapshot of the
@@ -103,13 +115,19 @@ class ChunkMeshCache(
     private val jobs = HashMap<ChunkPos, Job>()
 
     /**
-     * Edits get a thread of their own, at normal priority. On the shared
+     * Edits get threads of their own, at normal priority. On the shared
      * workers an edit waited behind whatever streaming had queued -- up to a
      * dozen chunks of new ground -- so a tapped block could take a tenth of
      * a second to show; here it waits for at most the edit before it.
+     *
+     * Two of them where the device has the cores: a forged attack's crater
+     * or wall often straddles a chunk border, and a fight lands several at
+     * once, so edits to different chunks are meshed side by side rather
+     * than one behind another.
      */
+    private val editWorkers = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, MAX_EDIT_WORKERS)
     private val editWorker: ExecutorService? = detail?.let {
-        Executors.newSingleThreadExecutor { r -> Thread(r, "micro-edit").apply { isDaemon = true } }
+        Executors.newFixedThreadPool(editWorkers) { r -> Thread(r, "micro-edit").apply { isDaemon = true } }
     }
 
     /**
@@ -306,6 +324,11 @@ class ChunkMeshCache(
             val e = entries[pos] ?: continue
             if (!e.detailed || detailed[i] == 0 || e.signature == signatures[i]) continue
             if (jobs[pos]?.let { it.signature == signatures[i] && it.lod == e.lod } == true || !urgent(pos)) continue
+            // One mesh in flight per chunk. Edits that land while it is being made -- a fight
+            // digging the same ground every few frames -- are folded into the next one, which
+            // starts from where this one ends (see collectDetail), instead of cancelling it
+            // and starting again each frame and never catching up.
+            if (jobs[pos]?.let { it.lod == e.lod && it.running } == true) continue
             val snapshot = snapshotOf(world, pos)
             val dirty = dirtyLayers(e, snapshot)
             val cost = dirty.count { it }
@@ -313,7 +336,7 @@ class ChunkMeshCache(
             if (cost > budget) {
                 val previous = e.layers
                 val lod = e.lod
-                editWorker?.let { pool -> jobs[pos] = Job(signatures[i], lod, snapshot, pool.submit(Callable { d.meshLayers(snapshot, pos, lod, dirty, previous) })) }
+                editWorker?.let { pool -> jobs[pos] = submit(pool, signatures[i], lod, snapshot) { d.meshLayers(snapshot, pos, lod, dirty, previous) } }
                 continue
             }
             budget -= cost
@@ -334,8 +357,15 @@ class ChunkMeshCache(
             val job = jobs[pos] ?: continue
             if (!job.future.isDone) continue
             jobs.remove(pos)
-            if (detailed[i] != job.lod || job.signature != signatures[i] || job.future.isCancelled) continue
+            if (detailed[i] != job.lod || job.future.isCancelled) continue
             val fine = runCatching { job.future.get() }.getOrNull()
+            if (job.signature != signatures[i]) {
+                // The chunk changed again while this was being made. The mesh is still newer than
+                // the one on screen, so it goes up now under the signature it was made for, and the
+                // next pass remeshes only the layers changed since.
+                if (fine != null) { entries[pos] = Entry(job.signature, fine, job.lod, job.snapshot); generation++ }
+                continue
+            }
             entries[pos] = if (fine != null) Entry(signatures[i], fine, job.lod, job.snapshot)
             else {
                 // A chunk the microvoxels cannot draw (changed too much) keeps its blocks, and is remembered as done.
@@ -358,6 +388,7 @@ class ChunkMeshCache(
         for (i in missing) {
             if (jobs.size >= MAX_DETAIL_JOBS * workers) break
             val pos = wanted[i]
+            if (jobs[pos]?.let { it.lod == detailed[i] && it.running } == true) continue
             jobs.remove(pos)?.future?.cancel(false)
             val snapshot = snapshotOf(world, pos) // taken here, on the thread that owns the world
             val lod = detailed[i]
@@ -365,7 +396,7 @@ class ChunkMeshCache(
             val previous = entries[pos]?.takeIf { it.lod == lod }
             val only = previous?.layers?.let { dirtyLayers(previous, snapshot) }
             val layers = previous?.layers
-            jobs[pos] = Job(signatures[i], lod, snapshot, pool.submit(Callable { mesherOnWorker.meshLayers(snapshot, pos, lod, only, layers) }))
+            jobs[pos] = submit(pool, signatures[i], lod, snapshot) { mesherOnWorker.meshLayers(snapshot, pos, lod, only, layers) }
         }
     }
 
@@ -413,6 +444,7 @@ class ChunkMeshCache(
         const val MAX_DETAIL_JOBS = 4
         /** Meshing threads at most; a phone keeps at least one core for the game. */
         const val MAX_WORKERS = 3
+        const val MAX_EDIT_WORKERS = 2
         /** See the constructor's `editLayersPerCall`. */
         const val EDIT_LAYERS_PER_CALL = 3
 

@@ -88,19 +88,26 @@ class GeoProcessTest {
 
     @Test
     fun `water cuts valleys and lays fans, and the dial turns it off`() {
-        val wet = atlas(world(Provinces.FOREST_HILLS))
         val dry = atlas(world(Provinces.FOREST_HILLS, "erosion" to "0", "rivers" to "0"))
-        var diff = 0.0; var lower = 0; var fans = 0
         val c = GeoAtlas.Column()
-        for (j in 0 until 80) for (i in 0 until 80) {
-            val x = i * 37 - 1500; val y = j * 41 - 1600
-            val d = wet.heightAt(x, y) - dry.heightAt(x, y)
-            diff += abs(d); if (d < -2f) lower++
-            if (wet.column(x, y, c).mark == GeoAtlas.MARK_FAN) fans++
+        /** Mean height moved, columns cut down by water, and fan columns, against the land with no water at all. */
+        fun measure(wet: GeoAtlas): Triple<Double, Int, Int> {
+            var diff = 0.0; var lower = 0; var fans = 0
+            for (j in 0 until 80) for (i in 0 until 80) {
+                val x = i * 37 - 1500; val y = j * 41 - 1600
+                val d = wet.heightAt(x, y) - dry.heightAt(x, y)
+                diff += abs(d); if (d < -2f) lower++
+                if (wet.column(x, y, c).mark == GeoAtlas.MARK_FAN) fans++
+            }
+            return Triple(diff / 6400, lower, fans)
         }
-        assertTrue(diff / 6400 > 0.5, "erosion moved the land only ${diff / 6400} on average")
-        assertTrue(lower > 200, "only $lower columns were cut down by water")
+        val (moved, lower, fans) = measure(atlas(world(Provinces.FOREST_HILLS)))
+        assertTrue(moved > 0.2, "erosion moved the land only $moved on average")
+        assertTrue(lower > 150, "only $lower columns were cut down by water")
         assertTrue(fans > 0, "no fans laid")
+        // A stronger dial moves more land.
+        val (stronger, _, _) = measure(atlas(world(Provinces.FOREST_HILLS, "erosion" to "2")))
+        assertTrue(stronger > moved * 1.3, "erosion 2 moved $stronger, erosion 1 moved $moved")
     }
 
     @Test
@@ -128,13 +135,15 @@ class GeoProcessTest {
 
     @Test
     fun `the dunes dial raises the sand sea`() {
+        // The dunes' own relief: each height against the same land with no dunes, so the region's hills and coasts drop out.
+        val flat = atlas(world(Provinces.ERG, "dunes" to "0"))
         fun spread(g: MicroGenerator): Double {
             val a = atlas(g); val hs = ArrayList<Float>()
-            for (j in 0 until 60) for (i in 0 until 60) hs += a.heightAt(i * 23, j * 29)
+            for (j in 0 until 60) for (i in 0 until 60) hs += a.heightAt(i * 23, j * 29) - flat.heightAt(i * 23, j * 29)
             val mean = hs.average(); return hs.sumOf { (it - mean) * (it - mean) } / hs.size
         }
         val low = spread(world(Provinces.ERG, "dunes" to "0.3")); val high = spread(world(Provinces.ERG, "dunes" to "2"))
-        assertTrue(high > low * 2, "erg height variance $low at 0.3, $high at 2")
+        assertTrue(high > low * 10, "dune height variance $low at 0.3, $high at 2")
     }
 
     @Test

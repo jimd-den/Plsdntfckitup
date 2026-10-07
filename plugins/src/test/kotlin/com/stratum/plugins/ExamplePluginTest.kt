@@ -46,6 +46,5 @@ class ExamplePluginTest {
         assertTrue(content.units.any { it.id == "ash:oathsworn" } && content.structures.isNotEmpty(), "its soldiers train in the standard barracks")
         assertTrue(content.recipes.any { it.id == "ash:grub_stew" } && content.recipes.any { it.id == "stratum:cook_meat" })
         assertEquals(com.stratum.core.domain.world.SurvivalMode.HARSH, content.suggestedRules.survival)
-        assertEquals(listOf("ash:chronicler"), content.agentRoles.map { it.id })
     }
 }

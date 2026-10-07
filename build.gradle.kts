@@ -24,7 +24,6 @@ val pureModules = listOf(
   ":engine:settlement",
   ":engine:worldgen",
   ":engine:crowd",
-  ":agents",
   ":engine:render",
   ":engine:scene",
   ":engine:model",
@@ -34,7 +33,6 @@ val pureModules = listOf(
   ":importer:flame",
   ":plugins",
   ":tools:artpreview",
-  ":legacy:domain",
 )
 
 tasks.register("architectureCheck") {

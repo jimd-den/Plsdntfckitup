@@ -1,5 +1,7 @@
 package com.stratum.engine.world
 
+import com.stratum.core.domain.quest.QuestEvent
+
 import com.stratum.core.domain.actor.EnemyDefinition
 import com.stratum.core.domain.actor.EnemyInstance
 import com.stratum.core.domain.actor.EnemyRank
@@ -22,6 +24,7 @@ import com.stratum.core.domain.session.WorldSave
 import com.stratum.core.domain.sprite.AnimationPlayback
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.tabletop.ActiveBoon
+import com.stratum.core.domain.world.BlockPos
 import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.TerrainGenerator
 import com.stratum.core.domain.world.World
@@ -78,7 +81,9 @@ class WorldSession private constructor(
         difficulty: Difficulty = Difficulty.BASE,
         /** A character carried in from an earlier world; null starts fresh at level one. */
         hero: HeroSave? = null,
-    ) : this(SessionParts(content, config, heroClassId, terrainGenerator, difficulty, hero))
+        /** The player's standing procedural options. */
+        settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
+    ) : this(SessionParts(content, config, heroClassId, terrainGenerator, difficulty, hero, settings))
 
     val content: AssembledContent get() = parts.content
     val config: WorldConfig get() = parts.config
@@ -179,6 +184,11 @@ class WorldSession private constructor(
      */
     fun tick(deltaSeconds: Float): List<CombatEvent> {
         playSeconds += deltaSeconds
+        // Bodies keep falling while the player lies dead too.
+        parts.ragdolls?.let { dolls ->
+            if (!player.isAlive) dolls.spawn(PLAYER_ACTOR_ID, player.position, player.facing.dx.toFloat(), player.facing.dy.toFloat(), 0f, 0f, PLAYER_BODY, 1f)
+            dolls.advance(deltaSeconds)
+        }
         if (!player.isAlive) {
             events = emptyList()
             return events
@@ -200,14 +210,144 @@ class WorldSession private constructor(
         encounters.populateMarkers()
 
         val news = parts.politics.advance(deltaSeconds)
+        // Friendly towns go about their day; quest quarries arrive as the player nears them.
+        val towns = parts.politics.townsInSight()
+        state.enemies = parts.townLife.advance(state.enemies, towns, { !parts.politics.isHostileTown(it) }, parts.politics::isHostile, clock.dayFraction)
+        parts.quests.encounters(player.position, ::groundAt) { id, at, rank -> content.enemies.firstOrNull { it.id == id }?.let { encounters.spawn(it, at, rank) } }
         val earlier = state.pending.toList().also { state.pending.clear() }
+        val healthBefore = player.health
         val fought = parts.fight.monstersAct(deltaSeconds, currentBiome.id)
+        if (player.health < healthBefore) parts.quests.on(QuestEvent.Hurt)
+        countQuests(deltaSeconds)
         val produced = earlier + news + fought + parts.gear.collect() + parts.politics.endRaids()
         animator.advance(deltaSeconds, PLAYER_ACTOR_ID, playerMotionState(), enemies) { parts.flashes.intensity(it) > 0f }
         player = player.copy(cooldowns = player.cooldowns.advanced(deltaSeconds), attackCooldown = (player.attackCooldown - deltaSeconds).coerceAtLeast(0f))
         events = produced
         return produced
     }
+
+    // ---- quests and towns ----------------------------------------------------------------------
+
+    init {
+        // Kills count toward quests the moment the bodies are buried.
+        encounters.onBuried = { slain ->
+            slain.filter { !it.civilian && it.factionId != com.stratum.core.domain.faction.Factions.PLAYER }.forEach { e ->
+                parts.quests.on(QuestEvent.Killed(e.definitionId, e.role, e.rank, e.position.x, e.position.y, clock.isNight))
+            }
+            // The fallen tumble away from the player, who most likely felled them.
+            parts.ragdolls?.let { dolls ->
+                slain.forEach { e ->
+                    val dx = e.position.x - player.position.x; val dy = e.position.y - player.position.y
+                    val d = kotlin.math.hypot(dx, dy).coerceAtLeast(0.01f)
+                    val scale = when (e.rank) { EnemyRank.BOSS -> 1.6f; EnemyRank.CHAMPION -> 1.3f; EnemyRank.ELITE -> 1.15f; else -> 1f }
+                    dolls.spawn(e.instanceId, e.position, e.facingX, e.facingY, dx / d * RAGDOLL_PUSH, dy / d * RAGDOLL_PUSH, e.bodyColor, scale)
+                }
+            }
+        }
+    }
+
+    override fun mine(target: BlockPos, deltaSeconds: Float): MineResult = parts.building.mine(target, deltaSeconds).also {
+        if (it is MineResult.Broken) parts.quests.on(QuestEvent.Mined(it.block.id, target.x, target.y))
+    }
+
+    override fun place(picked: BlockPos): PlaceResult = parts.building.place(picked).also {
+        if (it is PlaceResult.Placed) parts.quests.on(QuestEvent.Placed(it.block.id, picked.x, picked.y))
+    }
+
+    override fun castSkill(skillId: String): AttackReport = parts.fight.castSkill(skillId).also {
+        content.skill(skillId)?.let { skill -> parts.quests.on(QuestEvent.Dealt(skill.damageTypeId)) }
+    }
+
+    private var carried: Map<String, Int> = emptyMap()
+    private var blastsSeen = 0
+
+    /** Everything a tick tells the quests: pickups, blasts, and where the player is. */
+    private fun countQuests(deltaSeconds: Float) {
+        val now = player.inventory
+        now.forEach { (id, n) -> val gained = n - (carried[id] ?: 0); if (gained > 0) parts.quests.on(QuestEvent.Collected(id, gained)) }
+        carried = now
+        val blasts = combat.blasts
+        repeat(blasts - blastsSeen) { parts.quests.on(QuestEvent.Blasted) }
+        blastsSeen = blasts
+        val p = player.position
+        parts.quests.on(
+            QuestEvent.Tick(
+                seconds = deltaSeconds, playerX = p.x, playerY = p.y, night = clock.isNight,
+                followers = parts.politics.followers.size,
+                hostilesWithin = { x, y, r -> state.enemies.count { it.isAlive && parts.politics.isHostile(it) && kotlin.math.hypot(it.position.x - x - 0.5f, it.position.y - y - 0.5f) <= r } },
+                townId = parts.politics.currentSettlement?.takeIf { !parts.politics.isHostileTown(it) }?.id,
+                carrying = { id -> player.inventory[id] ?: 0 },
+            ),
+        )
+    }
+
+    private fun groundAt(x: Int, y: Int): WorldPoint? {
+        val surface = streamingWorld.surfaceAt(x, y)
+        return if (surface < 0) null else WorldPoint(x + 0.5f, y + 0.5f, surface + 1f)
+    }
+
+    /** The friendly town the player stands in, or null out in the wild or in a hostile one. */
+    val currentTown: com.stratum.core.domain.settlement.SettlementPlan?
+        get() = parts.politics.currentSettlement?.takeIf { !parts.politics.isHostileTown(it) }
+
+    /** The people of the town the player stands in, who give its quests. */
+    val townsfolk: List<com.stratum.core.domain.quest.Townsperson> get() = currentTown?.let(parts.townLife::residentsOf).orEmpty()
+
+    /** The quests on offer in the town the player stands in; empty out in the wild. */
+    fun questBoard(): List<com.stratum.core.domain.quest.Quest> {
+        val town = currentTown ?: return emptyList()
+        return parts.quests.board(town, clock.day, player.level, parts.politics.settlementsNear(QUEST_TOWN_REACH))
+    }
+
+    /** The player's quests and how far along each is. */
+    val quests: List<com.stratum.core.domain.quest.ActiveQuest> get() = parts.quests.active
+
+    fun acceptQuest(questId: String): QuestResult {
+        val town = currentTown ?: return QuestResult.NotHere
+        val quest = questBoard().firstOrNull { it.id == questId } ?: return QuestResult.Unknown
+        return parts.quests.accept(quest, town)
+    }
+
+    fun abandonQuest(questId: String): QuestResult = parts.quests.abandon(questId)
+
+    /** Takes [quest] as if from the current town's board: for tests and the sandbox. */
+    internal fun acceptQuestDirectly(quest: com.stratum.core.domain.quest.Quest): QuestResult =
+        currentTown?.let { parts.quests.accept(quest, it) } ?: QuestResult.NotHere
+
+    /**
+     * Hands a finished quest to its giver. The reward is experience, more for
+     * a harder quest, and what the giver promised: coin, standing with the
+     * town's people, or more experience for training.
+     */
+    fun turnInQuest(questId: String): QuestResult {
+        val result = parts.quests.turnIn(questId, currentTown, player.level, parts.politics.settlementsNear(QUEST_TOWN_REACH)) { id, n ->
+            val left = (player.inventory[id] ?: 0) - n
+            player = player.copy(inventory = if (left > 0) player.inventory + (id to left) else player.inventory - id)
+        }
+        if (result is QuestResult.Rewarded) {
+            val q = result.quest
+            val bonus = if (q.reward.kind == com.stratum.core.domain.quest.RewardKind.TRAINING) 1.5f else 1f
+            parts.progression.award((q.reward.experience * bonus).toInt())
+            val faction = currentTown?.factionId
+            if (q.reward.kind == com.stratum.core.domain.quest.RewardKind.STANDING && faction != null) {
+                player = player.copy(reputation = player.reputation.adjusted(faction, STANDING_REWARD, content.factionBook))
+            }
+            val coin = content.currencies.firstOrNull()
+            if (coin != null && q.reward.kind == com.stratum.core.domain.quest.RewardKind.COIN) {
+                repeat((q.reward.coin / COIN_PER_CURRENCY).coerceIn(1, 5)) { parts.progression.pocket(Valuable.Currency(coin), player.position) }
+            }
+        }
+        return result
+    }
+
+    /** Fallen bodies, as they lie this tick; empty when ragdolls are off. */
+    fun ragdolls(): List<RagdollPose> = parts.ragdolls?.poses().orEmpty()
+
+    /** Blocks thrown loose by attacks and still in the air. */
+    fun debris(): List<DebrisPiece> = combat.debris()
+
+    /** Quests that just became ready or failed, once each, for a toast. */
+    fun questNews(): List<com.stratum.core.domain.quest.ActiveQuest> = parts.quests.news()
 
     /**
      * Gets the player back on their feet after dying, in the same world.
@@ -231,6 +371,7 @@ class WorldSession private constructor(
         parts.table.clear()
         parts.survival.clear()
         encounters.clearAround(player.position, REVIVE_CLEAR_RADIUS)
+        parts.ragdolls?.clear()
         events = emptyList()
         return ReviveResult.Revived(experienceLost = lost)
     }
@@ -446,8 +587,10 @@ class WorldSession private constructor(
          * same callers who pass one to a new session; null resolves the
          * packs' own, as the save's world was made with.
          */
-        fun restore(content: AssembledContent, save: WorldSave, terrainGenerator: TerrainGenerator? = null): WorldSession =
-            WorldSession(SessionParts(content, save.config, save.heroClassId, terrainGenerator, save.difficulty, save.hero), save)
+        fun restore(
+            content: AssembledContent, save: WorldSave, terrainGenerator: TerrainGenerator? = null,
+            settings: com.stratum.core.domain.settings.GameSettings = com.stratum.core.domain.settings.GameSettings(),
+        ): WorldSession = WorldSession(SessionParts(content, save.config, save.heroClassId, terrainGenerator, save.difficulty, save.hero, settings), save)
 
         /**
          * Chunks each way from the player's that are generated the tick they
@@ -457,6 +600,13 @@ class WorldSession private constructor(
          */
         const val URGENT_STREAM_RADIUS = 2
         const val STREAM_BUDGET = 2
+        /** Towns within this many blocks are where deliveries can be sent. */
+        const val QUEST_TOWN_REACH = 400
+        /** How hard a felled body is thrown, in blocks a second. */
+        const val RAGDOLL_PUSH = 6f
+        const val PLAYER_BODY = 0xFFB9A58AL
+        const val STANDING_REWARD = 10
+        const val COIN_PER_CURRENCY = 15
         const val PICKUP_RADIUS = GroundItems.PICKUP_RADIUS
         const val BASE_DROP_CHANCE = LootDrops.BASE_DROP_CHANCE
         const val INSERT_DROP_CHANCE = LootDrops.INSERT_DROP_CHANCE

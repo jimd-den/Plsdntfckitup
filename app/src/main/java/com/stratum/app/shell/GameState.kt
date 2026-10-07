@@ -35,9 +35,28 @@ import kotlinx.coroutines.flow.update
 @OptIn(ExperimentalCoroutinesApi::class)
 class GameState(private val graph: AppGraph, scope: CoroutineScope) {
 
-    private val ai = graph.ai
+    private val ai = graph.assets
+
+    private val settingsState = MutableStateFlow(graph.settings.load())
+
+    /** Every procedural option, as the settings screen last left them. */
+    val settings: StateFlow<com.stratum.core.domain.settings.GameSettings> = settingsState.asStateFlow()
+
+    fun changeSettings(next: com.stratum.core.domain.settings.GameSettings) {
+        val coerced = next.coerced()
+        graph.settings.save(coerced)
+        settingsState.value = coerced
+    }
 
     private val customClassList = MutableStateFlow(graph.classes.all())
+
+    /** Kept and carried forged attacks, as attack codes. */
+    data class ForgedAttacks(val kept: List<String>, val equipped: List<String>)
+
+    private val forgedState = MutableStateFlow(ForgedAttacks(graph.forgedAttacks.kept(), graph.forgedAttacks.equipped()))
+
+    /** The Forge of Will's shelf: every kept attack and which are carried. */
+    val forgedAttacks: StateFlow<ForgedAttacks> = forgedState.asStateFlow()
 
     /** Classes the player built, newest store order. */
     val customClasses: StateFlow<List<HeroClassDefinition>> = customClassList.asStateFlow()
@@ -47,9 +66,9 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
      * every active plugin (the crew's packs and the player's creations among
      * them), and the player's own classes as a pack of their own.
      */
-    val content: StateFlow<AssembledContent> = combine(graph.plugins.repository.library, customClassList) { library, classes ->
-        GameSetup.assemble(library.activePacks + if (classes.isEmpty()) emptyList() else listOf(CustomClassPack.of(classes)))
-    }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, GameSetup.assemble())
+    val content: StateFlow<AssembledContent> = combine(graph.plugins.repository.library, customClassList, forgedState) { library, classes, forged ->
+        GameSetup.assemble(library.activePacks + if (classes.isEmpty()) emptyList() else listOf(CustomClassPack.of(classes)), forged.equipped)
+    }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, GameSetup.assemble(forged = forgedState.value.equipped))
 
     /** The loaded content with every generated sprite sheet laid over it. */
     val contentWithSprites: StateFlow<AssembledContent> = combine(content, ai.sprites.sheets) { content, sheets ->
@@ -156,6 +175,17 @@ class GameState(private val graph: AppGraph, scope: CoroutineScope) {
         // Playing as a class that no longer exists would silently fall back to another one.
         if (loadoutState.value.heroClassId == id) chooseHeroClass(null)
         customClassList.value = graph.classes.all()
+    }
+
+    fun keepAttack(code: String) = forgedChanged { graph.forgedAttacks.keep(code) }
+
+    fun forgetAttack(code: String) = forgedChanged { graph.forgedAttacks.forget(code) }
+
+    fun toggleAttackEquipped(code: String) = forgedChanged { graph.forgedAttacks.toggleEquipped(code) }
+
+    private fun forgedChanged(change: () -> Unit) {
+        change()
+        forgedState.value = ForgedAttacks(graph.forgedAttacks.kept(), graph.forgedAttacks.equipped())
     }
 
     /** Called by the model forge whenever a binding or a blueprint changes. */

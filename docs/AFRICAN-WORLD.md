@@ -216,6 +216,56 @@ and exact materials.
 The town keeps its tradition's compound wall and sacred heart. See
 [COZY-BUILDER.md](COZY-BUILDER.md#parametric-buildings-and-vernacular-towns).
 
+## How towns are laid out
+
+A town of the packs' own peoples (a recipe with layout `stratum:african`) is
+not just drawn in its land's tradition: it is *made* that people's way. Before
+anything is placed, a `CityGenome` is rolled for the site
+(`core/domain/.../settlement/culture`):
+
+- **Form**: homestead, kraal, thorn-fenced camp, hamlet, tower-house
+  hamlet, village, village-group, cliff village, ksar, oasis, fishing village,
+  market town, river port, walled city, caravan city, stone town, royal
+  capital, sacred city or hill citadel. Each people favours its own forms.
+  The form sets the town's size and its **pattern**.
+- **Rule**: council of elders, titled society, village assembly, priest-king,
+  oba, stool, emir, sultan, negus, mambo, age-sets, merchant houses, queen
+  mother, hogon, scholars or headman. Its seat is the town's great building
+  and is named after it.
+- **Crafts** (one to three), in order of fame: iron, bronze, gold, weaving,
+  indigo, pottery, carving, salt, kola, palm oil, yams, cattle, dhows,
+  caravans, manuscripts and more. Each brings its workplace (dye pits, a
+  casters' yard, a yam barn, a caravanserai...).
+- **Heart**: an earth shrine, an iroko, an mbari house, a great earthen
+  mosque, a rock-cut church, a stele field, a conical tower, a toguna, the
+  cattle byre...
+- **Quarters**, **walls and gates**, a **founding legend** and a **history**
+  of up to seven events: wars with named rivals, fires, floods, markets won,
+  shrines raised, strangers settling, walls raised after raids. Events leave
+  marks on the plan: a burnt quarter stands thin, a raised wall rings the
+  town, newcomers have their own quarter, a town that grew is wider.
+
+The layout (`AfricanLayout`) follows the pattern:
+
+- **Ringed**: houses in a ring facing the byre.
+- **Dispersed**: walled compounds round a square, with wards for a village-group.
+- **Terraces**: rows up the scarp.
+- **Ksar**: lanes round a court of granaries.
+- **Walled**: a gate for each road and a quarter in each wedge.
+- **Radial**: the seat's court at the centre.
+- **Lanes**: crowded lanes behind a waterfront.
+- **Citadel**: the seat on the height.
+- **Linear**: one long street with back streets.
+
+Buildings a recipe lacks are cut from its own materials and named the town's
+way. The town's story is shown on its quest board.
+
+Counted from their choices alone, there are hundreds of millions of distinct
+cities and as many smaller settlements: over a million for every single
+people. Each is built from more than 10^15 distinct buildings.
+
+![One town of each pattern, from above](screenshots/towns/plans.png)
+
 ## Changing it
 
 - **In game:** open **⛰ World**. *Landscape* picks all of Africa, or one

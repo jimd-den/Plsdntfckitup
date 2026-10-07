@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.stratum.app.ProviderSettingsScreen
 import com.stratum.app.hub.HeroChoice
 import com.stratum.app.hub.ImportHubActions
 import com.stratum.app.hub.ImportHubScreen
@@ -91,20 +90,21 @@ internal fun MenuRoutes(app: AppViewModel, route: Route, stack: BackStack, modif
         }
 
         Route.Settings -> {
-            val ai = app.graph.ai
+            val settings by app.game.settings.collectAsStateWithLifecycle()
+            val loadout by app.game.loadout.collectAsStateWithLifecycle()
             var graphics by remember { mutableStateOf(app.graph.graphics.chosen) }
-            ProviderSettingsScreen(
-                initial = remember { ai.settings.load() },
-                onSave = ai.settings::save,
-                onBack = { stack.pop() },
+            var terrain by remember { mutableStateOf(app.graph.graphics.terrain) }
+            com.stratum.app.hub.SettingsScreen(
+                settings = settings,
+                display = com.stratum.app.hub.DisplayChoices(graphics = graphics, terrain = terrain, maskCharacters = loadout.maskCharacters),
+                actions = com.stratum.app.hub.SettingsActions(
+                    onBack = { stack.pop() },
+                    onChange = app.game::changeSettings,
+                    onGraphics = { tier -> app.graph.graphics.choose(tier); graphics = tier },
+                    onTerrain = { mode -> app.graph.graphics.chooseTerrain(mode); terrain = mode },
+                    onMaskCharacters = app.game::chooseMaskCharacters,
+                ),
                 modifier = modifier,
-                modelProviderFor = ai.settings::loadModelProvider,
-                onSaveModelProvider = ai.settings::saveModelProvider,
-                graphics = graphics,
-                onChooseGraphics = { tier ->
-                    app.graph.graphics.choose(tier)
-                    graphics = tier
-                },
             )
         }
 
@@ -134,12 +134,10 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
     }
     val loadout by app.game.loadout.collectAsStateWithLifecycle()
     val looks = rememberLookChoices(app, content)
-    val sceneScope = androidx.compose.runtime.rememberCoroutineScope()
     NewWorldScreen(
         draft = draft.copy(heroClassId = draft.heroClassId ?: app.game.loadout.value.heroClassId),
         heroes = heroes,
         existingWorlds = existingWorlds,
-        modelReady = app.graph.ai.isConfigured(),
         looks = looks,
         lookId = loadout.heroSheetId,
         actions = NewWorldActions(
@@ -148,8 +146,7 @@ private fun NewWorldRoute(app: AppViewModel, stack: BackStack, content: Assemble
             onQuickMake = { stack.push(Route.Create.Classes) },
             // Null is the class's own art; picking the worn look again also goes back to it.
             onPickLook = { id -> app.game.chooseHeroSheet(id) },
-            onMakeLook = { stack.push(Route.Create.Sprites) },
-            onReadScene = { readScene(app, sceneScope) },
+            onMakeLook = { stack.push(Route.Create.Mapper) },
             onGo = {
                 startNewWorld(
                     app,
@@ -179,7 +176,7 @@ private fun ShareHubRoute(app: AppViewModel, stack: BackStack, modifier: Modifie
         state = ImportHubState(
             installed = state.plugins.size,
             active = state.plugins.count { it.active },
-            shareable = remember(plugins, customClasses) { customClasses.size + app.graph.plugins.creationCount() },
+            shareable = customClasses.size,
             status = state.status,
         ),
         actions = ImportHubActions(
@@ -202,27 +199,3 @@ private fun packLine(content: AssembledContent): String = listOf(
     "${content.heroClasses.size} classes",
 ).joinToString(" · ")
 
-/**
- * Asks the connected language model to read the new world's description into
- * scene parameters ([com.stratum.engine.microbridge.ScenePrompt.systemPrompt]),
- * and keeps its reading on the draft for that exact prompt.
- */
-private fun readScene(app: AppViewModel, scope: kotlinx.coroutines.CoroutineScope) {
-    val draft = app.newWorld.value
-    val prompt = draft.prompt.trim()
-    if (prompt.isEmpty() || draft.readingScene) return
-    app.newWorld.value = draft.copy(readingScene = true)
-    scope.launch {
-        val reply = app.graph.ai.languageModel.complete(
-            com.stratum.core.domain.ai.CompletionRequest(
-                systemPrompt = com.stratum.engine.microbridge.ScenePrompt.systemPrompt(),
-                userPrompt = prompt, temperature = 0.3f, maxTokens = 900,
-            ),
-        )
-        val spec = reply.map(com.stratum.engine.microbridge.ScenePrompt::parse).getOrElse {
-            com.stratum.engine.microbridge.SceneSpec(emptyMap(), listOf("The model could not be reached: ${it.message}"))
-        }
-        val now = app.newWorld.value
-        app.newWorld.value = now.copy(readingScene = false, modelScene = spec.values, modelNotes = spec.notes, modelSceneFor = prompt)
-    }
-}

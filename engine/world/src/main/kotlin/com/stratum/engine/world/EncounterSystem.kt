@@ -41,6 +41,10 @@ internal class EncounterSystem(
     private val flashes: HitFlashes,
     private val impacts: ImpactField,
     private val random: Random,
+    /** Deals each newcomer its own forged attacks. */
+    private val spread: AttackSpread? = null,
+    /** Friendly towns, whose edge hostiles stop at. */
+    private val safe: SafeGround? = null,
 ) {
     private val level = landscape as? MarkedLevel
 
@@ -80,7 +84,7 @@ internal class EncounterSystem(
     fun populateMarkers() {
         val population = markers ?: return
         population.follow(world.residency) { world.loadedChunks.map { it.pos } }
-        val room = (directorConfig.maxAlive * MARKER_CROWD - state.enemies.size).coerceAtLeast(0)
+        val room = (directorConfig.maxAlive * MARKER_CROWD - state.enemies.count { !it.civilian }).coerceAtLeast(0)
         population.wake(state.player.position, room).forEach { marker ->
             val dice = MarkerEncounters.diceFor(seed, marker)
             when (val encounter = markerEncounters.resolve(marker, dice)) {
@@ -111,18 +115,34 @@ internal class EncounterSystem(
     fun advance(deltaSeconds: Float, biomeId: String) {
         val player = state.player
         val towns = politics.townsInSight()
-        state.enemies = director.maintainPopulation(state.enemies, player.position, biomeId, player.level, random, politics.spawnAllowed(towns))
+        state.enemies = director.maintainPopulation(state.enemies, player.position, biomeId, player.level, random, politics.spawnAllowed(towns), facingOf(player.facing))
         state.enemies = state.enemies + politics.musterGarrisons(towns)
+        spread?.let { state.enemies = it.deal(state.enemies) }
         val before = state.enemies
         state.enemies = combat.constrain(before, crowd.advance(before, player.position, politics::isHostile, deltaSeconds, politics.allyOrders()), deltaSeconds)
+        safe?.takeIf { !it.isEmpty }?.let { ground -> state.enemies = heldOut(before, state.enemies, ground) }
+    }
+
+    /** Hostiles the crowd moved into a safe town go back to where they stood: they stop at its edge. */
+    private fun heldOut(before: List<EnemyInstance>, after: List<EnemyInstance>, ground: SafeGround): List<EnemyInstance> {
+        val prior = before.associateBy { it.instanceId }
+        return after.map { e ->
+            val was = prior[e.instanceId] ?: return@map e
+            if (e.civilian || !politics.isHostile(e) || !ground.contains(e.position) || ground.contains(was.position)) e
+            else e.copy(position = was.position)
+        }
     }
 
     /**
      * Takes the fallen out of the world: loot, valuables, experience and
      * standing for a monster; a follower simply falls.
      */
+    /** Told of every body buried, after the fact: what quests count kills from. */
+    var onBuried: (List<EnemyInstance>) -> Unit = {}
+
     fun bury(slain: List<EnemyInstance>) {
         if (slain.isEmpty()) return
+        onBuried(slain)
         val gone = slain.mapTo(HashSet()) { it.instanceId }
         state.enemies = state.enemies.filterNot { it.instanceId in gone }
         slain.forEach { forget(it.instanceId) }
@@ -154,6 +174,10 @@ internal class EncounterSystem(
             .mapNotNull { content.skill(it.skillId) }.filterNot { it.isBeneficial }.maxOfOrNull { it.range.toFloat() } ?: 0f
         return maxOf(swing, longest * RANGED_HOLD)
     }
+
+    /** A facing as a bearing in radians, or null for straight up or down. */
+    private fun facingOf(direction: com.stratum.core.domain.world.Direction): Float? =
+        if (direction.dx == 0 && direction.dy == 0) null else kotlin.math.atan2(direction.dy.toFloat(), direction.dx.toFloat())
 
     private fun forget(actorId: String) {
         combat.forget(actorId)

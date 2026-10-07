@@ -21,6 +21,8 @@ data class Zone(
     val isTrap: Boolean = false,
     val depth: Int = 0,
     val color: Long = 0xFFFFFFFF,
+    /** A forged attack's look, drawn in full by renderers that can. */
+    val look: com.stratum.core.domain.attack.AttackLook? = null,
 )
 
 /** A zone pulsing over the bodies in it. */

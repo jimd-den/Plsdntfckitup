@@ -99,8 +99,6 @@ data class ContentPack(
     val resources: List<com.stratum.core.domain.strategy.ResourceDefinition> = emptyList(),
     val structures: List<com.stratum.core.domain.strategy.StructureDefinition> = emptyList(),
     val units: List<com.stratum.core.domain.strategy.UnitDefinition> = emptyList(),
-    /** The studio crew this pack brings: agents that write content in its lore. */
-    val agentRoles: List<com.stratum.core.domain.ai.AgentRoleDefinition> = emptyList(),
     /** Gear of every kind: armour, shields and foci, jewellery, and weapons written in full. */
     val itemBases: List<com.stratum.core.domain.item.ItemBase> = emptyList(),
     /** Named items with fixed modifiers, and the sets some of them belong to. */

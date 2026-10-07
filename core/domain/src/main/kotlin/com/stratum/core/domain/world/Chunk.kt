@@ -79,7 +79,19 @@ class Chunk(
         val previous = blocks[cell].toInt()
         if (previous == index) return false
         blocks[cell] = index.toShort()
-        heightMapValid = false
+        // Keep the height map current for this one column instead of throwing it all away:
+        // a fight's craters and walls edit a chunk every few frames, and each rebuild reads
+        // every cell in it.
+        if (heightMapValid) {
+            val col = localY * SIZE + localX
+            val top = heightMap[col]
+            if (index != BlockRegistry.AIR_INDEX) { if (z > top) heightMap[col] = z }
+            else if (z == top) {
+                var highest = -1
+                for (zz in z - 1 downTo 0) if (blocks[indexOf(localX, localY, zz)].toInt() != BlockRegistry.AIR_INDEX) { highest = zz; break }
+                heightMap[col] = highest
+            }
+        }
         revision++
         if (localX == 0 || localY == 0 || localX == SIZE - 1 || localY == SIZE - 1) edgeRevision++
         val sx = if (localX == 0) -1 else if (localX == SIZE - 1) 1 else 0

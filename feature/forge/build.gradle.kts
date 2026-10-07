@@ -8,7 +8,6 @@ android { namespace = "com.stratum.feature.forge" }
 dependencies {
   implementation(project(":core:domain"))
   implementation(project(":core:designsystem"))
-  implementation(project(":agents"))
   implementation(project(":engine:model"))
 
   implementation(libs.androidx.core.ktx)

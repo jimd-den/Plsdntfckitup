@@ -33,6 +33,8 @@ class EnemyDirector(
     private val packs: List<EnemyPackDefinition> = emptyList(),
 ) {
     private val byId = definitions.associateBy { it.id }
+    private val terrain = TacticalTerrain(world)
+    private val placer = TacticalPlacer(terrain)
 
     fun definition(id: String): EnemyDefinition? = byId[id]
 
@@ -54,10 +56,14 @@ class EnemyDirector(
         random: Random,
         /** False where nothing may spawn: inside a friendly town's walls. */
         spawnAllowed: (WorldPoint) -> Boolean = { true },
+        /** Where the player is looking, radians; ambushes come from the other way. Null when unknown. */
+        facing: Float? = null,
     ): List<EnemyInstance> {
         val alive = current.filter { it.isAlive }
         val nearby = alive.filter { it.position.horizontalDistanceTo(focus) <= keepWithin(it) }
-        if (nearby.size >= config.maxAlive) return nearby
+        // Townsfolk walk their streets; they are not part of the wild's population.
+        val wild = nearby.count { !it.civilian }
+        if (wild >= config.maxAlive) return nearby
 
         // A spawn weight of zero means "never on its own": garrison troops and pack-only followers.
         val eligible = definitions.filter { it.spawnWeight > 0 && (it.spawnBiomeIds.isEmpty() || biomeId in it.spawnBiomeIds) }
@@ -66,14 +72,16 @@ class EnemyDirector(
 
         val spawned = mutableListOf<EnemyInstance>()
         var attempts = 0
-        while (nearby.size + spawned.size < config.maxAlive && attempts < config.maxSpawnAttempts) {
+        while (wild + spawned.size < config.maxAlive && attempts < config.maxSpawnAttempts) {
             attempts++
             val position = findSpawnPoint(focus, random)?.takeIf(spawnAllowed) ?: continue
-            val room = config.maxAlive - nearby.size - spawned.size
+            val room = config.maxAlive - wild - spawned.size
             val pack = eligiblePacks.takeIf { random.nextFloat() < config.packChance }?.let { pickPack(it, room, random) }
-            spawned += if (pack != null) spawnPack(pack, position, playerLevel, random) else {
+            spawned += if (pack != null) spawnPack(pack, position, playerLevel, random, focus = focus, facing = facing, allowed = spawnAllowed) else {
                 val definition = pickWeighted(eligible, random) ?: continue
-                listOf(instantiate(definition, position, playerLevel, random))
+                // A lone monster still picks its ground: the archer finds the ridge near where it arrived.
+                val spot = if (!config.tactical) position else placer.nudge(definition.role, focus, position, LONE_NUDGE, config.safeRadius, facing, spawnAllowed) ?: position
+                listOf(instantiate(definition, spot, playerLevel, random))
             }
         }
         return nearby + spawned
@@ -92,14 +100,31 @@ class EnemyDirector(
     }
 
     /**
-     * A pack arrives together: the leader in the middle, the rest in a loose
-     * ring round it, all sharing a squad id so they alert, fight and break as
-     * one.
+     * A pack arrives together, all sharing a squad id so they alert, fight
+     * and break as one.
+     *
+     * Hunting the player (a [focus] given, no [home] to hold), the pack is an
+     * [EncounterCell]: it takes the formation its roles suit and the ground
+     * allows, and each member the spot its role wants -- see
+     * [TacticalPlacer]. Otherwise the leader stands in the middle and the
+     * rest in a loose ring round it.
      */
-    fun spawnPack(pack: EnemyPackDefinition, at: WorldPoint, playerLevel: Int, random: Random, home: WorldPoint? = null, squadId: String? = null): List<EnemyInstance> {
+    fun spawnPack(
+        pack: EnemyPackDefinition, at: WorldPoint, playerLevel: Int, random: Random, home: WorldPoint? = null, squadId: String? = null,
+        focus: WorldPoint? = null, facing: Float? = null, allowed: (WorldPoint) -> Boolean = { true },
+    ): List<EnemyInstance> {
         val squad = squadId ?: "squad_${random.nextLong().toULong().toString(16)}"
-        val leader = pack.leaderId?.let(byId::get)?.let { instantiate(it, at, playerLevel, random).copy(squadId = squad, isLeader = true, home = home) }
+        val leaderDefinition = pack.leaderId?.let(byId::get)
         val members = pack.members.flatMap { member -> List(member.count) { member.enemyId } }.mapNotNull(byId::get)
+        if (focus != null && home == null && config.tactical) {
+            val everyone = listOfNotNull(leaderDefinition) + members
+            val placement = placer.place(everyone.map { it.role }, focus, at, config.safeRadius, config.spawnRadius, random, facing, allowed)
+            return everyone.mapIndexed { i, definition ->
+                instantiate(definition, placement.positions[i], playerLevel, random)
+                    .copy(squadId = squad, isLeader = leaderDefinition != null && i == 0)
+            }
+        }
+        val leader = leaderDefinition?.let { instantiate(it, at, playerLevel, random).copy(squadId = squad, isLeader = true, home = home) }
         val ring = members.mapIndexed { i, definition ->
             val angle = i * TWO_PI / members.size.coerceAtLeast(1)
             val spot = WorldPoint(at.x + kotlin.math.cos(angle) * PACK_SPREAD, at.y + kotlin.math.sin(angle) * PACK_SPREAD, at.z)
@@ -184,6 +209,7 @@ class EnemyDirector(
             bodyColor = definition.bodyColor,
             factionId = definition.factionId,
             role = definition.role,
+            level = com.stratum.core.domain.difficulty.MonsterLevel.of(playerLevel, difficulty.monsterLevelBonus, rank),
         )
     }
 
@@ -305,6 +331,8 @@ class EnemyDirector(
         const val DEFAULT_AGGRO = 8
         const val DEFAULT_SPEED = 2.2f
         const val PACK_SPREAD = 1.6f
+        /** How far a lone monster wanders from where it arrived to find better ground. */
+        const val LONE_NUDGE = 4f
         const val GARRISON_REACH = 60f
 
         /**
@@ -339,6 +367,12 @@ data class DirectorConfig(
     /** Share of a generated world's monster spawn points that wake; the rest stay empty. */
     val markerShare: Float = 1f,
 ) {
+    /**
+     * Whether monsters pick their ground: heights, narrows, ambushes. A
+     * calmer world (less alert than usual) lets them simply arrive.
+     */
+    val tactical: Boolean get() = alertness >= 1f
+
     init {
         require(safeRadius < spawnRadius) { "Spawn ring is inverted" }
         require(spawnRadius < despawnRadius) { "Monsters would despawn as they spawn" }
