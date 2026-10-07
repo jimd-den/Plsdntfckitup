@@ -26,6 +26,8 @@ internal class LotPacker(
     private val square: Boolean,
     /** Kept empty around the centre: where the player arrives and the town gathers. */
     private val plazaRadius: Int,
+    /** Most buildings a town of this size holds. */
+    private val maxBuildings: Int = MAX_BUILDINGS,
 ) {
     val placed = mutableListOf<PlacedBuilding>()
     private val counts = HashMap<String, Int>()
@@ -66,11 +68,47 @@ internal class LotPacker(
 
     fun hall(): BuildingTemplate? = recipe.buildings.firstOrNull { it.role == BuildingRole.HALL }
 
+    /** A template of [role] still under its limit, by weight; null when the recipe has none left. */
+    fun templateFor(role: BuildingRole): BuildingTemplate? {
+        val candidates = recipe.buildings.filter { it.role == role && count(it) < it.maxCount }
+        if (candidates.isEmpty()) return null
+        val total = candidates.sumOf { it.weight.coerceAtLeast(1) }
+        var roll = random.nextInt(total)
+        return candidates.firstOrNull { roll -= it.weight.coerceAtLeast(1); roll < 0 } ?: candidates.first()
+    }
+
+    /**
+     * Lines both sides of [road] with buildings, choosing each by where it
+     * would stand: [roleAt] names the role wanted at a spot, or null to
+     * leave a gap there (a ruin, a field, a yard).
+     */
+    fun lineZoned(road: Road, roleAt: (x: Float, y: Float) -> BuildingRole?) {
+        Side.entries.forEach { side -> lineSide(road, side) { x, y -> roleAt(x, y)?.let { role -> templateFor(role) ?: templateFor(BuildingRole.HOUSE) } } }
+    }
+
+    /**
+     * Tries up to [tries] spots within [spread] blocks of ([cx], [cy]) for
+     * [template], each door turned toward the cluster's middle. True when one
+     * fitted.
+     */
+    fun placeNear(template: BuildingTemplate, cx: Float, cy: Float, spread: Float, tries: Int = 8): Boolean {
+        repeat(tries) {
+            val a = random.nextDouble() * 2 * Math.PI
+            val d = spread * kotlin.math.sqrt(random.nextFloat())
+            val x = cx + (kotlin.math.cos(a) * d).toFloat()
+            val y = cy + (kotlin.math.sin(a) * d).toFloat()
+            if (placeCentred(template, x, y, facingToward(cx - x, cy - y))) return true
+        }
+        return false
+    }
+
+    val full: Boolean get() = placed.size >= maxBuildings
+
     private fun count(template: BuildingTemplate) = counts[template.id] ?: 0
 
     private enum class Side(val sign: Int) { LEFT(1), RIGHT(-1) }
 
-    private fun lineSide(road: Road, side: Side) {
+    private fun lineSide(road: Road, side: Side, choose: (Float, Float) -> BuildingTemplate? = { _, _ -> nextTemplate() }) {
         val dx = (road.toX - road.fromX).toFloat()
         val dy = (road.toY - road.fromY).toFloat()
         val length = sqrt(dx * dx + dy * dy)
@@ -83,8 +121,11 @@ internal class LotPacker(
         val door = facingToward(-nx, -ny)
         var t = STREET_INSET
         var misses = 0
-        while (t < length - STREET_INSET && placed.size < MAX_BUILDINGS && misses < MAX_MISSES) {
-            val template = nextTemplate() ?: return
+        while (t < length - STREET_INSET && placed.size < maxBuildings && misses < MAX_MISSES) {
+            val probeX = road.fromX + 0.5f + ux * t + nx * (road.width / 2f + SETBACK + 2f)
+            val probeY = road.fromY + 0.5f + uy * t + ny * (road.width / 2f + SETBACK + 2f)
+            val template = choose(probeX, probeY)
+            if (template == null) { t += GAP_STEP; continue }
             val (width, depth) = footprint(template, door)
             val alongNormal = if (door == Facing.NORTH || door == Facing.SOUTH) depth else width
             val alongRoad = if (door == Facing.NORTH || door == Facing.SOUTH) width else depth
@@ -133,6 +174,8 @@ internal class LotPacker(
         private const val GAP = 1
         private const val SETBACK = 1
         private const val STEP = 2f
+        /** How far a street runs on past a spot left empty on purpose. */
+        private const val GAP_STEP = 5f
         private const val STREET_INSET = 2f
         private const val WALL_MARGIN = 3
         private const val OPEN_MARGIN = 1

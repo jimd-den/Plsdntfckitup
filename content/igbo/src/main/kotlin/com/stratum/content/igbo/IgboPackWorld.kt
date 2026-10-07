@@ -180,7 +180,8 @@ object IgboPackWorld {
     val nriVillage = SettlementRecipe(
         id = "$NS:nri_village",
         name = "Nri Village",
-        layoutId = SettlementRecipe.ORGANIC,
+        // Laid out the way its people make places: a village-group, a market town, a royal capital...
+        layoutId = SettlementRecipe.AFRICAN,
         factionId = nri.id,
         minRadius = 18, maxRadius = 26, chance = 0.35f,
         roadBlockId = IgboPackBlocks.lateritePaving.id,

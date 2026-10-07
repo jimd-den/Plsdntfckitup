@@ -150,12 +150,13 @@ class MenuScreenshotTest {
             buildables = listOf(com.stratum.core.domain.quest.QuestTarget("igbo:mud_brick", "mud bricks")),
             towns = listOf(com.stratum.core.domain.quest.QuestTarget("t:2", "Nri")),
         )
-        val people = com.stratum.core.domain.quest.QuestGenerator.residents("t:1", "Awka", 11L, 9)
+        val town = com.stratum.core.domain.settlement.culture.CityGenerator.roll(7L, "igbo", com.stratum.core.domain.settlement.culture.Form.VILLAGE_GROUP)
+        val people = com.stratum.core.domain.quest.QuestGenerator.residents("t:1", town.name, 11L, 9)
         val board = com.stratum.core.domain.quest.QuestGenerator.board(people, world, 11L, day = 2, count = 4, difficulty = 1)
         val taken = com.stratum.core.domain.quest.QuestGenerator.board(people, world, 12L, day = 1, count = 2, difficulty = 2)
             .mapIndexed { i, q -> com.stratum.core.domain.quest.ActiveQuest(q, 0, 0, progress = i, status = if (i == 1) com.stratum.core.domain.quest.QuestStatus.READY else com.stratum.core.domain.quest.QuestStatus.ACTIVE) }
         com.stratum.feature.play.QuestOverlay(
-            panel = com.stratum.feature.play.QuestPanel(townName = "Awka", people = people.size, board = board, active = taken, playerX = 0f, playerY = 0f, handInHere = setOf(taken[1].quest.id)),
+            panel = com.stratum.feature.play.QuestPanel(townName = town.name, people = people.size, board = board, active = taken, playerX = 0f, playerY = 0f, handInHere = setOf(taken[1].quest.id), townStory = town.describe()),
             actions = com.stratum.feature.play.QuestActions(),
         )
     }

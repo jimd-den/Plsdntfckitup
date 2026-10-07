@@ -125,6 +125,7 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
         val natural = fields.require(Fields.SURFACE)
         val rules = context.config.rules
         val home = homeOf(o)
+        val geology = fields.get(Fields.GEOLOGY)
         val planner = SettlementPlanner(
             seed = context.config.seed,
             recipes = context.settlements,
@@ -134,6 +135,14 @@ class SettlementsStage(private val context: TerrainContext, private val blocks: 
             density = rules.townDensity * o.float("density", 1f).coerceIn(0f, 3f),
             welcoming = context.welcoming,
             home = home,
+            // A town laid out by its people's ways follows the same people it is drawn as.
+            cultureAt = { x, y ->
+                val chosen = if (x == 0 && y == 0 && homeStyle != AUTO) homeStyle.removePrefix("parametric:") else style
+                when (chosen) {
+                    REGIONAL -> Traditions.choose(geology?.provinceAt(x * R, y * R)?.id, Hash.mix(0L, x, y, 0, 97))
+                    else -> chosen.takeIf { it in Traditions.ids }
+                }
+            },
         )
         val sacred = o.boolean("sacredTree", true)
         fields.publish(KEY, planner)

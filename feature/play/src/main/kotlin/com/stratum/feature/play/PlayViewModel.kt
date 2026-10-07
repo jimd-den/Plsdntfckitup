@@ -1227,6 +1227,7 @@ class PlayViewModel(
             people = if (open) session.townsfolk.size else 0,
             board = if (open && town != null) session.questBoard() else emptyList(),
             active = active, playerX = p.x, playerY = p.y, handInHere = handIn,
+            townStory = if (open) town?.character?.describe() else null,
         )
     }
 

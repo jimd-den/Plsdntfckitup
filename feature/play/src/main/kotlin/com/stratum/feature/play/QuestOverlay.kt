@@ -50,6 +50,8 @@ data class QuestPanel(
     val playerY: Float = 0f,
     /** The ids of quests that can be handed in where the player stands. */
     val handInHere: Set<String> = emptySet(),
+    /** The town's own story -- its people, rule, crafts, founding and history -- when it has one. */
+    val townStory: String? = null,
 ) {
     val ready: Int get() = active.count { it.status == QuestStatus.READY }
 }
@@ -88,6 +90,9 @@ fun QuestOverlay(panel: QuestPanel, actions: QuestActions, modifier: Modifier = 
             if (panel.townName == null) {
                 Text("Find a friendly town: its people have work for you.", style = MaterialTheme.typography.bodySmall, color = colors.inkMuted)
             } else {
+                panel.townStory?.let { story ->
+                    Text(story, style = MaterialTheme.typography.bodySmall, color = colors.inkMuted, modifier = Modifier.padding(bottom = Space.small))
+                }
                 Text("The board · ${panel.people} people live here", style = MaterialTheme.typography.titleSmall, color = colors.ink)
                 if (panel.board.isEmpty()) Text("Nobody needs anything today. Come back tomorrow.", style = MaterialTheme.typography.bodySmall, color = colors.inkMuted)
                 panel.board.forEach { q -> BoardRow(q, actions) }
