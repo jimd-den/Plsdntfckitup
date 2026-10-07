@@ -43,6 +43,8 @@ internal class EncounterSystem(
     private val random: Random,
     /** Deals each newcomer its own forged attacks. */
     private val spread: AttackSpread? = null,
+    /** Friendly towns, whose edge hostiles stop at. */
+    private val safe: SafeGround? = null,
 ) {
     private val level = landscape as? MarkedLevel
 
@@ -118,6 +120,17 @@ internal class EncounterSystem(
         spread?.let { state.enemies = it.deal(state.enemies) }
         val before = state.enemies
         state.enemies = combat.constrain(before, crowd.advance(before, player.position, politics::isHostile, deltaSeconds, politics.allyOrders()), deltaSeconds)
+        safe?.takeIf { !it.isEmpty }?.let { ground -> state.enemies = heldOut(before, state.enemies, ground) }
+    }
+
+    /** Hostiles the crowd moved into a safe town go back to where they stood: they stop at its edge. */
+    private fun heldOut(before: List<EnemyInstance>, after: List<EnemyInstance>, ground: SafeGround): List<EnemyInstance> {
+        val prior = before.associateBy { it.instanceId }
+        return after.map { e ->
+            val was = prior[e.instanceId] ?: return@map e
+            if (e.civilian || !politics.isHostile(e) || !ground.contains(e.position) || ground.contains(was.position)) e
+            else e.copy(position = was.position)
+        }
     }
 
     /**

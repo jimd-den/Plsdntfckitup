@@ -63,7 +63,7 @@ class TownQuestSessionTest {
         val session = session()
         session.tick(0.05f)
         val town = session.currentTown!!
-        val life = TownLife(GameSettings(), 4L) { x, y -> com.stratum.core.domain.world.WorldPoint(x + 0.5f, y + 0.5f, 10f) }
+        val life = TownLife(GameSettings(), 4L, SafeGround(true)) { x, y -> com.stratum.core.domain.world.WorldPoint(x + 0.5f, y + 0.5f, 10f) }
         val people = life.residentsOf(town)
         val night = people.mapIndexed { i, p -> life.scheduleFor(town, p, i, 0.8f) }
         val noon = people.mapIndexed { i, p -> life.scheduleFor(town, p, i, 0.32f) }
@@ -86,6 +86,29 @@ class TownQuestSessionTest {
         val brave = unsafe.spawn(wolf, unsafe.player.position.translated(2f, 0f, 0f))
         unsafe.tick(0.05f)
         assertTrue(unsafe.enemies.any { it.instanceId == brave.instanceId }, "with safe towns off the wolf stays")
+    }
+
+    @Test
+    fun `a hostile outside a safe town stops at its edge and cannot strike anyone inside`() {
+        val session = session()
+        session.tick(0.05f)
+        val town = session.currentTown!!
+        // The player just inside the east edge, a wolf just outside it, facing each other.
+        val edge = town.radius.toFloat()
+        val ground = { dx: Float -> session.player.position.let { com.stratum.core.domain.world.WorldPoint(town.centerX + dx + 0.5f, town.centerY + 0.5f, it.z) } }
+        session.player = session.player.copy(position = ground(edge - 2f))
+        val wolfBody = session.spawn(wolf, ground(edge + 3f))
+        val health = session.player.health
+        repeat(80) {
+            session.tick(0.05f)
+            val w = session.enemies.firstOrNull { it.instanceId == wolfBody.instanceId } ?: return@repeat
+            assertTrue(!town.contains(kotlin.math.floor(w.position.x).toInt(), kotlin.math.floor(w.position.y).toInt()), "the wolf walked in to ${w.position}")
+        }
+        val held = session.enemies.firstOrNull { it.instanceId == wolfBody.instanceId }
+        assertNotNull(held, "the wolf was removed rather than held at the edge")
+        // It came for the player and was stopped at the wall, not left standing where it appeared.
+        assertTrue(held.position.x < town.centerX + edge + 2f, "the wolf never came up to the edge: ${held.position}")
+        assertEquals(health, session.player.health, "the wolf struck the player inside a safe town")
     }
 
     @Test

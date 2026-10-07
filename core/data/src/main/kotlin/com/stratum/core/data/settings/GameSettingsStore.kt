@@ -24,6 +24,7 @@ class GameSettingsStore(context: Context) {
             questDifficulty = prefs.getInt("quest_difficulty", d.questDifficulty),
             questChains = prefs.getBoolean("quest_chains", d.questChains),
             challenge = prefs.getString("challenge", null)?.let { n -> Challenge.entries.firstOrNull { it.name == n } } ?: d.challenge,
+            stunLocks = prefs.getBoolean("stun_locks", d.stunLocks),
             attacksPerMonster = prefs.getInt("attacks_per_monster", d.attacksPerMonster),
             distinctAttacks = prefs.getBoolean("distinct_attacks", d.distinctAttacks),
             voxelDestruction = prefs.getString("voxel_destruction", null)?.let { n -> VoxelDestruction.entries.firstOrNull { it.name == n } } ?: d.voxelDestruction,
@@ -41,6 +42,7 @@ class GameSettingsStore(context: Context) {
             putInt("quest_difficulty", s.questDifficulty)
             putBoolean("quest_chains", s.questChains)
             putString("challenge", s.challenge.name)
+            putBoolean("stun_locks", s.stunLocks)
             putInt("attacks_per_monster", s.attacksPerMonster)
             putBoolean("distinct_attacks", s.distinctAttacks)
             putString("voxel_destruction", s.voxelDestruction.name)

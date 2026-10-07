@@ -209,6 +209,7 @@ class EnemyDirector(
             bodyColor = definition.bodyColor,
             factionId = definition.factionId,
             role = definition.role,
+            level = com.stratum.core.domain.difficulty.MonsterLevel.of(playerLevel, difficulty.monsterLevelBonus, rank),
         )
     }
 

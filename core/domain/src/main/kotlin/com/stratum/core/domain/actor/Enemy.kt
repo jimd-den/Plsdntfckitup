@@ -232,6 +232,12 @@ data class EnemyInstance(
      * dealt. Its kind's other skills are always its own.
      */
     val skillPool: List<String>? = null,
+    /**
+     * Its level: the player's when it was made, plus the world tier's bonus
+     * and a step for its rank (see [com.stratum.core.domain.difficulty.MonsterLevel]).
+     * 0 for a body made by hand at no particular level.
+     */
+    val level: Int = 0,
 ) {
     val isAlive: Boolean get() = health > 0 && state != EnemyState.DEAD
 

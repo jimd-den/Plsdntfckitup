@@ -16,11 +16,14 @@ class ChallengeTest {
 
     private val fixtures = CombatCoreFixtures
 
-    private fun session(challenge: Challenge) = WorldSession(
-        ContentPackAssembler().assemble(listOf(fixtures.pack())),
+    /** A clubber that hits like a landslide: its own numbers would fell any hero in one blow. */
+    private val crusher = fixtures.clubber.copy(id = "test:crusher", name = "Crusher", baseStats = fixtures.clubber.baseStats.copy(attackPower = 5000))
+
+    private fun session(challenge: Challenge, stunLocks: Boolean = false) = WorldSession(
+        ContentPackAssembler().assemble(listOf(fixtures.pack().let { it.copy(enemies = it.enemies + crusher) })),
         WorldConfig(seed = 5L, simulationRadius = 1, rules = WorldRules()),
         terrainGenerator = CombatCoreFixtures.FlatTerrain,
-        settings = GameSettings(challenge = challenge),
+        settings = GameSettings(challenge = challenge, stunLocks = stunLocks),
     ).also { it.enemies = emptyList() }
 
     /** [count] clubbers -- every blow dazes for a second -- in a ring at arm's length. */
@@ -79,5 +82,41 @@ class ChallengeTest {
         val order = Challenge.entries.map { taken.getValue(it) }
         assertTrue(order.zipWithNext().all { (a, b) -> a <= b }, "damage taken by difficulty: $taken")
         assertTrue(taken.getValue(Challenge.STORY) * 2 < taken.getValue(Challenge.HARD), "story is not much gentler: $taken")
+    }
+
+    @Test
+    fun `with stun-locks allowed, a crowd's stuns chain with no gap`() {
+        val s = session(Challenge.HARD, stunLocks = true)
+        s.ring(6)
+        val f = s.fight(8f)
+        assertTrue(f.longestStun > 2f, "stuns did not chain: longest ${f.longestStun}s")
+    }
+
+    @Test
+    fun `no blow takes more than the player's level allows`() {
+        for (challenge in listOf(Challenge.NORMAL, Challenge.BRUTAL)) {
+            val s = session(challenge)
+            s.place(crusher, dx = 1f, id = "crusher")
+            val life = s.maxHealth
+            val ceiling = com.stratum.core.domain.difficulty.BlowCeiling.of(life, com.stratum.core.domain.actor.EnemyRank.MINION, 0, 0, challenge.damageTaken)
+            var worst = 0
+            repeat(60) {
+                val before = s.player.health
+                s.tick(0.05f)
+                worst = maxOf(worst, before - s.player.health)
+                s.player = s.player.copy(health = life)
+            }
+            assertTrue(worst in 1..ceiling, "$challenge: a blow took $worst of $life life, ceiling $ceiling")
+        }
+    }
+
+    @Test
+    fun `the ceiling grows with the player's level, so blows keep pace with the hero`() {
+        val low = com.stratum.core.domain.difficulty.BlowCeiling.of(100, com.stratum.core.domain.actor.EnemyRank.ELITE, 0, 0)
+        val high = com.stratum.core.domain.difficulty.BlowCeiling.of(800, com.stratum.core.domain.actor.EnemyRank.ELITE, 0, 0)
+        assertTrue(high == low * 8 || kotlin.math.abs(high - low * 8) <= 8, "$low at 100 life, $high at 800")
+        // A monster the player has outgrown hits softer; one above them, harder; a higher tier, harder still.
+        val share = { gap: Int, tier: Int -> com.stratum.core.domain.difficulty.BlowCeiling.share(com.stratum.core.domain.actor.EnemyRank.MINION, gap, tier) }
+        assertTrue(share(-5, 0) < share(0, 0) && share(0, 0) < share(5, 0) && share(0, 0) < share(0, 16) && share(0, 16) < share(0, 30))
     }
 }

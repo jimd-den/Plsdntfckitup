@@ -87,6 +87,9 @@ internal class SessionParts(
     val progression = ProgressionSystem(state, content, config.rules, difficulty, cues, content::insert, profile)
     val politics = PoliticsSystem(state, content, generator as? SettlementAtlas, director, RealmSystem(content, config.rules.raids), cues, random)
 
+    /** Friendly towns in sight, where hostiles may not go or strike. */
+    val safeGround = SafeGround(settings.safeTowns)
+
     /** The fight itself: casting, hits, statuses, projectiles, triggers, flasks. */
     val combat = CombatSystem(
         content, config.rules.combat, world, director, cues, flashes, impacts, random, profile,
@@ -95,19 +98,23 @@ internal class SessionParts(
         destruction = settings.voxelDestruction,
         maxDebris = settings.maxDebris,
         challenge = settings.challenge,
+        stunLocks = settings.stunLocks,
+        safe = safeGround,
+        tier = difficulty.tier,
     )
     val encounters: EncounterSystem = EncounterSystem(
         state, content, config.seed, director, directorConfig, world, landscape, { x, y -> biomeSource?.biomeAt(x, y)?.id },
         combat, CrowdControl(world, director, reachOf = { encounters.fightingReach(it) }), LootDrops(content, lootRoller, config.seaLevel, difficulty),
         ground, politics, progression, survival, flashes, impacts, random,
         AttackSpread({ id -> content.enemies.firstOrNull { it.id == id } }, settings.attacksPerMonster, settings.distinctAttacks),
+        safeGround,
     )
     val inspector = BuildInspector(content, config.rules.combat, profile, survivalRules::modifiers, { table.boons }, combat.statuses::of, workbench::linkedTo)
     /** Fallen bodies tumbling loose, when the player turned ragdolls on. */
     val ragdolls: Ragdolls? = if (settings.ragdolls) Ragdolls(world) else null
 
     /** The people of friendly towns, walking their day. */
-    val townLife = TownLife(settings, config.seed) { x, y ->
+    val townLife = TownLife(settings, config.seed, safeGround) { x, y ->
         val surface = world.surfaceAt(x, y)
         if (surface < 0) null else WorldPoint(x + 0.5f, y + 0.5f, surface + 1f)
     }

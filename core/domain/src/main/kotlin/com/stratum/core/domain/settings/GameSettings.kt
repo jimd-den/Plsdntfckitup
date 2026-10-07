@@ -25,6 +25,11 @@ data class GameSettings(
     // ---- combat --------------------------------------------------------------------------------
     /** How hard monsters press the player: what their blows cost, how often they come, and how long they hold. */
     val challenge: Challenge = Challenge.NORMAL,
+    /**
+     * Lets a crowd's stuns chain with no gap between them. Off, every stun is
+     * followed by a moment no new stun can land in ([Challenge.stunGuard]).
+     */
+    val stunLocks: Boolean = false,
     /** Forged attacks each monster carries (1-3): more means fewer repeats in a fight. */
     val attacksPerMonster: Int = 2,
     /** No two monsters close together share an attack, so a fight never feels like the same move twice. */

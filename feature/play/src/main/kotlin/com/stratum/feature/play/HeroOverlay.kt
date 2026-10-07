@@ -298,14 +298,16 @@ private fun WorldsPage(state: PlayUiState, actions: HeroActions, modifier: Modif
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.small)) {
         item {
             SectionLabel("This world")
-            Text("World tier ${panel.tier}", style = MaterialTheme.typography.titleSmall, color = colors.ink)
+            val rung = com.stratum.core.domain.difficulty.TierLadder.rung(panel.tier)
+            Text("World tier ${panel.tier} · ${rung.name}", style = MaterialTheme.typography.titleSmall, color = colors.ink)
+            Muted("${rung.meaning}. Monsters stand ${panel.tier * com.stratum.core.domain.difficulty.Difficulty.LEVELS_PER_TIER} levels above you here, and each blow presses ${"%.1f".format(com.stratum.core.domain.difficulty.TierLadder.pressure(panel.tier))}× as hard as on the road.")
             panel.worldMods.forEach { mod -> Text(mod.name + ": " + mod.describe().replace("\n", " · "), style = MaterialTheme.typography.bodySmall, color = colors.inkMuted) }
             Spacer(Modifier.height(Space.small))
             SectionLabel("World tiers")
-            Muted("Each tier is tougher and pays better. Fell a champion at your highest tier to open the next. There is no last one.")
+            Muted("Each rung is tougher and pays better. Fell a champion at your highest to open the next. Past Chi the ladder runs on without end.")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
                 items((0..state.player.highestTier).toList()) { tier ->
-                    StratumChip(label = "Tier $tier", selected = tier == panel.tier, onClick = { actions.onEnterTier(tier) })
+                    StratumChip(label = "$tier · ${com.stratum.core.domain.difficulty.TierLadder.rung(tier).name}", selected = tier == panel.tier, onClick = { actions.onEnterTier(tier) })
                 }
             }
             Spacer(Modifier.height(Space.small))

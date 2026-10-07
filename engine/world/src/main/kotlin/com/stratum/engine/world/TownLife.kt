@@ -30,6 +30,8 @@ import kotlin.math.floor
 internal class TownLife(
     private val settings: GameSettings,
     private val seed: Long,
+    /** Updated each tick with the friendly towns in sight. */
+    private val safe: SafeGround,
     /** A point standing on the ground at (x, y), or null where there is none loaded. */
     private val ground: (Int, Int) -> WorldPoint?,
 ) {
@@ -63,6 +65,7 @@ internal class TownLife(
         dayFraction: Float,
     ): List<EnemyInstance> {
         val peaceful = towns.filter(friendly)
+        safe.update(peaceful)
         if (peaceful.isEmpty()) return enemies
         val present = enemies.mapNotNullTo(HashSet()) { e -> e.instanceId.takeIf { e.civilian } }
         val arrivals = ArrayList<EnemyInstance>()
@@ -82,7 +85,7 @@ internal class TownLife(
                     val goal = scheduleFor(town, person, index, dayFraction) ?: return@mapNotNull e
                     if (e.home == goal) e else e.copy(home = goal)
                 }
-                // Safe streets: a hostile that walks in turns back and is gone.
+                // Safe streets: hostiles stop at the edge (see SafeGround); one already inside, as when a town comes into sight around it, leaves.
                 settings.safeTowns && e.home == null && hostile(e) && peaceful.any { it.contains(floor(e.position.x).toInt(), floor(e.position.y).toInt()) } -> null
                 else -> e
             }

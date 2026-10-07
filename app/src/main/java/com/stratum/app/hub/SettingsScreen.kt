@@ -59,6 +59,7 @@ fun SettingsScreen(settings: GameSettings, display: DisplayChoices, actions: Set
         StratumSection("Combat", subtitle = "How hard monsters press you, and how varied their attacks are.") {
             Steps("Difficulty", Challenge.entries.map { it.label }, settings.challenge.ordinal) { set(settings.copy(challenge = Challenge.entries[it])) }
             Hint(settings.challenge.blurb)
+            Toggle("Allow stun-locks", "Off: after every stun you get a moment no new stun can land in. On: a crowd's stuns can chain, as in a harsher game.", settings.stunLocks) { set(settings.copy(stunLocks = it)) }
             Steps("Attacks per monster", listOf("1", "2", "3"), settings.attacksPerMonster - 1) { set(settings.copy(attacksPerMonster = it + 1)) }
             Toggle("Never the same move twice", "Monsters fighting together never share an attack.", settings.distinctAttacks) { set(settings.copy(distinctAttacks = it)) }
         }
