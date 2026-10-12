@@ -35,8 +35,10 @@ internal fun startNewWorld(
     )
     if (described != null) app.game.saveStyle(described.stylePrompt)
     app.game.chooseHeroClass(heroId)
-    val base = com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.basePasses(content.terrain)
+    // Every new world is generated in microvoxels: its stages are kept with it, so it stays so.
+    val base = com.stratum.engine.microbridge.MicrovoxelTerrainGenerator.newWorldPasses(content.terrain)
     val passes = scene?.takeIf { !it.isEmpty && base.isNotEmpty() }?.passSpecs(base)
+        ?: base.map { com.stratum.core.domain.world.PassSpec(it.id, it.options) }.ifEmpty { null }
     val launch = WorldLaunch.New(identity, heroId, scene?.rules(rules) ?: rules, seed, passes)
     // Replaced rather than pushed from a flow's last step: leaving the world
     // goes back to the hub, not to the step that started it.

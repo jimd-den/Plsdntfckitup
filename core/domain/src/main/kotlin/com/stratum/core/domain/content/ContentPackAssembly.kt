@@ -419,9 +419,21 @@ data class AssembledContent(
 
     fun recipe(id: String): RecipeDefinition? = recipes.firstOrNull { it.id == id }
 
-    /** What a terrain generator is built from, for this content and [config]. */
-    fun terrainContext(config: WorldConfig): TerrainContext =
-        TerrainContext(config, biomes, config.terrainPasses?.let { terrain.copy(passes = it) } ?: terrain, maps, settlements, structureTemplates, blocks = registry.all)
+    /**
+     * What a terrain generator is built from, for this content and [config].
+     * A world that keeps microvoxel stages is a microvoxel world, whatever the
+     * packs' own terrain names: its stages were made for that generator.
+     */
+    fun terrainContext(config: WorldConfig): TerrainContext {
+        val passes = config.terrainPasses
+        val recipe = when {
+            passes == null -> terrain
+            passes.isNotEmpty() && passes.all { it.id.startsWith(MICRO_STAGE) } && terrain.generatorId != TerrainRecipe.MICROVOXEL ->
+                TerrainRecipe(generatorId = TerrainRecipe.MICROVOXEL, elevation = emptyList(), terraceStep = 1, passes = passes)
+            else -> terrain.copy(passes = passes)
+        }
+        return TerrainContext(config, biomes, recipe, maps, settlements, structureTemplates, blocks = registry.all)
+    }
 
     fun loreFor(subjectId: String): List<LoreEntry> = lore.filter { it.subjectId == subjectId }
 
@@ -474,6 +486,8 @@ data class AssembledContent(
 
     private companion object {
         const val DEFAULT_RARITY_COLOR = 0xFFCFD8DC
+        /** Every microvoxel stage's id begins so. */
+        const val MICRO_STAGE = "micro:"
     }
 }
 

@@ -108,6 +108,9 @@ class WorldSession private constructor(
     /** Models, sculpting and chiselling laid over this world's land, oldest first; empty on block worlds. */
     val microStamps: List<com.stratum.core.domain.micro.MicroStamp> get() = parts.stampSurface?.stamps().orEmpty()
 
+    /** The quarter-block ground bodies stand on, when this microvoxel world is played at that scale. */
+    val microGround: MicroGround? get() = parts.microGround
+
     /** The world with write access, for persistence and tests in this module; features see [world]. */
     internal val editableWorld: StreamingWorld get() = streamingWorld
 

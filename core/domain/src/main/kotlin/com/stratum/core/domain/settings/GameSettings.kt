@@ -39,6 +39,15 @@ data class GameSettings(
     /** Loose blocks simulated at once; past this the oldest settle at once. Lower is faster. */
     val maxDebris: Int = 160,
 
+    // ---- the ground --------------------------------------------------------------------------------
+    /**
+     * In a world generated in microvoxels, bodies walk on the microvoxels
+     * themselves -- quarter-block slopes and steps -- and digging carves them
+     * away rather than lifting out whole blocks. Off, the world plays on its
+     * blocks as before.
+     */
+    val quarterBlockPlay: Boolean = true,
+
     // ---- characters ----------------------------------------------------------------------------
     /** Bodies fall and tumble as ragdolls when they die or are blasted, instead of fading in place. */
     val ragdolls: Boolean = false,

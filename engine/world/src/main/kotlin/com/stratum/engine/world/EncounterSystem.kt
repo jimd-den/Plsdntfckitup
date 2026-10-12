@@ -45,6 +45,8 @@ internal class EncounterSystem(
     private val spread: AttackSpread? = null,
     /** Friendly towns, whose edge hostiles stop at. */
     private val safe: SafeGround? = null,
+    /** The quarter-block ground bodies stand on, in a microvoxel world played at that scale. */
+    private val microGround: MicroGround? = null,
 ) {
     private val level = landscape as? MarkedLevel
 
@@ -121,6 +123,23 @@ internal class EncounterSystem(
         val before = state.enemies
         state.enemies = combat.constrain(before, crowd.advance(before, player.position, politics::isHostile, deltaSeconds, politics.allyOrders()), deltaSeconds)
         safe?.takeIf { !it.isEmpty }?.let { ground -> state.enemies = heldOut(before, state.enemies, ground) }
+        microGround?.let { g -> state.enemies = onTheGround(before, state.enemies, g) }
+    }
+
+    /**
+     * Bodies that moved stand on the quarter-block ground under them, as the
+     * player does: up a quarter step, down a slope. Only a short way either
+     * way -- the crowd already decided which ledge a body is on.
+     */
+    private fun onTheGround(before: List<EnemyInstance>, after: List<EnemyInstance>, g: MicroGround): List<EnemyInstance> {
+        val prior = before.associateBy { it.instanceId }
+        return after.map { e ->
+            val was = prior[e.instanceId]
+            if (was != null && was.position.x == e.position.x && was.position.y == e.position.y) return@map e
+            if (!world.isLoaded(e.blockPos.chunkPos)) return@map e
+            val stand = g.standAt(e.position.x, e.position.y, kotlin.math.floor(e.position.z) + 1f) ?: return@map e
+            if (stand < e.position.z - 1.5f || stand > e.position.z + 1f) e else e.copy(position = e.position.copy(z = stand))
+        }
     }
 
     /** Hostiles the crowd moved into a safe town go back to where they stood: they stop at its edge. */

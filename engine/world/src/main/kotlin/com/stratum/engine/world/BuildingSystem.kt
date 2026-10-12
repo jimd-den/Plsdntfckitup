@@ -139,11 +139,13 @@ internal class BuildingSystem(
 
     override fun mine(target: BlockPos, deltaSeconds: Float): MineResult {
         val speed = player.sheet(insertOf).multiplier(Stat.MINING_SPEED)
+        val before = world.blockIndexAt(target)
         val result = interaction.mine(MineRequest(player.blockPos, target, player.toolTier, deltaSeconds * speed, mining.effortOn(target)))
         when (result) {
             is MineResult.InProgress -> mining.record(result.progress)
             is MineResult.Broken -> {
                 mining.reset()
+                carveMined(target, before)
                 player = motion.advance(pocketed(player, result.drop), 0f)
                 survival.forage(result.block.id, result.block.material, random).forEach { player = player.withItem(it) }
             }
@@ -153,6 +155,27 @@ internal class BuildingSystem(
     }
 
     override fun cancelMining() = mining.reset()
+
+    /**
+     * In a world played on its microvoxels, a block of the land dug out
+     * leaves a rounded hollow carved from the microvoxels, not a cube cut from
+     * blocks: the block goes back to what the land was, and a sphere a little
+     * wider than it is carved away, taking the block with it and rounding into
+     * the ground around. A block the player placed comes out whole.
+     */
+    private fun carveMined(target: BlockPos, before: Int) {
+        val source = micro ?: return
+        if (motion.ground == null || stamps == null) return
+        if (before != source.generatedBlock(target.x, target.y, target.z)) return
+        world.setBlock(target, before)
+        val m = MICRO
+        val r = DIG_RADIUS
+        val stamp = MicroStamp(MicroBrushes.id("sphere", r), target.x * m + m / 2 - r, target.y * m + m / 2 - r, target.z * m + m / 2 - r, carve = true)
+        // The block was already pocketed by the dig; the carving itself gathers nothing more.
+        restamp(stamp, null, carve = true, gather = false) { stamps.stamp(stamp, null) }
+        // Whatever is left of the dug block, the block world follows the land: never left standing where it was dug.
+        if (world.blockIndexAt(target) == before) world.setBlock(target, source.generatedBlock(target.x, target.y, target.z))
+    }
 
     override fun place(picked: BlockPos): PlaceResult {
         val blockId = player.selectedBlockId ?: return PlaceResult.Rejected(PlaceRejection.UNKNOWN_BLOCK)
@@ -345,7 +368,7 @@ internal class BuildingSystem(
      * in the bag. Chunks whose blocks all read the same are still marked, so
      * their fine detail is drawn again.
      */
-    private fun restamp(stamp: MicroStamp, model: MicroModel?, carve: Boolean, apply: () -> BlockBox?): Pair<Int, Map<String, Int>>? {
+    private fun restamp(stamp: MicroStamp, model: MicroModel?, carve: Boolean, gather: Boolean = true, apply: () -> BlockBox?): Pair<Int, Map<String, Int>>? {
         val source = micro ?: return null
         val shape = model ?: MicroBrushes.model(stamp.modelId) ?: stamps?.stampModels()?.firstOrNull { it.id == stamp.modelId } ?: return null
         val box = StampLayer.blocksOf(StampLayer.boxOf(stamp, shape), MICRO)
@@ -372,7 +395,7 @@ internal class BuildingSystem(
             val broken = registry.typeOf(current)
             if (!broken.isAir && !broken.isBreakable) continue
             if (!world.setBlock(pos, now)) continue
-            if (!broken.isAir && now == BlockRegistry.AIR_INDEX) {
+            if (gather && !broken.isAir && now == BlockRegistry.AIR_INDEX) {
                 player = player.withItem(broken.drop)
                 gathered.merge(broken.drop, 1, Int::plus)
             }
@@ -415,5 +438,7 @@ internal class BuildingSystem(
         /** Steps of undo kept. */
         const val HISTORY = 40
         const val MICRO = 4
+        /** Microvoxels out from a dug block's middle that the carve takes: a little wider than the block, so the hollow is round. */
+        const val DIG_RADIUS = 3
     }
 }

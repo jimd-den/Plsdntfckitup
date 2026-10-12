@@ -29,6 +29,7 @@ class GameSettingsStore(context: Context) {
             distinctAttacks = prefs.getBoolean("distinct_attacks", d.distinctAttacks),
             voxelDestruction = prefs.getString("voxel_destruction", null)?.let { n -> VoxelDestruction.entries.firstOrNull { it.name == n } } ?: d.voxelDestruction,
             maxDebris = prefs.getInt("max_debris", d.maxDebris),
+            quarterBlockPlay = prefs.getBoolean("quarter_block_play", d.quarterBlockPlay),
             ragdolls = prefs.getBoolean("ragdolls", d.ragdolls),
         ).coerced()
     }
@@ -47,6 +48,7 @@ class GameSettingsStore(context: Context) {
             putBoolean("distinct_attacks", s.distinctAttacks)
             putString("voxel_destruction", s.voxelDestruction.name)
             putInt("max_debris", s.maxDebris)
+            putBoolean("quarter_block_play", s.quarterBlockPlay)
             putBoolean("ragdolls", s.ragdolls)
         }
     }

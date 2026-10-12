@@ -72,6 +72,9 @@ fun SettingsScreen(settings: GameSettings, display: DisplayChoices, actions: Set
                 Hint("Fewer is faster on older phones; past the limit the oldest blocks settle at once.")
             }
         }
+        StratumSection("The ground", subtitle = "How you walk and dig in a world made of microvoxels.") {
+            Toggle("Quarter-block ground", "Walk the microvoxels themselves: smooth slopes, quarter steps, kerbs. Digging carves rounded hollows instead of lifting out whole blocks.", settings.quarterBlockPlay) { set(settings.copy(quarterBlockPlay = it)) }
+        }
         StratumSection("Characters", subtitle = "How bodies look and fall.") {
             Toggle("Ragdolls", "Bodies tumble and fall loose when they die or are blasted.", settings.ragdolls) { set(settings.copy(ragdolls = it)) }
             Steps("Drawn as", listOf("Mask spirits", "Sprites"), if (display.maskCharacters) 0 else 1) { actions.onMaskCharacters(it == 0) }

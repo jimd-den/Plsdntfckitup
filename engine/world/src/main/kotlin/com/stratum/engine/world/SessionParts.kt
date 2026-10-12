@@ -63,7 +63,9 @@ internal class SessionParts(
     val animator = ActorAnimator()
     val impacts = ImpactField(world)
     val table = TableState()
-    val motion = PlayerMotion(world)
+    /** The quarter-block ground, when this is a microvoxel world played at that scale. */
+    val microGround: MicroGround? = if (settings.quarterBlockPlay) microTerrain?.let { MicroGround(world, it) } else null
+    val motion = PlayerMotion(world).also { it.ground = microGround }
     private val roomScanner = RoomScanner(world)
     private val lootRoller = LootRoller.of(content)
     val ground = GroundItems()
@@ -108,6 +110,7 @@ internal class SessionParts(
         ground, politics, progression, survival, flashes, impacts, random,
         AttackSpread({ id -> content.enemies.firstOrNull { it.id == id } }, settings.attacksPerMonster, settings.distinctAttacks),
         safeGround,
+        microGround,
     )
     val inspector = BuildInspector(content, config.rules.combat, profile, survivalRules::modifiers, { table.boons }, combat.statuses::of, workbench::linkedTo)
     /** Fallen bodies tumbling loose, when the player turned ragdolls on. */
