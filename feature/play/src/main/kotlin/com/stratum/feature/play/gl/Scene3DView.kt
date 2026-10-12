@@ -93,6 +93,8 @@ data class Scene3DInput(
     val projectiles: List<com.stratum.engine.world.Projectile> = emptyList(),
     val zones: List<com.stratum.engine.world.Zone> = emptyList(),
     val telegraphs: List<com.stratum.engine.world.Telegraph> = emptyList(),
+    val debris: List<com.stratum.engine.scene.DebrisMark> = emptyList(),
+    val ragdolls: List<com.stratum.engine.scene.RagdollMark> = emptyList(),
     /** The hero and monsters drawn as floating mask spirits; false draws their sprites. */
     val maskCharacters: Boolean = true,
     /** The hero's mask, a genome code; null for the first preset. */
@@ -175,6 +177,8 @@ fun Scene3DView(
             highlight = input.highlight,
             effects = theatre.track.active,
             marks = combatMarksOf(input.projectiles, input.zones, input.telegraphs),
+            debris = input.debris,
+            ragdolls = input.ragdolls,
             spirits = if (input.maskCharacters) maskTheatre.spirits else emptyList(),
         )
         renderer.submit(frame)

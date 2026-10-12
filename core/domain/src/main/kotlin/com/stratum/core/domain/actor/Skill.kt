@@ -54,6 +54,8 @@ data class SkillDefinition(
      * blocks and dashes. Each should require a tag only this skill carries.
      */
     val grants: List<com.stratum.core.domain.combat.TriggerDefinition> = emptyList(),
+    /** A forged attack's look, for renderers that draw it in full; null draws the skill in its [color]. */
+    val look: com.stratum.core.domain.attack.AttackLook? = null,
 ) {
     init {
         require(charges >= 1) { "skill '$id' needs at least one charge" }

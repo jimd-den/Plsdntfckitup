@@ -9,6 +9,9 @@ import com.stratum.core.domain.world.ChunkPos
 import com.stratum.core.domain.world.MutableWorld
 import com.stratum.core.domain.world.TerrainGenerator
 import com.stratum.core.domain.world.WorldConfig
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 
 /**
  * A world that keeps only the chunks near the player resident and generates the
@@ -18,12 +21,33 @@ import com.stratum.core.domain.world.WorldConfig
  * walking away from a mine and coming back does not silently regenerate the
  * terrain over the tunnel. Untouched chunks are dropped outright, because the
  * generator can recreate them byte-for-byte.
+ *
+ * ## Generation off the game thread
+ *
+ * With [workers], chunks queued for [pump] are generated ahead on those
+ * threads and only installed on the game thread, which costs nothing. A
+ * microvoxel chunk takes several milliseconds to generate; two a tick on the
+ * game thread was a hitch every time the player walked. A chunk needed at
+ * once ([focusOn]'s urgent ring) takes its worker's result if one is under
+ * way rather than starting over, and is made on the spot only if none is.
+ * The generators are pure functions of position and safe to call from any
+ * thread, so a chunk is the same whichever thread made it.
  */
 class StreamingWorld(
     override val registry: BlockRegistry,
     private val generator: TerrainGenerator,
     private val config: WorldConfig,
+    /** Threads to generate queued chunks on; null generates everything on the caller's thread, in [pump]. */
+    private val workers: ExecutorService? = sharedWorkers,
 ) : MutableWorld {
+
+    /** A chunk being generated on a worker, by the generator as it was in [epoch]. */
+    private class Pending(val future: Future<Chunk>, val epoch: Int)
+
+    private val pending = HashMap<ChunkPos, Pending>()
+
+    /** Bumped by [regenerate]: chunks a worker made for an older generator are not used. */
+    private var epoch = 0
 
     private val chunks = LinkedHashMap<ChunkPos, Chunk>()
     private val modifiedChunks = HashMap<ChunkPos, Chunk>()
@@ -115,7 +139,14 @@ class StreamingWorld(
     override fun loadChunk(pos: ChunkPos): Chunk = chunks.getOrPut(pos) {
         residency++
         forgetLookup()
-        modifiedChunks.remove(pos) ?: generator.generate(pos, registry)
+        modifiedChunks.remove(pos) ?: fromWorker(pos) ?: generator.generate(pos, registry)
+    }
+
+    /** A worker's chunk for [pos], waiting for it if it is still being made; null when there is none to use. */
+    private fun fromWorker(pos: ChunkPos): Chunk? {
+        val job = pending.remove(pos) ?: return null
+        if (job.epoch != epoch) { job.future.cancel(false); return null }
+        return runCatching { job.future.get() }.getOrNull()
     }
 
     override fun unloadChunk(pos: ChunkPos) {
@@ -153,6 +184,8 @@ class StreamingWorld(
 
         val toUnload = chunks.keys.filterNot(wanted::contains)
         toUnload.forEach(::unloadChunk)
+        // Ground the player turned away from before it was made is not waited for.
+        pending.keys.filterNot(wanted::contains).forEach { pending.remove(it)?.future?.cancel(false) }
 
         val missing = wanted.filterNot(chunks::containsKey)
         val (now, later) = missing.partition { maxOf(abs(it.x - centre.x), abs(it.y - centre.y)) <= urgentRadius }
@@ -163,8 +196,33 @@ class StreamingWorld(
         return StreamingDelta(loaded = now, unloaded = toUnload)
     }
 
-    /** Generates up to [budget] queued chunks, nearest first. Returns how many it made. */
+    /**
+     * Generates up to [budget] queued chunks, nearest first. Returns how many it made.
+     *
+     * With [workers], it instead installs every queued chunk a worker has
+     * finished -- installing is free, so [budget] does not limit it -- and
+     * keeps the workers busy with the nearest of the rest.
+     */
     fun pump(budget: Int): Int {
+        val pool = workers ?: return pumpHere(budget)
+        var made = 0
+        val iterator = queued.iterator()
+        while (iterator.hasNext()) {
+            val pos = iterator.next()
+            val ready = chunks.containsKey(pos) || pos in modifiedChunks || pending[pos]?.future?.isDone == true
+            if (!ready) continue
+            iterator.remove()
+            if (chunks.containsKey(pos)) pending.remove(pos)?.future?.cancel(false) else { loadChunk(pos); made++ }
+        }
+        for (pos in queued) {
+            if (pending.size >= MAX_IN_FLIGHT) break
+            if (pos in pending) continue
+            pending[pos] = Pending(pool.submit(Callable { generator.generate(pos, registry) }), epoch)
+        }
+        return made
+    }
+
+    private fun pumpHere(budget: Int): Int {
         var made = 0
         while (made < budget && queued.isNotEmpty()) {
             val pos = queued.removeAt(0)
@@ -202,6 +260,9 @@ class StreamingWorld(
      * chunks were dropped.
      */
     fun regenerate(urgentRadius: Int = 1): Int {
+        epoch++
+        pending.values.forEach { it.future.cancel(false) }
+        pending.clear()
         val stale = chunks.keys.filterNot(editedPositions::contains)
         stale.forEach { chunks.remove(it) }
         if (stale.isNotEmpty()) residency++
@@ -218,6 +279,18 @@ class StreamingWorld(
         residency++
         forgetLookup()
         if (markEdited) editedPositions += chunk.pos
+    }
+
+    companion object {
+        /** Chunks generated ahead at once: enough to keep the workers busy, few enough to drop cheaply when the player turns. */
+        const val MAX_IN_FLIGHT = 8
+
+        /**
+         * The threads new worlds generate their queued chunks on, installed
+         * once by the app at startup. Null -- the default, and what tests
+         * use -- generates on the game thread, a fixed number a tick.
+         */
+        @Volatile var sharedWorkers: ExecutorService? = null
     }
 }
 

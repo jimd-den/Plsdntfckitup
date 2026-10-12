@@ -80,8 +80,32 @@ internal fun VitalsCard(state: PlayUiState, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(Space.tight))
             NeedMeters(state.survival)
         }
+        nearestFoe(state)?.let { foe ->
+            Spacer(Modifier.height(Space.tight))
+            Text(
+                text = foe.name + if (foe.level > 0) " · LV ${foe.level}" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (foe.level > state.player.level + state.hero.tier * com.stratum.core.domain.difficulty.Difficulty.LEVELS_PER_TIER + 1) colors.danger else colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            StratumProgressSliver(fraction = foe.healthFraction, tint = colors.danger)
+        }
     }
 }
+
+/** The nearest monster that could be fighting the player, within a short throw: its name, level and life go under the vitals. */
+private fun nearestFoe(state: PlayUiState): com.stratum.core.domain.actor.EnemyInstance? {
+    val p = state.player.position
+    return state.enemies.asSequence()
+        .filter { it.isAlive && !it.civilian && it.factionId != com.stratum.core.domain.faction.Factions.PLAYER }
+        .map { it to kotlin.math.hypot(it.position.x - p.x, it.position.y - p.y) }
+        .filter { it.second <= FOE_RANGE }
+        .minByOrNull { it.second }?.first
+}
+
+/** How near a monster must be for its name and level to show. */
+private const val FOE_RANGE = 14f
 
 /** One entry in the feature dock. */
 internal data class DockEntry(

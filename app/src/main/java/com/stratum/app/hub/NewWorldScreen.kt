@@ -68,7 +68,6 @@ data class NewWorldActions(
     /** Detours to the sprite forge to draw a new look. */
     val onMakeLook: () -> Unit = {},
     /** Asks the connected language model to read the description into scene parameters. */
-    val onReadScene: () -> Unit = {},
 )
 
 /**
@@ -85,7 +84,6 @@ fun NewWorldScreen(
     /** How many worlds exist, for the default name "World N". */
     existingWorlds: Int = 0,
     /** Whether a model is connected, so a described world also gets the crew writing it. */
-    modelReady: Boolean = false,
     /** Character art the hero can wear, and which is worn; null is the class's own art. */
     looks: List<LookChoice> = emptyList(),
     lookId: String? = null,
@@ -126,8 +124,8 @@ fun NewWorldScreen(
                 HeroStep(heroes, heroId, onPick = { actions.onChange(draft.copy(heroClassId = it)) }, onQuickMake = actions.onQuickMake)
                 LookStep(looks, lookId, actions.onPickLook, actions.onMakeLook)
             }
-            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, modelReady, actions.onChange, actions.onReadScene)
-            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, looks.firstOrNull { it.id == lookId }, existingWorlds, modelReady)
+            NewWorldStep.WORLD -> WorldStep(draft, existingWorlds, actions.onChange)
+            NewWorldStep.GO -> GoStep(draft, heroes.firstOrNull { it.id == heroId }, looks.firstOrNull { it.id == lookId }, existingWorlds)
         }
     }
 }
@@ -171,7 +169,7 @@ private fun LookStep(looks: List<LookChoice>, selected: String?, onPick: (String
 }
 
 @Composable
-private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boolean, onChange: (NewWorldDraft) -> Unit, onReadScene: () -> Unit = {}) {
+private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, onChange: (NewWorldDraft) -> Unit) {
     var fineTune by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.small)) {
         SectionHeader("What kind of world?")
@@ -211,9 +209,7 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boo
             label = { Text("Describe a world") },
             placeholder = { Text("A drowned bronze city under a red moon") },
             supportingText = {
-                Text(
-                    if (modelReady) "Shapes the land, towns and look at once. The AI crew writes the rest while you play." else "Shapes the land, towns and look at once.",
-                )
+                Text("Shapes the land, towns and look at once.")
             },
         )
         val scene = draft.scene
@@ -222,14 +218,6 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boo
                 Text("How your words shape the world", style = MaterialTheme.typography.labelLarge, color = StratumTheme.colors.ink)
                 if (scene.notes.isEmpty()) Text("Nothing here names a land yet: try a place, a people, a climate or a mood.", style = MaterialTheme.typography.bodySmall, color = StratumTheme.colors.inkMuted)
                 scene.notes.take(10).forEach { Text("· $it", style = MaterialTheme.typography.bodySmall, color = StratumTheme.colors.inkMuted) }
-                if (modelReady) {
-                    Spacer(Modifier.height(Space.small))
-                    com.stratum.core.designsystem.component.StratumAction(
-                        label = if (draft.readingScene) "Reading…" else "✨ Read the scene with AI",
-                        onClick = onReadScene, enabled = !draft.readingScene,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
             }
         }
     }
@@ -256,7 +244,7 @@ private fun WorldStep(draft: NewWorldDraft, existingWorlds: Int, modelReady: Boo
 }
 
 @Composable
-private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, existingWorlds: Int, modelReady: Boolean) {
+private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, existingWorlds: Int) {
     val colors = StratumTheme.colors
     StratumPanel(Modifier.fillMaxWidth()) {
         Text(draft.resolvedName(existingWorlds), style = MaterialTheme.typography.displaySmall, color = colors.ink)
@@ -279,9 +267,6 @@ private fun GoStep(draft: NewWorldDraft, hero: HeroChoice?, look: LookChoice?, e
         }
         Spacer(Modifier.height(Space.medium))
         Text(summaryOf(draft.rules), style = MaterialTheme.typography.labelSmall, color = colors.accent)
-    }
-    if (draft.described != null && modelReady) {
-        StatusChip("AI crew writes the rest as you play", tone = StatusTone.BUSY)
     }
     Text(
         "Your hero keeps their level, gear and points in every world they enter.",

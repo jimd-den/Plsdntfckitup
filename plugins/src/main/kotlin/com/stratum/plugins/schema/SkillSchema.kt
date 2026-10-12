@@ -12,6 +12,7 @@ import com.stratum.core.domain.actor.SkillDefinition
 import com.stratum.core.domain.actor.SkillDelivery
 import com.stratum.core.domain.actor.SkillEffect
 import com.stratum.core.domain.actor.SummonSpec
+import com.stratum.core.domain.actor.TerrainChange
 import com.stratum.core.domain.actor.ZoneSpec
 import com.stratum.core.domain.combat.DamageConversion
 import com.stratum.core.domain.combat.ExtraDamage
@@ -54,6 +55,7 @@ internal data class SkillSchema(
     val zone: ZoneSchema? = null,
     val summon: SummonSchema? = null,
     val conversions: List<ConversionSchema> = emptyList(),
+    val grants: List<TriggerSchema> = emptyList(),
 ) {
     fun toDomain(): SkillDefinition {
         val owner = "skill '$id'"
@@ -61,7 +63,7 @@ internal data class SkillSchema(
             id, name, description, damageType, powerMultiplier, resourceCost, cooldownSeconds, delivery(owner), range,
             SchemaValues.color(color, "$owner color"), area?.toDomain() ?: AREA, effects.map { it.toDomain(owner) }, tags.toSet(),
             castTime, charges, lifeCost, projectile?.toDomain() ?: PROJECTILE, zone?.toDomain() ?: ZONE, summon?.toDomain(),
-            conversions.map { it.toConversion() },
+            conversions.map { it.toConversion() }, grants = grants.map { it.toDomain("$owner grant") },
         )
     }
 
@@ -77,6 +79,7 @@ internal data class SkillSchema(
             s.range, SchemaValues.color(s.color), s.area.takeIf { it != AREA }?.let(AreaSchema::of), s.effects.map(EffectSchema::of),
             s.tags.toList(), s.castTime, s.charges, s.lifeCost, s.projectile.takeIf { it != PROJECTILE }?.let(ProjectileSchema::of),
             s.zone.takeIf { it != ZONE }?.let(ZoneSchema::of), s.summon?.let(SummonSchema::of), s.conversions.map(ConversionSchema::of),
+            s.grants.map(TriggerSchema::of),
         )
     }
 }
@@ -146,6 +149,9 @@ internal data class EffectSchema(
     val force: Float = 0f,
     val skill: String? = null,
     val target: String? = null,
+    val change: String? = null,
+    val radius: Float = 1.5f,
+    val seconds: Float = 6f,
 ) {
     fun toDomain(owner: String): SkillEffect {
         fun need(value: String?, field: String) = value ?: throw ImportException("$owner effect '$type' needs '$field'")
@@ -157,7 +163,8 @@ internal data class EffectSchema(
             "resource" -> SkillEffect.RestoreResource(amount)
             "knockback" -> SkillEffect.Knockback(force)
             "cast" -> SkillEffect.CastSkill(need(skill, "skill"), target(EffectTarget.TARGET))
-            else -> throw ImportException("$owner effect: '$type' is not one of damage, status, heal, resource, knockback, cast")
+            "terrain" -> SkillEffect.Terrain(SchemaValues.enum<TerrainChange>(need(change, "change"), "$owner terrain change"), radius, seconds)
+            else -> throw ImportException("$owner effect: '$type' is not one of damage, status, heal, resource, knockback, cast, terrain")
         }
     }
 
@@ -169,6 +176,7 @@ internal data class EffectSchema(
             is SkillEffect.RestoreResource -> EffectSchema("resource", amount = e.amount)
             is SkillEffect.Knockback -> EffectSchema("knockback", force = e.force)
             is SkillEffect.CastSkill -> EffectSchema("cast", skill = e.skillId, target = SchemaValues.name(e.target))
+            is SkillEffect.Terrain -> EffectSchema("terrain", change = SchemaValues.name(e.change), radius = e.radius, seconds = e.seconds)
         }
     }
 }

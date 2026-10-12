@@ -222,6 +222,22 @@ data class EnemyInstance(
     val summonerId: String? = null,
     /** Seconds before a summoned body fades; null for one that stays. */
     val expiresIn: Float? = null,
+    /**
+     * A townsperson: never hostile, never a target, never counted against the
+     * monster population. Walks the town's schedule by its [home].
+     */
+    val civilian: Boolean = false,
+    /**
+     * The forged attacks this body was dealt from its kind's pool; null until
+     * dealt. Its kind's other skills are always its own.
+     */
+    val skillPool: List<String>? = null,
+    /**
+     * Its level: the player's when it was made, plus the world tier's bonus
+     * and a step for its rank (see [com.stratum.core.domain.difficulty.MonsterLevel]).
+     * 0 for a body made by hand at no particular level.
+     */
+    val level: Int = 0,
 ) {
     val isAlive: Boolean get() = health > 0 && state != EnemyState.DEAD
 

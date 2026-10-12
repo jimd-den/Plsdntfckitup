@@ -34,7 +34,10 @@ internal class MonsterAbilities(private val content: AssembledContent, private v
     /** The skills [enemy] fights with now: the latest entered phase's, when it names any. */
     fun currentSkills(enemy: EnemyInstance): List<MonsterSkill> {
         val definition = definitionOf(enemy.definitionId) ?: return emptyList()
-        return definition.phases.take(enemy.phase).lastOrNull { it.skills.isNotEmpty() }?.skills ?: definition.skills
+        val all = definition.phases.take(enemy.phase).lastOrNull { it.skills.isNotEmpty() }?.skills ?: definition.skills
+        // A body dealt its own forged attacks uses only those of its kind's pool.
+        val pool = enemy.skillPool ?: return all
+        return all.filter { !it.skillId.startsWith(AttackSpread.FORGED) || it.skillId in pool }
     }
 
     /**

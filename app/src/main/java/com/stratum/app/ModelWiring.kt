@@ -1,52 +1,33 @@
 package com.stratum.app
 
 import android.content.Context
-import com.stratum.core.data.ai.model3d.HttpModelGeneration
 import com.stratum.core.data.model.ModelAssetStore
-import com.stratum.core.data.settings.ProviderSettingsStore
-import com.stratum.core.domain.ai.GenerateModelUseCase
-import com.stratum.core.domain.ai.ImageModelPort
 import com.stratum.core.domain.ai.ModelAsset
 import com.stratum.core.domain.content.AssembledContent
 import com.stratum.core.domain.content.ModelDefinition
 import com.stratum.core.domain.content.VoxelBlueprint
 import com.stratum.engine.model.ModelPipeline
 import com.stratum.engine.scene.PropModel
-import com.stratum.feature.forge.ModelForgeStorage
 import com.stratum.feature.play.gl.AndroidImageCodec
 import java.io.File
 
 /**
- * Wires generated 3D models: the provider, the store, the pipeline, and the
- * step that turns stored models into things the world draws.
+ * The 3D models and voxel blueprints kept on the device, and the step that
+ * turns them into things the world draws.
  *
- * Models forged on the device join the loaded packs' own model references as
- * ordinary [ModelDefinition]s, so from the renderer's side there is one road:
- * a definition names a block or a monster, its source is resolved to bytes,
+ * Kept models join the loaded packs' own model references as ordinary
+ * [ModelDefinition]s, so from the renderer's side there is one road: a
+ * definition names a block or a monster, its source is resolved to bytes,
  * and the pure pipeline makes a prop or a sprite of it.
  */
-class ModelWiring(context: Context, settings: ProviderSettingsStore, images: ImageModelPort) {
+class ModelWiring(context: Context) {
 
     val store = ModelAssetStore(File(context.filesDir, "model-forge"))
-
-    val generation = HttpModelGeneration(configProvider = settings::loadModelProvider)
-
-    val generate = GenerateModelUseCase(generation, images)
 
     /** Decodes a GLB's embedded textures with the platform decoder. */
     val pipeline = ModelPipeline(decodeImage = AndroidImageCodec::decode)
 
     private val props = HashMap<String, PropModel?>()
-
-    val storage: ModelForgeStorage = object : ModelForgeStorage {
-        override fun all(): List<ModelAsset> = store.all()
-        override fun save(asset: ModelAsset, bytes: ByteArray, previewPng: ByteArray?) = store.save(asset, bytes, previewPng)
-        override fun update(asset: ModelAsset) = store.update(asset)
-        override fun delete(id: String) = store.delete(id)
-        override fun bytesFor(id: String): ByteArray? = store.bytesFor(id)
-        override fun previewFor(id: String): ByteArray? = store.previewFor(id)
-        override fun saveBlueprint(blueprint: VoxelBlueprint) = store.saveBlueprint(blueprint)
-    }
 
     /**
      * [content] with the device's bound models added.

@@ -26,6 +26,12 @@ import kotlin.math.sqrt
 class PlayerMotion(private val world: World) {
 
     /**
+     * The quarter-block ground, in a microvoxel world played at that scale:
+     * the body then stands on the microvoxels themselves. Null plays on blocks.
+     */
+    var ground: MicroGround? = null
+
+    /**
      * The direction the player is being pushed. Length 0..1, so a
      * half-deflected stick walks at half speed.
      *
@@ -175,6 +181,13 @@ class PlayerMotion(private val world: World) {
 
     /** Drops the player if there is nothing under them, e.g. after mining. */
     private fun settled(player: PlayerState): PlayerState {
+        ground?.let { g ->
+            val p = player.position
+            if (!world.isLoaded(player.blockPos.chunkPos)) return player
+            // Ground risen under the body (a quarter step it walked onto) lifts it; ground gone drops it.
+            val stand = g.standAt(p.x, p.y, p.z + SETTLE_REACH) ?: return player
+            return if (stand == p.z) player else player.copy(position = p.copy(z = stand))
+        }
         val feet = player.blockPos
         if (feet.z <= 0) return player
         val localX = player.position.x - feet.x
@@ -199,6 +212,7 @@ class PlayerMotion(private val world: World) {
         // Unloaded ground reads as air, and walking onto air drops the player
         // to the bottom of the world. A column that is not there yet is a wall.
         if (!world.isLoaded(BlockPos(columnX, columnY, 0).chunkPos)) return null
+        ground?.let { return microAxis(it, from, target, dx, dy, maxStep) }
         val currentZ = from.toBlockPos().z
 
         // Tested against the block's real shape, not the cell. A wall a third
@@ -233,6 +247,33 @@ class PlayerMotion(private val world: World) {
         return WorldPoint(target.x, target.y, standingZ.toFloat())
     }
 
+    /**
+     * One axis of movement over the quarter-block ground: a step up to
+     * [STEP_UP] blocks is walked, up to [maxStep] climbed (only up terrain,
+     * never a wall), and the body must fit, head and all, where it lands. The
+     * leading edge of the body is tested too, so a thin wall stops it short
+     * rather than letting it stand half inside.
+     */
+    private fun microAxis(g: MicroGround, from: WorldPoint, target: WorldPoint, dx: Float, dy: Float, maxStep: Int): WorldPoint? {
+        val reach = from.z + maxStep + STEP_SLACK
+        val stand = g.standAt(target.x, target.y, reach) ?: return null
+        val rise = stand - from.z
+        if (rise > maxStep + STEP_SLACK) return null
+        if (rise > STEP_UP + STEP_SLACK) {
+            val under = BlockPos(floor(target.x).toInt(), floor(target.y).toInt(), floor(stand - 0.01f).toInt())
+            if (world.blockAt(under).shape != BlockShape.CUBE) return null
+        }
+        if (stand + BODY_HEIGHT >= Chunk.HEIGHT) return null
+        if (!g.clear(target.x, target.y, stand, BODY_HEIGHT)) return null
+        // The leading edge of the body.
+        val ex = target.x + kotlin.math.sign(dx) * BODY_MARGIN
+        val ey = target.y + kotlin.math.sign(dy) * BODY_MARGIN
+        val edge = g.standAt(ex, ey, reach)
+        if (edge != null && edge - from.z > maxStep + STEP_SLACK) return null
+        if (!g.clear(ex, ey, maxOf(stand, edge ?: stand), BODY_HEIGHT - QUARTER)) return null
+        return WorldPoint(target.x, target.y, stand)
+    }
+
     private fun facingFor(dx: Float, dy: Float): Direction = when {
         abs(dx) >= abs(dy) && dx > 0 -> Direction.EAST
         abs(dx) >= abs(dy) -> Direction.WEST
@@ -264,6 +305,14 @@ class PlayerMotion(private val world: World) {
          * wall and draw half inside it.
          */
         const val BODY_MARGIN = 0.18f
+        /** A body's height, in blocks, for headroom over the quarter-block ground. */
+        const val BODY_HEIGHT = 1.75f
+        /** One microvoxel, in blocks. */
+        const val QUARTER = 0.25f
+        /** Rounding room when comparing quarter-block heights. */
+        const val STEP_SLACK = 0.01f
+        /** How far above its feet a standing body looks for the ground it is on. */
+        const val SETTLE_REACH = 0.3f
         /** Blocks per second at full stick deflection. */
         const val WALK_SPEED = 4.2f
         /** A roll is a burst, not a sprint: fast and over quickly. */

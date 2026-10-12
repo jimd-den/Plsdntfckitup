@@ -214,13 +214,19 @@ internal class Drainage(
         }
     }
 
-    /** A 1-2-1 blur: fans spread out from the thread of water that laid them. */
+    /**
+     * Fans spread out from the thread of water that laid them: each node
+     * holds at least [FAN_SHOULDER] of the thickest deposit beside it. The
+     * load already paid for this width ([SPREAD] times what the channel
+     * holds), so the sediment lies on the land instead of vanishing.
+     */
     private fun blur(f: FloatArray) {
         val src = f.copyOf()
         for (j in 1 until d - 1) for (i in 1 until d - 1) {
             val k = j * d + i
-            f[k] = (src[k] * 4f + (src[k - 1] + src[k + 1] + src[k - d] + src[k + d]) * 2f +
-                src[k - d - 1] + src[k - d + 1] + src[k + d - 1] + src[k + d + 1]) / 16f
+            var m = 0f
+            for (e in 0 until 8) m = max(m, src[k + oy[e] * d + ox[e]])
+            if (m * FAN_SHOULDER > f[k]) f[k] = m * FAN_SHOULDER
         }
     }
 
@@ -286,6 +292,8 @@ internal class Drainage(
         const val MAX_DROP = 5f
         /** Sediment used per microvoxel laid on the channel: the rest of the fan spreads to the sides. */
         const val SPREAD = 8f
+        /** A fan's edge, as a share of the deposit at its heart. */
+        const val FAN_SHOULDER = 0.8f
         /** Catchment, in nodes of average rain, at which a stream becomes a river. */
         const val RIVER_ACC = 60f
         /** A river's surface below the valley floor the lattice gives. */

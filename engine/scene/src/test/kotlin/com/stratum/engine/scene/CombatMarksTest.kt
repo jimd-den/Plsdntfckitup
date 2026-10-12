@@ -64,4 +64,17 @@ class CombatMarksTest {
         }
         assertTrue(filled(0.9f) > filled(0.1f))
     }
+
+    @Test
+    fun `a forged attack draws in its own look, and two looks draw differently`() {
+        fun look(seed: Long) = com.stratum.core.domain.attack.AttackForge.roll(seed).look
+        fun glows(mark: CombatMark) = frame(mark).let { f -> f.glows.vertices.copyOf(f.glows.vertexCount * Vertex.STRIDE).toList() + f.decals.vertices.copyOf(f.decals.vertexCount * Vertex.STRIDE).toList() }
+        val plain = CombatMark(CombatMarkKind.PROJECTILE, 1f, 1f, 1f, 0.2f, 0xFFFF8800, dirX = 1f, dirY = 0f)
+        val a = plain.copy(look = look(1)); val b = plain.copy(look = look(2))
+        assertTrue(frame(a).glows.triangleCount > 0)
+        assertTrue(glows(a) != glows(b), "two looks drew the same")
+        assertTrue(glows(a) != glows(plain))
+        val zone = CombatMark(CombatMarkKind.ZONE, 0f, 0f, 0f, 2f, 0xFF44AAFF)
+        assertTrue(frame(zone.copy(look = look(3))).decals.triangleCount >= frame(zone).decals.triangleCount)
+    }
 }

@@ -452,6 +452,18 @@ open class MicrovoxelTerrainGenerator(private val context: TerrainContext) : Ter
             return presets[preset] ?: MicroWorldgen.presets[preset].orEmpty()
         }
 
+        /**
+         * The stages a new world starts with. Every new world is generated in
+         * microvoxels: the packs' own microvoxel stages when they name the
+         * microvoxel generator, else the default world ([ANCIENT]) on the
+         * packs' blocks, creatures and towns. A hand-made map stays its map.
+         */
+        fun newWorldPasses(recipe: com.stratum.core.domain.world.TerrainRecipe): List<StageSpec> {
+            basePasses(recipe).takeIf { it.isNotEmpty() }?.let { return it }
+            if (recipe.generatorId == com.stratum.core.domain.world.TerrainRecipe.TILE_MAP) return emptyList()
+            return presets.getValue(ANCIENT)
+        }
+
         /** Every stage the bridge can build: the engine's, plus the ones that need the packs. */
         private fun stagesFor(context: TerrainContext, blocks: BlockMaterials, biomeId: (Int, Int) -> String?): StageRegistry =
             MicroWorldgen.stages.copy().register(SettlementsStage.ID, SettlementsStage(context, blocks, biomeId))

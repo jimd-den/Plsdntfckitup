@@ -18,9 +18,6 @@ import com.stratum.core.designsystem.theme.StratumTheme
 import com.stratum.core.domain.world.WorldConfig
 import com.stratum.engine.world.IsometricProjection
 import com.stratum.engine.world.WorldSession
-import com.stratum.agents.forge.Creations
-import com.stratum.agents.forge.ForgeCards
-import com.stratum.agents.forge.ForgeKind
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.content.LoreCategory
 import com.stratum.core.domain.content.LoreEntry
@@ -30,11 +27,6 @@ import com.stratum.core.domain.item.UniqueDefinition
 import com.stratum.core.domain.stats.BuildFlag
 import com.stratum.core.domain.stats.ModifierKind
 import com.stratum.core.domain.stats.Stat
-import com.stratum.feature.forge.ContentForgeActions
-import com.stratum.feature.forge.ContentForgeContent
-import com.stratum.feature.forge.ContentForgeUiState
-import com.stratum.feature.forge.SpriteForgeContent
-import com.stratum.feature.forge.SpriteForgeUiState
 import com.stratum.core.domain.content.ClassDraft
 import com.stratum.core.domain.content.ClassOptions
 import com.stratum.feature.hero.ClassForgeScreenContent
@@ -60,90 +52,6 @@ import org.robolectric.annotation.GraphicsMode
 class StratumScreenshotTest {
 
     @get:Rule val composeTestRule = createComposeRule()
-
-    @Test
-    fun agent_studio() {
-        val crew = com.stratum.agents.StandardCrew
-        fun attempt(n: Int, reply: String, problems: List<String> = emptyList(), added: Map<String, List<String>> = emptyMap()) =
-            com.stratum.agents.AgentAttempt(n, "system", "THE WORLD: a hive city under siege by rot cults\nWRITE: blocks, biomes", reply, problems, added, durationMillis = 4200L + n * 800)
-        val steps = listOf(
-            com.stratum.agents.StudioStep(crew.cartographer, com.stratum.agents.StepStatus.DONE, listOf(
-                attempt(1, "{ \"blocks\": [ { \"id\": \"hive:ferrocrete\" } ] }", problems = listOf("biome 'hive:underhive' names unknown block 'hive:slag'")),
-                attempt(2, "{ \"blocks\": [ { \"id\": \"hive:ferrocrete\", \"name\": \"Ferrocrete\", \"material\": \"STONE\" } ] }", added = mapOf("blocks" to listOf("hive:ferrocrete", "hive:slag"), "biomes" to listOf("hive:underhive"))),
-            )),
-            com.stratum.agents.StudioStep(crew.loremaster, com.stratum.agents.StepStatus.REVIEW, listOf(attempt(1, "{}", added = mapOf("factions" to listOf("hive:enforcers", "hive:rot_cult", "hive:guilders"))))),
-        ) + listOf(crew.bestiary, crew.architect, crew.steward, crew.warlord, crew.arbiter).map { com.stratum.agents.StudioStep(it) }
-        val state = com.stratum.feature.forge.CrewUiState(
-            prompt = "A hive city under siege by rot cults; faith is currency",
-            packName = "Hive Siege",
-            crew = crew.all,
-            benched = setOf(crew.arbiter.id),
-            journal = com.stratum.agents.StudioJournal("A hive city under siege", steps),
-            review = com.stratum.feature.forge.PendingReview(steps[1], "{\n  \"factions\": [\n    { \"id\": \"hive:enforcers\", \"name\": \"Enforcers\", \"color\": \"#FF3D5AFE\" },\n    { \"id\": \"hive:rot_cult\", \"name\": \"Rot Cult\", \"defaultStance\": \"HOSTILE\" }\n  ]\n}"),
-            openStep = crew.cartographer.id,
-            providerConfigured = true,
-        )
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                com.stratum.feature.forge.CrewScreenContent(state, com.stratum.feature.forge.CrewActions(), Modifier.fillMaxSize().background(com.stratum.core.designsystem.theme.StratumTheme.colors.surface))
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/agent_studio.png")
-    }
-
-    /** A run part way through: a progress bar, a gallery filling in, one failure. */
-    private fun forgeInProgress(): com.stratum.feature.play.TextureForgeUiState {
-        val content = GameSetup.assemble()
-        val orders = com.stratum.core.domain.art.ForgePlanner.plan(
-            com.stratum.core.domain.art.StyleLexicon.interpret("painterly impasto").direction,
-            com.stratum.feature.play.TextureForgeViewModel.mergedPack(content),
-            includeActors = false,
-        )
-        var progress = com.stratum.engine.scene.forge.ForgeProgress(total = orders.size)
-        orders.take(9).forEachIndexed { i, order ->
-            val texture = if (i == 4) null else com.stratum.engine.scene.Texture(1, 1, IntArray(1))
-            progress = progress.recording(com.stratum.engine.scene.forge.ForgedAsset(order, texture, "rejected: flat colour".takeIf { texture == null }))
-        }
-        val swatches = listOf(0xFF6B8E4E, 0xFF8C6A48, 0xFF5A5F66, 0xFFB08D57, 0xFF3F6B5A, 0xFF7A4E3A, 0xFF9DA38F, 0xFF4E5B3A)
-        val gallery = progress.latest.mapIndexed { i, order ->
-            val image = androidx.compose.ui.graphics.ImageBitmap(32, 32)
-            androidx.compose.ui.graphics.Canvas(image).drawRect(0f, 0f, 32f, 32f, androidx.compose.ui.graphics.Paint().apply { color = androidx.compose.ui.graphics.Color(swatches[i % swatches.size]) })
-            com.stratum.feature.play.ForgedThumb(order.key, order.subject, image)
-        }
-        return com.stratum.feature.play.TextureForgeUiState(
-            prompt = "painterly impasto",
-            summary = "thick brushwork, warm light, soft shadows",
-            regions = content.biomes,
-            planned = orders.size,
-            planDescription = com.stratum.engine.scene.forge.ForgeProgress.describe(orders),
-            progress = progress,
-            gallery = gallery,
-            hasModel = true,
-        )
-    }
-
-    @Test
-    fun texture_forge_screen() {
-        val state = forgeInProgress()
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                com.stratum.feature.play.TextureForgeContent(state = state, actions = com.stratum.feature.play.TextureForgeActions())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/texture_forge.png")
-    }
-
-    @Test
-    @Config(qualifiers = "+land")
-    fun texture_forge_screen_landscape() {
-        val state = forgeInProgress()
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                com.stratum.feature.play.TextureForgeContent(state = state, actions = com.stratum.feature.play.TextureForgeActions())
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/texture_forge_landscape.png")
-    }
 
     @Test
     fun play_screen() {
@@ -312,26 +220,6 @@ class StratumScreenshotTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/death.png")
-    }
-
-    @Test
-    fun provider_settings_screen() {
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                ProviderSettingsScreen(
-                    initial = com.stratum.core.data.ai.ProviderConfig(
-                        apiKey = "sk-or-v1-not-a-real-key",
-                        model = "anthropic/claude-sonnet-4",
-                        imageModel = "black-forest-labs/flux-1.1-pro",
-                    ),
-                    onSave = {},
-                    onBack = {},
-                    modifier = Modifier.fillMaxSize(),
-                    onChooseGraphics = {},
-                )
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/settings.png")
     }
 
     @Test
@@ -755,86 +643,4 @@ class StratumScreenshotTest {
         composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/anvil.png")
     }
 
-    @Test
-    fun sprite_forge_rejection() {
-        // The view that matters: the model said no, and the panel shows exactly
-        // what was sent and exactly what came back.
-        val attempt = com.stratum.core.domain.ai.GenerationAttempt(
-            id = "img_1",
-            label = "Image · 512×512",
-            endpoint = "https://openrouter.ai/api/v1/images/generations",
-            model = "anthropic/claude-sonnet-4",
-            requestBody = "{\"model\":\"anthropic/claude-sonnet-4\"," +
-                "\"prompt\":\"A 4x4 sprite sheet of an ancestral warrior…\"," +
-                "\"n\":1,\"size\":\"512x512\",\"response_format\":\"b64_json\"}",
-            redactedHeaders = mapOf(
-                "Authorization" to "Bearer ****",
-                "Content-Type" to "application/json",
-            ),
-            status = 404,
-            responseBody = "{\"error\":{\"message\":\"No endpoints found for " +
-                "anthropic/claude-sonnet-4 that support image generation.\"," +
-                "\"code\":404}}",
-            failure = "'anthropic/claude-sonnet-4' is not available on this provider.",
-            durationMillis = 812,
-        )
-
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                SpriteForgeContent(
-                    state = SpriteForgeUiState(
-                        subject = "ancestral warrior",
-                        style = "bronze age, high contrast",
-                        providerConfigured = true,
-                        error = attempt.failure,
-                        attempt = attempt,
-                        detailsOpen = true,
-                        stage = com.stratum.core.domain.ai.GenerationStage.FAILED,
-                    ),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/sprite_rejection.png")
-    }
-
-    @Test
-    fun content_forge_screen() {
-        // Rendered with a result in hand, because the cards after forging are
-        // the part of this screen worth guarding against regressions.
-        val unique = UniqueDefinition(
-            "${Creations.ID}:kiln_heart", "Heart of the Last Kiln", "igbo:bronze_ring",
-            modifiers = listOf(ModifierRange(Stat.DAMAGE, ModifierKind.MORE, 0.6f), ModifierRange(Stat.MAX_HEALTH, ModifierKind.FLAT, 20f, 35f)),
-            flags = setOf(BuildFlag.SKILLS_COST_HEALTH), flavour = "It burned for a hundred years. Then it was worn.", minItemLevel = 8,
-        )
-        val story = LoreEntry("${Creations.ID}:kiln", "The Last Kiln", "When the kilns of Awka went cold, one ember was kept.", LoreCategory.ARTIFACT, unique.id)
-        val fragment = ContentPack(Creations.ID, Creations.NAME, "forge", uniques = listOf(unique), loreEntries = listOf(story))
-
-        composeTestRule.setContent {
-            StratumTheme(palette = IgboContentPack.palette, darkTheme = true) {
-                ContentForgeContent(
-                    state = ContentForgeUiState(
-                        kind = ForgeKind.UNIQUE,
-                        prompt = "A ring that makes every skill cost blood",
-                        budget = PowerTier.STRONG,
-                        drafts = listOf(
-                            com.stratum.feature.forge.ForgeDraft(
-                                key = "draft-1", kind = ForgeKind.UNIQUE,
-                                order = ForgeKind.UNIQUE.order("A ring that makes every skill cost blood"),
-                                context = com.stratum.agents.forge.ForgeContext(budget = PowerTier.STRONG),
-                                placeholder = com.stratum.agents.forge.ForgePlaceholder.of(ForgeKind.UNIQUE, "A ring that makes every skill cost blood"),
-                                result = fragment,
-                                cards = ForgeCards.of(fragment, listOf(IgboContentPack.pack)),
-                            ),
-                        ),
-                        providerConfigured = true,
-                        kept = 3,
-                    ),
-                    actions = ContentForgeActions(),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/content_forge.png")
-    }
 }

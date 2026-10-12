@@ -82,7 +82,7 @@ private fun Session(
     modifier: Modifier,
 ) {
     val graph = app.graph
-    val ai = graph.ai
+    val ai = graph.assets
     val liveContent by app.game.contentWithSprites.collectAsStateWithLifecycle()
     // Held for the whole visit: content arriving mid-play (a plugin finishing
     // loading) must not rebuild the session under the player and lose the
@@ -124,7 +124,6 @@ private fun Session(
                 content, config,
                 heroClassId = heroClassId,
                 spriteResolver = drawSprite,
-                imageModel = ai.imageModel,
                 kitDirectory = graph.forgeDirectory,
                 kitOverlays = graph.plugins.textureDirectories() + ai.models.textureDirectory,
                 quality = graph.graphics.chosen,
@@ -144,6 +143,7 @@ private fun Session(
                 heroMask = loadout.heroMask,
                 maskCharacters = loadout.maskCharacters,
                 saveMaskCharacters = app.game::chooseMaskCharacters,
+                settings = app.game.settings.value,
             ),
         )
         ImmersiveMode()

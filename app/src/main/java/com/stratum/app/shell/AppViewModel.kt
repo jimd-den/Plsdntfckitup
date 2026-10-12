@@ -4,13 +4,11 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.stratum.app.CreationJobs
-import com.stratum.app.PoseGenerationService
 import com.stratum.app.nav.Route
 import com.stratum.core.domain.content.ContentPack
 import com.stratum.core.domain.creation.PackDelivery
 import com.stratum.app.nav.BackStack
 import com.stratum.app.world.NewWorldDraft
-import com.stratum.feature.forge.PoseRun
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
@@ -71,10 +69,5 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             graph.plugins.repository.refresh()
         }
         graph.worlds.refresh()
-
-        // The service is started by a pose run beginning, not by the forge
-        // opening: it exists to protect work in flight, and one that started
-        // with the screen would be a permanent notification about nothing.
-        PoseRun.running.filter { it }.onEach { PoseGenerationService.start(application) }.launchIn(viewModelScope)
     }
 }

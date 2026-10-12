@@ -55,7 +55,7 @@ internal class SessionCues(private val log: FeedbackLog = FeedbackLog()) {
         log.add(FeedbackKind.LOOT, name, at, VALUABLE, emphasis = 1.05f, lifetime = 1.2f)
 
     fun tierOpened(tier: Int, at: WorldPoint) =
-        log.add(FeedbackKind.LEVEL_UP, "WORLD TIER $tier OPENED", at, LEVEL, emphasis = 1.9f, lifetime = 2.4f)
+        log.add(FeedbackKind.LEVEL_UP, "${com.stratum.core.domain.difficulty.TierLadder.rung(tier).name.uppercase()} OPENED · TIER $tier", at, LEVEL, emphasis = 1.9f, lifetime = 2.4f)
 
     fun townFreed(name: String, at: WorldPoint) =
         log.add(FeedbackKind.LEVEL_UP, "${name.uppercase()} LIBERATED", at, LEVEL, emphasis = 1.9f, lifetime = 2.6f)

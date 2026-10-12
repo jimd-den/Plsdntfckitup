@@ -74,7 +74,11 @@ class HotTerrainTest {
         assertTrue(big.radius > small.radius, "home radius ${small.radius} -> ${big.radius}")
         assertTrue(big.walled, "the home town has no wall")
         // Still where the player begins, and still built: a building's floor is solid.
-        val b = big.buildings.first()
+        // The building nearest the middle, inside the ground the test world has loaded.
+        val b = big.buildings.minBy { kotlin.math.abs(it.x + it.width / 2 - big.centerX) + kotlin.math.abs(it.y + it.depth / 2 - big.centerY) }
+        // Walk over to it, so its ground is loaded.
+        session.player = session.player.copy(position = com.stratum.core.domain.world.WorldPoint(b.x + 1.5f, b.y + b.depth + 2.5f, big.groundZ + 1f))
+        repeat(20) { session.tick(0.05f) }
         assertTrue(session.world.isSolid(BlockPos(b.x + 1, b.y + 1, big.groundZ)), "no floor under ${b.template.id}")
     }
 

@@ -11,6 +11,8 @@ data class SettlementSite(
     val centerY: Int,
     val groundZ: Int,
     val radius: Int,
+    /** The town's own character, for layouts that follow it; rolled by the planner for [SettlementRecipe.AFRICAN] towns. */
+    val character: com.stratum.core.domain.settlement.culture.CityGenome? = null,
 )
 
 /** What a layout decides: the roads and the buildings. The town's shape and ground are the site's. */
@@ -19,6 +21,8 @@ data class Layout(
     val buildings: List<PlacedBuilding>,
     /** Square towns measure their wall by the larger of the two axes, not by a circle. */
     val square: Boolean = false,
+    /** The buildings the layout added to the recipe's own (a culture's granaries, gatehouses, dye pits...), with the wall it chose. */
+    val recipe: SettlementRecipe? = null,
 )
 
 /**
@@ -49,6 +53,6 @@ class SettlementLayouts(layouts: List<SettlementLayout> = emptyList()) {
 
     companion object {
         /** Shared, so a layout registered once is available to every world. */
-        val standard: SettlementLayouts = SettlementLayouts(listOf(OrganicLayout, GridLayout, FortressLayout, CampLayout))
+        val standard: SettlementLayouts = SettlementLayouts(listOf(OrganicLayout, GridLayout, FortressLayout, CampLayout, AfricanLayout))
     }
 }

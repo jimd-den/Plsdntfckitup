@@ -266,7 +266,7 @@ class GeoAtlas(
     private val drains = AtomicReferenceArray<DrainTile?>(DRAIN_SLOTS)
 
     private fun drain(tx: Int, ty: Int): DrainTile {
-        val slot = ((tx * 73856093) xor (ty * 19349663)) and (DRAIN_SLOTS - 1)
+        val slot = gridSlot(tx, ty, DRAIN_SIDE)
         drains.get(slot)?.let { if (it.tx == tx && it.ty == ty) return it }
         return drainage.build(tx, ty).also { drains.set(slot, it) }
     }
@@ -290,7 +290,7 @@ class GeoAtlas(
 
     private fun tile(tx: Int, ty: Int): FineTile {
         last?.let { if (it.tx == tx && it.ty == ty) return it }
-        val slot = ((tx * 73856093) xor (ty * 19349663)) and (FINE_SLOTS - 1)
+        val slot = gridSlot(tx, ty, FINE_SIDE)
         val t = tiles.get(slot)?.takeIf { it.tx == tx && it.ty == ty } ?: buildFine(tx, ty).also { tiles.set(slot, it) }
         last = t
         return t
@@ -556,7 +556,7 @@ class GeoAtlas(
         val ix = Math.floorDiv(x + step / 2, step); val iy = Math.floorDiv(y + step / 2, step)
         val tx = Math.floorDiv(ix, FINE); val ty = Math.floorDiv(iy, FINE)
         val at = (iy - ty * FINE) * E + (ix - tx * FINE)
-        val slot = ((tx * 73856093) xor (ty * 19349663)) and (FINE_SLOTS - 1)
+        val slot = gridSlot(tx, ty, FINE_SIDE)
         tiles.get(slot)?.let { if (it.tx == tx && it.ty == ty) return provinces[it.province[at]] }
         val t = provinceTiles.get(slot)?.takeIf { it.tx == tx && it.ty == ty } ?: ProvinceTile(tx, ty).also {
             rawBlock(tx * FINE * step, ty * FINE * step, E, step, null, null, null, it.province)
@@ -578,8 +578,20 @@ class GeoAtlas(
         /** Lattice nodes a side a fine tile owns. */
         private const val FINE = 32
         private const val E = FINE + 1
-        private const val FINE_SLOTS = 256
-        private const val DRAIN_SLOTS = 16
+        /** Fine tiles cached: a 16 x 16 window of neighbours. */
+        private const val FINE_SIDE = 16
+        private const val FINE_SLOTS = FINE_SIDE * FINE_SIDE
+        /** Drainage tiles cached: a 4 x 4 window, more than the 2 x 2 a fine tile's erosion reads. */
+        private const val DRAIN_SIDE = 4
+        private const val DRAIN_SLOTS = DRAIN_SIDE * DRAIN_SIDE
+
+        /**
+         * A tile's cache slot: its position modulo a [side] x [side] grid, so
+         * any [side] x [side] block of neighbouring tiles never shares a slot.
+         * A hashed slot let two neighbours evict each other on every node of
+         * an erosion pass, rebuilding a drainage tile thousands of times.
+         */
+        private fun gridSlot(tx: Int, ty: Int, side: Int) = Math.floorMod(ty, side) * side + Math.floorMod(tx, side)
 
         /** Scree reaches this share of the cliff above it... */
         private const val SCREE_SHARE = 0.32f

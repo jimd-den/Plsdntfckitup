@@ -52,7 +52,6 @@ fun StyleOverlay(
     onRestyle: (String) -> Unit,
     onReroll: () -> Unit,
     onClose: () -> Unit,
-    onForge: () -> Unit = {},
     onChooseQuality: (QualityTier?) -> Unit = {},
     onChooseTerrain: (com.stratum.engine.scene.SplatMode?) -> Unit = {},
     onChooseMasks: (Boolean) -> Unit = {},
@@ -107,15 +106,6 @@ fun StyleOverlay(
                 }
             }
 
-            state.forgeProgress?.let { progress ->
-                Spacer(Modifier.height(Space.medium))
-                GameProgress(
-                    fraction = progress.fraction,
-                    label = if (progress.isFinished) "Textures painted" else "Painting textures…",
-                    detail = progress.summary,
-                )
-            }
-
             Spacer(Modifier.height(Space.medium))
             GraphicsChooser(chosen = state.quality, onChoose = onChooseQuality)
             Spacer(Modifier.height(Space.small))
@@ -142,15 +132,6 @@ fun StyleOverlay(
                 StratumAction(
                     label = "Reroll",
                     onClick = onReroll,
-                    emphasis = ActionEmphasis.SECONDARY,
-                )
-                // Paints this style's own textures and props with the image
-                // model. The lighting restyle above is instant and free; this
-                // is the part that costs a few cents and a minute.
-                StratumAction(
-                    label = "Paint textures",
-                    onClick = onForge,
-                    enabled = state.forgeProgress?.isFinished != false,
                     emphasis = ActionEmphasis.SECONDARY,
                 )
                 StratumAction(

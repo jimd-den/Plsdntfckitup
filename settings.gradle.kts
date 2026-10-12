@@ -74,7 +74,6 @@ include(":importer:flame")
 // The mod system: the .stratum plugin format, and the registry of every
 // importer. Pure Kotlin.
 include(":plugins")
-include(":agents")
 
 // Renders the world headlessly so the art direction can be reviewed and
 // regression-tested without a device. Never shipped in the app.
@@ -82,8 +81,3 @@ include(":tools:artpreview")
 // Ray-traces the microvoxel generators to PNGs. Never shipped in the app.
 include(":tools:microvoxelpreview")
 
-// The original engine, moved out of :app and split along the layering it
-// already had. Being ported feature by feature onto the new architecture.
-include(":legacy:domain")
-include(":legacy:data")
-include(":feature:studio")

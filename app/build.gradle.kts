@@ -156,10 +156,7 @@ dependencies {
   implementation(project(":feature:hero"))
   implementation(project(":feature:library"))
   implementation(project(":plugins"))
-  implementation(project(":agents"))
   implementation(project(":core:data"))
-  // :feature:studio and :legacy:* are frozen: they still build on their own,
-  // but nothing in the app reaches them. See ARCHITECTURE.md.
 
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))

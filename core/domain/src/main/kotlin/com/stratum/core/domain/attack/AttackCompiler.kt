@@ -214,6 +214,7 @@ object AttackCompiler {
             ),
             zone = zone,
             grants = grants,
+            look = look,
         )
     }
 
@@ -231,6 +232,7 @@ object AttackCompiler {
         tags = setOf("$NS:attack"), castTime = castTime,
         projectile = ProjectileSpec(count = count.coerceIn(1, 12), speed = 10f, spreadDegrees = spread.coerceIn(0f, 360f)),
         zone = ZoneSpec(durationSeconds = 2.5f, pulseSeconds = 0.5f),
+        look = look,
     )
 
     private fun payloadEffects(p: Payload, element: Element, delivery: Delivery): List<SkillEffect> = when (p) {
@@ -287,6 +289,18 @@ object AttackCompiler {
      * forged attacks suited to its role, seeded by its id so every device
      * arms it the same.
      */
+    /** How big a kind's ground-shaping is, against a player's forged attack. */
+    fun terrainScale(role: com.stratum.core.domain.actor.CombatRole): Float = when (role) {
+        com.stratum.core.domain.actor.CombatRole.BRUTE -> 2f
+        com.stratum.core.domain.actor.CombatRole.MELEE -> 1.3f
+        com.stratum.core.domain.actor.CombatRole.SUPPORT -> 1.2f
+        com.stratum.core.domain.actor.CombatRole.RANGED -> 1f
+        com.stratum.core.domain.actor.CombatRole.SWARMER -> 0.8f
+    }
+
+    /** Forged attacks each kind carries for its bodies to be dealt from. */
+    const val POOL = 6
+
     fun pack(
         attacks: List<ProceduralSkill>, vocab: AttackVocabulary,
         enemies: List<EnemyDefinition> = emptyList(), worldSeed: Long = 0L, perEnemy: Int = 1,
@@ -296,7 +310,13 @@ object AttackCompiler {
             val forged = List(perEnemy) { k -> AttackForge.roll(e.id.hashCode().toLong() * 7919L + worldSeed + k, e.role) }
             e to forged
         }
-        val monsterSkills = armed.flatMap { (_, forged) -> forged.flatMap { compile(it, vocab, forMonster = true) } }
+        // A kind's attacks reshape the ground as it would: a brute's slam digs twice as wide as a thrown dart.
+        val monsterSkills = armed.flatMap { (e, forged) ->
+            val scale = terrainScale(e.role)
+            forged.flatMap { compile(it, vocab, forMonster = true) }.map { s ->
+                s.copy(effects = s.effects.map { fx -> if (fx is SkillEffect.Terrain) fx.copy(radius = fx.radius * scale) else fx })
+            }
+        }
         return ContentPack(
             id = NS, name = "Forge of Will", author = "Stratum",
             description = "Procedural attacks forged from orthogonal parts.",

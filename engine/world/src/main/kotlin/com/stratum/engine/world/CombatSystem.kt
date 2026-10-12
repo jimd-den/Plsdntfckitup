@@ -2,6 +2,7 @@ package com.stratum.engine.world
 
 import com.stratum.core.domain.actor.EffectTarget
 import com.stratum.core.domain.actor.EnemyInstance
+import com.stratum.core.domain.actor.EnemyRank
 import com.stratum.core.domain.actor.PendingCast
 import com.stratum.core.domain.actor.SkillCost
 import com.stratum.core.domain.actor.SkillDefinition
@@ -25,6 +26,9 @@ import com.stratum.core.domain.faction.Factions
 import com.stratum.core.domain.session.PlayerState
 import com.stratum.core.domain.stats.Stat
 import com.stratum.core.domain.stats.StatSheet
+import com.stratum.core.domain.difficulty.BlowCeiling
+import com.stratum.core.domain.difficulty.MonsterLevel
+import com.stratum.core.domain.settings.Challenge
 import com.stratum.core.domain.status.StatusApplication
 import com.stratum.core.domain.status.DotTick
 import com.stratum.core.domain.status.StatusBehaviour
@@ -63,6 +67,17 @@ internal class CombatSystem(
     private val playerSkill: (String) -> SkillDefinition?,
     /** Share of a monster's damage that reaches the player; see [com.stratum.core.domain.world.WorldRules.enemyDamage]. */
     private val incomingDamage: Float = 1f,
+    /** How far attacks reshape the ground, and how many thrown blocks fly at once. */
+    destruction: com.stratum.core.domain.settings.VoxelDestruction = com.stratum.core.domain.settings.VoxelDestruction.SCARS,
+    maxDebris: Int = 0,
+    /** How hard monsters press the player; null fights at full strength with no guard against stun-locks. */
+    private val challenge: Challenge? = null,
+    /** Lets stuns chain with no guard between them, for those who want the harsher fight. */
+    private val stunLocks: Boolean = false,
+    /** Friendly towns: no hostile blow, burst or voxel payload lands there, and nothing hostile casts from inside. */
+    private val safe: SafeGround? = null,
+    /** The world tier, which presses harder on every blow: see [com.stratum.core.domain.difficulty.TierLadder.pressure]. */
+    private val tier: Int = 0,
 ) {
     private val book = content.statusBook
     val statuses = StatusSystem(book, rules)
@@ -70,12 +85,27 @@ internal class CombatSystem(
     val zones = ZoneSystem()
     val triggers = TriggerEngine(rules)
     /** What attacks do to the blocks, when the world can be changed. */
-    private val terrain = (world as? com.stratum.core.domain.world.MutableWorld)?.let(::TerrainImpacts)
+    private val terrain = (world as? com.stratum.core.domain.world.MutableWorld)?.let { w ->
+        TerrainImpacts(w, destruction, if (destruction == com.stratum.core.domain.settings.VoxelDestruction.PHYSICS && maxDebris > 0) DebrisField(w, maxDebris) else null)
+    }
+
+    /** Blocks thrown loose and still flying, for the renderer. */
+    fun debris(): List<DebrisPiece> = terrain?.debris?.pieces().orEmpty()
+
+    /** Voxel payloads this fight has applied, for the quests that want things kept quiet. */
+    val blasts: Int get() = terrain?.applied ?: 0
     val flasks = FlaskSystem(content.flasks)
     private val vitals = VitalsSystem(rules)
     private val abilities = MonsterAbilities(content, director::definition)
 
     private var pendingPlayer: Pair<SkillDefinition, PendingCast>? = null
+
+    /** What reaches the player of a monster's damage. */
+    private val damageScale = incomingDamage * (challenge?.damageTaken ?: 1f)
+    /** Seconds before another stun can land on the player: the stun's own length, then [Challenge.stunGuard]. */
+    private var stunGuard = 0f
+    /** Monsters attacking the player now, and how long each holds its turn without attacking again. */
+    private val engaged = HashMap<String, Float>()
     private val lastAttackers = HashMap<String, HitAttacker>()
     private val dotCarry = HashMap<String, Float>()
     private val basicSkills = HashMap<Pair<String, Int>, SkillDefinition>()
@@ -173,6 +203,8 @@ internal class CombatSystem(
         triggers.beginAction()
         triggers.advance(deltaSeconds)
         dotTaken = 0
+        stunGuard = (stunGuard - deltaSeconds).coerceAtLeast(0f)
+        if (engaged.isNotEmpty()) engaged.entries.removeAll { e -> e.setValue(e.value - deltaSeconds); e.value <= 0f || battle.enemy(e.key)?.isAlive != true }
         burn(battle, deltaSeconds)
         resolvePlayerWindUp(battle, deltaSeconds)
         monstersCast(battle, deltaSeconds)
@@ -265,7 +297,7 @@ internal class CombatSystem(
             SkillDelivery.PROJECTILE -> launch(casterId, side, skill, origin, aim, depth)
             SkillDelivery.ZONE -> zones.place(
                 Zone(0, skill.id, casterId, side, landing, SkillTargeting.areaRadius(skill), skill.zone.durationSeconds, skill.zone.pulseSeconds,
-                    isTrap = skill.zone.isTrap, depth = depth, color = skill.color),
+                    isTrap = skill.zone.isTrap, depth = depth, color = skill.color, look = skill.look),
             )
             SkillDelivery.SUMMON -> summon(battle, casterId, side, skill, origin)
             SkillDelivery.SELF -> Unit
@@ -281,7 +313,7 @@ internal class CombatSystem(
         if (skill.delivery != SkillDelivery.PROJECTILE && skill.delivery != SkillDelivery.SELF) {
             // A nova is centred on its caster; everything else lands where it was aimed.
             val ground = if (skill.delivery == SkillDelivery.NOVA) origin else landing
-            skill.resolvedEffects.filterIsInstance<SkillEffect.Terrain>().forEach { terrain?.apply(it, ground, aim) }
+            if (side != CombatSide.MONSTERS || !sheltered(ground)) skill.resolvedEffects.filterIsInstance<SkillEffect.Terrain>().forEach { terrain?.apply(it, ground, aim) }
         }
         if (casterId == PLAYER) fire(battle, TriggerEvent.ON_SKILL_USE, depth, skill.allTags, null)
     }
@@ -291,7 +323,7 @@ internal class CombatSystem(
         val ground = WorldPoint(at.x, at.y, (at.z - ProjectileSystem.BODY_CENTRE).coerceAtLeast(0f))
         skill.resolvedEffects.forEach { effect ->
             when (effect) {
-                is SkillEffect.Terrain -> terrain?.apply(effect, ground, aim)
+                is SkillEffect.Terrain -> if (side != CombatSide.MONSTERS || !sheltered(ground)) terrain?.apply(effect, ground, aim)
                 is SkillEffect.CastSkill -> if (effect.target == EffectTarget.TARGET) castFollowUp(battle, casterId, side, effect.skillId, ground, at, depth)
                 else -> Unit
             }
@@ -307,7 +339,7 @@ internal class CombatSystem(
                     position = WorldPoint(origin.x, origin.y, origin.z + ProjectileSystem.BODY_CENTRE),
                     dx = direction.dx, dy = direction.dy, speed = spec.speed, range = skill.range.toFloat(), radius = spec.radius,
                     pierce = spec.pierce, chain = spec.chain, fork = spec.fork, collidesWithBlocks = spec.collidesWithBlocks,
-                    depth = depth, color = skill.color,
+                    depth = depth, color = skill.color, look = skill.look,
                 ),
             )
         }
@@ -442,6 +474,7 @@ internal class CombatSystem(
     /** A monster's skill or swing reaching the player. */
     private fun hitPlayer(battle: Battlefield, casterId: String, skill: SkillDefinition, depth: Int, from: WorldPoint) {
         if (!battle.player.isAlive) return
+        if (sheltered(battle.player.position)) return
         val attacker = monsterAttacker(battle, casterId, skill) ?: return
         if (battle.playerInvulnerable) {
             // A swing during a roll still happened; saying it missed is what makes a well-timed roll legible.
@@ -449,10 +482,10 @@ internal class CombatSystem(
             return
         }
         val result = resolve(attacker, profile.defender(battle.player, statuses.of(PLAYER)), skill).let { r ->
-            if (incomingDamage == 1f || r.amount == 0) r
+            if (damageScale == 1f || r.amount == 0) r
             // A gentler world softens every packet alike, never below one point for a hit that landed.
-            else r.copy(amount = (r.amount * incomingDamage).roundToInt().coerceAtLeast(1), packets = r.packets.mapValues { (_, v) -> (v * incomingDamage).roundToInt() })
-        }
+            else r.copy(amount = (r.amount * damageScale).roundToInt().coerceAtLeast(1), packets = r.packets.mapValues { (_, v) -> (v * damageScale).roundToInt() })
+        }.let { r -> withinCeiling(battle, casterId, r) }
         battle.incoming += result
         when {
             result.wasEvaded -> {
@@ -481,6 +514,7 @@ internal class CombatSystem(
      */
     private fun hitAlly(battle: Battlefield, casterId: String, skill: SkillDefinition, allyId: String, depth: Int, from: WorldPoint) {
         val ally = battle.enemy(allyId)?.takeIf { it.isAlive } ?: return
+        if (sheltered(ally.position)) return
         val attacker = monsterAttacker(battle, casterId, skill) ?: return
         val result = resolve(attacker, monsterDefender(ally), skill)
         val struck = ally.damaged(result.amount)
@@ -521,7 +555,7 @@ internal class CombatSystem(
                 is SkillEffect.Knockback -> if (targetId != PLAYER) impacts.strike(targetId, from, at, effect.force)
                 is SkillEffect.CastSkill -> castFollowUp(battle, casterId, side, effect.skillId, at, from, depth)
                 // A projectile's voxel payload goes off where it struck the body; areas change the ground once, in cast().
-                is SkillEffect.Terrain -> if (skill.delivery == SkillDelivery.PROJECTILE) terrain?.apply(effect, at, Aim.toward(from, at))
+                is SkillEffect.Terrain -> if (skill.delivery == SkillDelivery.PROJECTILE && (side != CombatSide.MONSTERS || !sheltered(at))) terrain?.apply(effect, at, Aim.toward(from, at))
                 is SkillEffect.Heal -> heal(battle, targetId, effect.amount, effect.maxShare)
                 else -> Unit
             }
@@ -538,11 +572,18 @@ internal class CombatSystem(
 
     fun applyStatus(battle: Battlefield, actorId: String, application: StatusApplication) {
         val definition = book[application.statusId] ?: return
-        if (actorId == PLAYER && profile.traits(battle.player).has(Keystone.UNSHAKEABLE) &&
-            definition.behaviours.any { it is StatusBehaviour.Stun || it is StatusBehaviour.Slow }
-        ) return
+        val holds = definition.behaviours.any { it is StatusBehaviour.Stun }
+        val hinders = holds || definition.behaviours.any { it is StatusBehaviour.Slow }
+        if (actorId == PLAYER && hinders && profile.traits(battle.player).has(Keystone.UNSHAKEABLE)) return
+        var applied = application
+        if (actorId == PLAYER && hinders && challenge != null && application.sourceId != PLAYER) {
+            // No stun-locks: while the last stun and its guard last, another cannot land.
+            if (holds && !stunLocks && stunGuard > 0f) return
+            applied = application.copy(durationScale = application.durationScale * challenge.controlTime)
+            if (holds && !stunLocks) stunGuard = definition.durationSeconds * applied.durationScale.coerceAtLeast(0f) + challenge.stunGuard
+        }
         val fresh = !statuses.of(actorId).has(definition.id)
-        statuses.apply(actorId, application)
+        statuses.apply(actorId, applied)
         val at = battle.positionOf(actorId) ?: return
         if (definition.behaviours.any { it is StatusBehaviour.Stun }) {
             if (actorId == PLAYER) pendingPlayer = null else battle.enemy(actorId)?.let { battle.put(it.copy(casting = null)) }
@@ -595,7 +636,8 @@ internal class CombatSystem(
             val defender = if (actorId == PLAYER) profile.defender(battle.player, statuses.of(PLAYER))
             else battle.enemy(actorId)?.takeIf { it.isAlive }?.let(::monsterDefender) ?: return@forEach
             val resolved = ticks.map { it to HitResolver.dot(it.amount, it.damageTypeId, defender, rules, book) }
-            val raw = resolved.sumOf { it.second.toDouble() }.toFloat()
+            // Monsters' burns on the player are softened as their blows are.
+            val raw = resolved.sumOf { (tick, amount) -> (if (actorId == PLAYER && tick.sourceId != PLAYER) amount * damageScale else amount).toDouble() }.toFloat()
             if (actorId != PLAYER) onDealt?.let { listener -> resolved.forEach { (tick, amount) -> ailmentDealt(battle, actorId, tick, amount)?.let(listener) } }
             val carried = (dotCarry[actorId] ?: 0f) + raw
             val whole = carried.toInt()
@@ -653,16 +695,23 @@ internal class CombatSystem(
                 cast(battle, id, side, skill, enemy.position, Aim(casting.aimX, casting.aimY), casting.target, 0)
                 return@forEach
             }
-            val target = targetFor(battle, enemy, side)?.position
+            val foe = targetFor(battle, enemy, side)
+            val target = foe?.position
             val allies = alliesOf(battle, id, side).mapNotNull(battle::enemy)
             val choice = abilities.choose(enemy, target, allies, statuses::of, random) ?: return@forEach
             val skill = choice.skill
+            val atPlayer = side == CombatSide.MONSTERS && foe?.id == PLAYER && !skill.isBeneficial
+            // Nothing hostile attacks from a safe town or into one.
+            if (side == CombatSide.MONSTERS && !skill.isBeneficial && (sheltered(enemy.position) || target?.let(::sheltered) == true)) return@forEach
+            if (atPlayer && !mayPress(id)) return@forEach
+            val tempo = tempoOf(side)
             val aim = target?.let { Aim.toward(enemy.position, it) } ?: Aim.of(enemy.facingX, enemy.facingY)
             val started = enemy.copy(
-                skillCooldowns = enemy.skillCooldowns.started(skill.copy(cooldownSeconds = choice.cooldownSeconds)),
+                skillCooldowns = enemy.skillCooldowns.started(skill.copy(cooldownSeconds = choice.cooldownSeconds * tempo)),
                 // Casting is its move for this beat: no basic swing on top of it.
-                attackCooldown = maxOf(enemy.attackCooldown, skill.castTime + enemy.stats.secondsBetweenAttacks.coerceAtMost(MAX_SWING_GAP)),
+                attackCooldown = maxOf(enemy.attackCooldown, skill.castTime + enemy.stats.secondsBetweenAttacks.coerceAtMost(MAX_SWING_GAP) * tempo),
             )
+            if (atPlayer) press(id, started.attackCooldown)
             if (skill.castTime > 0f) {
                 val point = if (skill.delivery == SkillDelivery.NOVA || skill.isBeneficial) enemy.position else target ?: enemy.position
                 battle.put(started.copy(casting = PendingCast(skill.id, skill.castTime, skill.castTime, point, aim.dx, aim.dy)))
@@ -713,10 +762,48 @@ internal class CombatSystem(
             if (statuses.of(id).isStunned(book)) return@forEach
             val reach = enemy.stats.attackRange + SkillTargeting.REACH_FORGIVENESS
             val target = targetFor(battle, enemy, side, reach) ?: return@forEach
-            battle.put(enemy.copy(attackCooldown = enemy.stats.secondsBetweenAttacks))
+            // Past the challenge's limit, a monster waits its turn: its swing stays ready for when one comes free.
+            if (target.id == PLAYER && side == CombatSide.MONSTERS && !mayPress(id)) return@forEach
+            if (side == CombatSide.MONSTERS && (sheltered(enemy.position) || sheltered(target.position))) return@forEach
+            val gap = enemy.stats.secondsBetweenAttacks * tempoOf(side)
+            battle.put(enemy.copy(attackCooldown = gap))
+            if (target.id == PLAYER && side == CombatSide.MONSTERS) press(id, gap)
             battle.swung += id
             hit(battle, side, id, basicSkill(enemy.damageTypeId, enemy.stats.attackRange), target.id, 0, enemy.position)
         }
+    }
+
+    /** Inside a safe town, where no hostile attack lands. */
+    private fun sheltered(at: WorldPoint): Boolean = safe?.contains(at) == true
+
+    /**
+     * Holds a monster's blow to what the player's level can bear: never
+     * more than [BlowCeiling]'s share of their life, scaled by the challenge.
+     */
+    private fun withinCeiling(battle: Battlefield, casterId: String, r: DamageResult): DamageResult {
+        if (challenge == null || r.amount <= 0) return r
+        val caster = battle.enemy(casterId)
+        val rank = caster?.rank ?: EnemyRank.MINION
+        val bonus = tier * com.stratum.core.domain.difficulty.Difficulty.LEVELS_PER_TIER
+        val gap = caster?.let { MonsterLevel.gap(it.level, rank, battle.player.level, bonus) } ?: 0
+        val ceiling = BlowCeiling.of(profile.maxHealth(battle.player), rank, gap, tier, challenge.damageTaken)
+        if (r.amount <= ceiling) return r
+        val k = ceiling.toFloat() / r.amount
+        return r.copy(amount = ceiling, packets = r.packets.mapValues { (_, v) -> (v * k).roundToInt() })
+    }
+
+    /** Hostile monsters' time between attacks is stretched or shortened by the challenge; followers keep their own pace. */
+    private fun tempoOf(side: CombatSide): Float = if (side == CombatSide.MONSTERS) challenge?.tempo ?: 1f else 1f
+
+    /** Whether monster [id] may attack the player now: it already holds a turn, or fewer than the challenge allows do. */
+    private fun mayPress(id: String): Boolean {
+        val limit = challenge?.attackers ?: return true
+        return id in engaged || engaged.size < limit
+    }
+
+    /** Monster [id] attacked the player: it holds its turn until a little after its next attack is due. */
+    private fun press(id: String, untilNext: Float) {
+        if (challenge != null) engaged[id] = untilNext + TURN_GRACE
     }
 
     /** Which side [enemy] fights on now, or null when it is not fighting: followers for the player, hostile monsters against. */
@@ -937,6 +1024,8 @@ internal class CombatSystem(
         private const val SUMMON_SQUAD = "summon:"
         private const val AUTO_AIM_SLACK = 2f
         private const val MAX_SWING_GAP = 1.5f
+        /** How long past its next attack a monster keeps its turn at the player, so a steady attacker is not cut in on. */
+        private const val TURN_GRACE = 0.75f
 
         /** How far a follower looks for a fight when its definition does not say. */
         private const val FOLLOWER_SIGHT = 8f
